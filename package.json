@@ -1,0 +1,28 @@
+{
+	"name": "marinmind",
+	"version": "0.1.0",
+	"description": "革新性整合阅读标注工具、思维导图和学习卡的一站式学习工具（Obsidian 插件）",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+	},
+	"keywords": [
+		"obsidian",
+		"obsidian-plugin",
+		"pdf",
+		"epub",
+		"mindmap",
+		"spaced-repetition"
+	],
+	"author": "",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^20.14.0",
+		"builtin-modules": "^3.3.0",
+		"esbuild": "^0.21.5",
+		"obsidian": "latest",
+		"tslib": "^2.6.2",
+		"typescript": "^5.4.5"
+	}
+}
