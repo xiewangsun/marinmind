@@ -22,7 +22,11 @@ Obsidian 学习插件：**电子书阅读器 + 思维导图 + 学习卡**"一站
 npm install    # 安装依赖
 npm run dev    # 开发模式：监听 src/ 变化并增量构建 main.js
 npm run build  # 生产构建：先 tsc 类型检查，再 esbuild 打包
+npm test       # 运行全部测试（vitest）
 ```
+
+数据存储：SQLite（sql.js / WASM），库文件位于 Obsidian 库根目录的
+`.marinmind/marinmind.db`，写入防抖落盘。
 
 开发调试：将本目录软链或复制到 Obsidian 库的 `.obsidian/plugins/marinmind/`
 （需包含 `main.js`、`manifest.json`、`styles.css`），在设置中启用本插件。

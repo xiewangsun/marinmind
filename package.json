@@ -5,7 +5,9 @@
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"test": "vitest run",
+		"test:watch": "vitest"
 	},
 	"keywords": [
 		"obsidian",
@@ -19,10 +21,15 @@
 	"license": "MIT",
 	"devDependencies": {
 		"@types/node": "^20.14.0",
+		"@types/sql.js": "^1.4.11",
 		"builtin-modules": "^3.3.0",
 		"esbuild": "^0.21.5",
 		"obsidian": "latest",
 		"tslib": "^2.6.2",
-		"typescript": "^5.4.5"
+		"typescript": "^5.4.5",
+		"vitest": "^4.1.11"
+	},
+	"dependencies": {
+		"sql.js": "^1.14.2"
 	}
 }
