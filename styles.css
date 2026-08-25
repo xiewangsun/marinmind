@@ -549,3 +549,162 @@ body.marinmind-card-dragging {
 	border-color: var(--interactive-accent);
 	box-shadow: 0 0 0 2px var(--interactive-accent);
 }
+
+/* ===== 照片 / 手写 / 语音摘录 ===== */
+
+/* 照片摘录高亮：粉色变体（页面上无框，靠页角徽标入口；预留色值保持一致） */
+.marinmind-excerpt-highlight[data-color="pink"] {
+	background: rgba(236, 72, 153, 0.18);
+	border-color: rgba(236, 72, 153, 0.45);
+}
+
+.marinmind-excerpt-highlight[data-color="pink"]:hover {
+	background: rgba(236, 72, 153, 0.32);
+}
+
+/* 手写摘录回显：透明高亮框 + PNG 图片铺满（图片本身即视觉，不再叠色框） */
+.marinmind-excerpt-highlight.marinmind-excerpt-highlight-img {
+	background: transparent;
+	border: 1px dashed rgba(215, 55, 63, 0.4);
+}
+
+.marinmind-excerpt-highlight.marinmind-excerpt-highlight-img:hover {
+	background: rgba(215, 55, 63, 0.08);
+}
+
+.marinmind-excerpt-img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: fill; /* PNG 按 bbox 精确裁剪，容器比例即图片比例，拉伸无失真 */
+}
+
+/* 手写层：平时完全穿透；模式开启时捕获指针 + 禁触摸滚动（与摘录层同构） */
+.marinmind-handwrite-layer {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+	z-index: 3; /* 文本层/摘录层之上 */
+}
+
+.marinmind-handwrite-canvas {
+	width: 100%;
+	height: 100%;
+	display: block;
+}
+
+.marinmind-handwrite-layer.marinmind-handwrite-on {
+	pointer-events: auto;
+	touch-action: none;
+	cursor: crosshair;
+}
+
+/* 录音状态条：悬浮在滚动区上方居中 */
+.marinmind-rec-bar {
+	position: absolute;
+	top: 10px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 10;
+	display: flex;
+	align-items: center;
+	gap: 0.6em;
+	padding: 0.45em 0.9em;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+	font-size: var(--font-ui-small);
+}
+
+/* 红点呼吸动画：录音进行中的视觉信号 */
+.marinmind-rec-dot {
+	width: 9px;
+	height: 9px;
+	border-radius: 50%;
+	background: var(--text-error, #e93147);
+	animation: marinmind-rec-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes marinmind-rec-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+
+.marinmind-rec-time {
+	font-variant-numeric: tabular-nums;
+	color: var(--text-muted);
+}
+
+/* 媒体摘录的页角徽标（挂在页容器右上角） */
+.marinmind-media-badge {
+	position: absolute;
+	top: 8px;
+	right: 8px;
+	z-index: 4;
+	padding: 0.25em 0.6em;
+	font-size: var(--font-ui-smaller);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+	cursor: pointer;
+	user-select: none;
+	pointer-events: auto;
+}
+
+.marinmind-media-badge:hover {
+	border-color: var(--interactive-accent);
+}
+
+/* 复习/预览中的媒体元素：img 留最小高度防加载抖动 */
+.marinmind-review-media {
+	max-width: 100%;
+	max-height: 24em;
+	border-radius: var(--radius-s, 4px);
+}
+
+img.marinmind-review-media {
+	min-height: 4em;
+	object-fit: contain;
+}
+
+audio.marinmind-review-media {
+	width: 100%;
+	margin: 0.75em 0;
+}
+
+/* 媒体预览弹窗 */
+.marinmind-media-preview {
+	min-width: 22em;
+	max-width: 34em;
+}
+
+.marinmind-media-preview-title {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-bottom: 0.75em;
+}
+
+.marinmind-media-preview-note {
+	margin: 0.75em 0;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.marinmind-media-preview-note.is-empty {
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+.marinmind-media-preview-missing {
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 1.5em 0;
+	text-align: center;
+}

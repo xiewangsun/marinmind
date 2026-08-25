@@ -4,7 +4,10 @@ import type MarinMindPlugin from "../main";
 import { MindmapPickerModal } from "../mindmap/mindmap-picker-modal";
 import { suggestRootPosition } from "../mindmap/mindmap-graph";
 import type { Card, DocRect } from "../types";
+import { AudioRecorder } from "./audio-recorder";
 import { ExcerptLayer } from "./excerpt-layer";
+import { HandwriteLayer } from "./handwrite-layer";
+import { MediaPreviewModal } from "./media-preview-modal";
 import { TextPromptModal } from "./note-edit-modal";
 import { PageView } from "./page-view";
 import { PdfDocument } from "./pdf-document";
@@ -21,6 +24,37 @@ const ZOOM_STEP = 1.25;
 /** fit-width 计算预留的滚动容器水平内边距（与 CSS padding 12px×2 对应） */
 const SCROLL_PADDING_X = 24;
 
+/** 照片/语音卡的菜单标签 */
+function mediaCardLabel(card: Card): string {
+	const page = card.page != null ? ` · 第 ${card.page} 页` : "";
+	if (card.excerptType === "audio") {
+		return `语音摘录${page}`;
+	}
+	if (card.excerptType === "handwriting") {
+		return `手写摘录${page}`;
+	}
+	return `照片摘录${page}`;
+}
+
+/** MIME 类型 → 图片扩展名（未知类型兜底 png） */
+function imageExtOf(mime: string): string {
+	const map: Record<string, string> = {
+		"image/png": "png",
+		"image/jpeg": "jpg",
+		"image/webp": "webp",
+		"image/gif": "gif",
+		"image/svg+xml": "svg",
+		"image/bmp": "bmp",
+	};
+	return map[mime] ?? "png";
+}
+
+/** 毫秒 → m:ss（录音计时显示） */
+function formatMs(ms: number): string {
+	const s = Math.floor(ms / 1000);
+	return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 /**
  * MarinMind 阅读视图：PDF 连续滚动渲染 + 区域/文字摘录 + 高亮回显。
  *
@@ -35,6 +69,7 @@ export class MarinMindReaderView extends FileView {
 	private pdf: PdfDocument | null = null;
 	private pageViews: PageView[] = [];
 	private readonly excerptLayers = new Map<number, ExcerptLayer>();
+	private readonly handwriteLayers = new Map<number, HandwriteLayer>();
 	private io: IntersectionObserver | null = null;
 	/** 加载代际：onLoadFile 重入时旧流程作废 */
 	private loadToken = 0;
@@ -47,8 +82,22 @@ export class MarinMindReaderView extends FileView {
 	private scale = 1;
 	private zoomMode: "fit" | "fixed" = "fit";
 	private excerptMode = false;
+	private handwriteMode = false;
 	private currentDocId: string | null = null;
 	private currentFilePath: string | null = null;
+
+	/** photo/audio 卡按页分组（页角徽标数据源，运行期增删维护） */
+	private readonly mediaCardsByPage = new Map<number, Card[]>();
+	private readonly mediaBadges = new Map<number, HTMLElement>();
+	/** 录音状态条与计时器 */
+	private recorder: AudioRecorder | null = null;
+	private recBar: HTMLElement | null = null;
+	private recTimer: ReturnType<typeof setInterval> | null = null;
+	/** 互斥模式的两个工具栏按钮（状态同步用） */
+	private excerptBtn: HTMLElement | null = null;
+	private handwriteBtn: HTMLElement | null = null;
+	/** 滚动离开手写页后延迟提交（防抖） */
+	private readonly commitOffscreenSoon: () => void;
 
 	private readonly rerenderSoon: () => void;
 
@@ -56,16 +105,21 @@ export class MarinMindReaderView extends FileView {
 		super(leaf);
 		this.plugin = plugin;
 
-		// 工具栏：摘录开关 / 放大 / 缩小 / 适应宽度
-		const excerptBtn = this.addAction("square-pen", "区域摘录模式", () => {
+		// 工具栏：摘录开关 / 手写开关 / 插图 / 录音 / 放大 / 缩小 / 适应宽度
+		this.excerptBtn = this.addAction("square-pen", "区域摘录模式", () => {
 			this.setExcerptMode(!this.excerptMode);
-			excerptBtn.classList.toggle("is-active", this.excerptMode);
 		});
+		this.handwriteBtn = this.addAction("pencil-line", "手写批注模式", () => {
+			this.setHandwriteMode(!this.handwriteMode);
+		});
+		this.addAction("image-plus", "插入图片摘录（亦可粘贴 / 拖入）", () => this.pickImages());
+		this.addAction("mic", "录音摘录", () => void this.toggleRecording());
 		this.addAction("zoom-in", "放大", () => this.setZoom(this.scale * ZOOM_STEP));
 		this.addAction("zoom-out", "缩小", () => this.setZoom(this.scale / ZOOM_STEP));
 		this.addAction("stretch-horizontal", "适应宽度", () => this.fitWidth());
 
 		this.rerenderSoon = debounce(() => this.handleResize(), 200, true);
+		this.commitOffscreenSoon = debounce(() => this.commitOffscreenInk(), 400, true);
 
 		// 划选文字摘录：鼠标松开 / Shift+方向键调整选区后尝试生成 text 卡片
 		this.registerDomEvent(this.contentEl, "mouseup", () => this.handleSelectionEnd());
@@ -74,6 +128,11 @@ export class MarinMindReaderView extends FileView {
 				this.handleSelectionEnd();
 			}
 		});
+
+		// 照片摘录三入口之二：粘贴（挂 document，仅本视图激活时响应）与拖入
+		this.registerDomEvent(document, "paste", (evt) => this.onPaste(evt));
+		this.registerDomEvent(this.contentEl, "dragover", (evt) => evt.preventDefault());
+		this.registerDomEvent(this.contentEl, "drop", (evt) => this.onDrop(evt));
 
 		// 文件重命名：FileView.onRename 只给新路径，oldPath 需从 vault 事件取
 		this.registerEvent(
@@ -175,13 +234,24 @@ export class MarinMindReaderView extends FileView {
 				isExcerptMode: () => this.excerptMode,
 				onCreateAreaCard: (page, rect) => this.createAreaCard(page, rect),
 				onHighlightClick: (card, evt) => this.onHighlightClick(card, evt),
+				readAttachment: (ref) => this.plugin.attachments.read(ref),
 			});
 			layer.setExcerptMode(this.excerptMode);
 			this.excerptLayers.set(n, layer);
+			const hw = new HandwriteLayer(pv, { getScale: () => this.scale });
+			hw.setHandwriteMode(this.handwriteMode);
+			this.handwriteLayers.set(n, hw);
 			this.pageViews.push(pv);
 		}
 
-		// 回显已有卡片高亮（按页分组）
+		// 滚动离开手写页 → 延迟提交该页笔迹（页面骨架卸载不影响手写层，但尽早成卡便于回显）
+		this.registerDomEvent(this.scrollEl, "scroll", () => {
+			if (this.handwriteMode) {
+				this.commitOffscreenSoon();
+			}
+		});
+
+		// 回显已有卡片高亮（按页分组）；photo/audio 卡进页角徽标数据源
 		const byPage = new Map<number, Card[]>();
 		for (const card of this.plugin.cards.listByDocument(doc.id)) {
 			if (card.page == null) {
@@ -193,6 +263,11 @@ export class MarinMindReaderView extends FileView {
 		}
 		for (const [page, cards] of byPage) {
 			this.excerptLayers.get(page)?.setCards(cards);
+			const media = cards.filter((c) => c.excerptType === "photo" || c.excerptType === "audio");
+			if (media.length > 0) {
+				this.mediaCardsByPage.set(page, media);
+				this.updateMediaBadge(page);
+			}
 		}
 
 		this.setupLazyRender();
@@ -341,9 +416,356 @@ export class MarinMindReaderView extends FileView {
 	}
 
 	private setExcerptMode(on: boolean): void {
+		if (on === this.excerptMode) {
+			return; // 幂等 + 防互斥递归
+		}
 		this.excerptMode = on;
+		if (on) {
+			this.setHandwriteMode(false); // 互斥：overlay 只能有一个指针捕获者
+		}
 		for (const layer of this.excerptLayers.values()) {
 			layer.setExcerptMode(on);
+		}
+		this.excerptBtn?.classList.toggle("is-active", on);
+	}
+
+	/** 手写模式开关（与摘录模式互斥；关闭时提交全部未提交笔迹） */
+	private setHandwriteMode(on: boolean): void {
+		if (on === this.handwriteMode) {
+			return; // 幂等 + 防互斥递归
+		}
+		this.handwriteMode = on;
+		if (on) {
+			this.setExcerptMode(false);
+		} else {
+			for (const [page, layer] of this.handwriteLayers) {
+				if (layer.hasInk()) {
+					this.commitHandwrite(page);
+				}
+			}
+		}
+		for (const layer of this.handwriteLayers.values()) {
+			layer.setHandwriteMode(on);
+		}
+		this.handwriteBtn?.classList.toggle("is-active", on);
+	}
+
+	/** 滚动离开的带笔迹页：整页移出视口即提交（还在视口内的保留继续画） */
+	private commitOffscreenInk(): void {
+		const scroll = this.scrollEl;
+		if (!scroll) {
+			return;
+		}
+		const box = scroll.getBoundingClientRect();
+		for (const [page, layer] of this.handwriteLayers) {
+			if (!layer.hasInk()) {
+				continue;
+			}
+			const pb = this.pageViews
+				.find((p) => p.pageNumber === page)
+				?.el.getBoundingClientRect();
+			// 页面与滚动视口完全不相交 → 已滚离，提交
+			if (pb && (pb.bottom < box.top || pb.top > box.bottom)) {
+				this.commitHandwrite(page);
+			}
+		}
+	}
+
+	/** 提交某页手写层：落库建卡 + img 高亮回显（docId 在异步前同步捕获） */
+	private commitHandwrite(page: number): void {
+		const layer = this.handwriteLayers.get(page);
+		const docId = this.currentDocId;
+		if (!layer || !layer.hasInk() || !docId) {
+			return;
+		}
+		void layer
+			.commit()
+			.then(async (result) => {
+				if (!result || !docId) {
+					return;
+				}
+				const ref = await this.plugin.attachments.save(result.png, "png");
+				const card = this.plugin.cards.create({
+					documentId: docId,
+					page,
+					rects: [result.bbox],
+					excerptType: "handwriting",
+					excerptRef: ref,
+					color: "green",
+				});
+				// cleanup 后 excerptLayers 已清空：卡片已在库中，重开文档自然回显
+				this.excerptLayers.get(page)?.addHighlight(card);
+			})
+			.catch((err) => {
+				console.error("[MarinMind] 手写提交失败", err);
+				new Notice("手写摘录保存失败");
+			});
+	}
+
+	/** 视口中心所在页（照片/音频锚定用；占位尺寸下可能偏差 ±1 页，可接受） */
+	getCurrentPage(): number {
+		const scroll = this.scrollEl;
+		if (!scroll || this.pageViews.length === 0) {
+			return 1;
+		}
+		const cy = scroll.getBoundingClientRect().top + scroll.clientHeight / 2;
+		for (const pv of this.pageViews) {
+			const b = pv.el.getBoundingClientRect();
+			if (cy >= b.top && cy < b.bottom) {
+				return pv.pageNumber;
+			}
+		}
+		// 落在页间隙：回退最近页
+		let best = this.pageViews[0];
+		let bestDist = Infinity;
+		for (const pv of this.pageViews) {
+			const b = pv.el.getBoundingClientRect();
+			const d = Math.abs(b.top + b.height / 2 - cy);
+			if (d < bestDist) {
+				bestDist = d;
+				best = pv;
+			}
+		}
+		return best.pageNumber;
+	}
+
+	// ---------- 照片摘录（粘贴 / 拖入 / 按钮选图） ----------
+
+	private onPaste(evt: ClipboardEvent): void {
+		// 挂 document：必须限定本视图激活，否则别的标签复制图片也会被吞
+		if (this.app.workspace.activeLeaf !== this.leaf) {
+			return;
+		}
+		this.handleImageFiles(Array.from(evt.clipboardData?.files ?? []));
+	}
+
+	private onDrop(evt: DragEvent): void {
+		// dragover 已 preventDefault，这里也必须阻止默认（浏览器直接打开文件）
+		evt.preventDefault();
+		this.handleImageFiles(Array.from(evt.dataTransfer?.files ?? []));
+	}
+
+	/** 工具栏按钮选图（隐藏 file input，移动端同样可用） */
+	private pickImages(): void {
+		const input = document.createElement("input");
+		input.type = "file";
+		input.accept = "image/*";
+		input.multiple = true;
+		input.style.display = "none";
+		input.addEventListener("change", () => {
+			this.handleImageFiles(Array.from(input.files ?? []));
+			input.remove();
+		});
+		input.addEventListener("cancel", () => input.remove());
+		document.body.appendChild(input);
+		input.click();
+	}
+
+	/** 图片文件 → 附件 → photo 卡（锚定当前页；原样存字节保 EXIF 方向） */
+	private handleImageFiles(files: File[]): void {
+		const docId = this.currentDocId;
+		if (files.filter((f) => f.type.startsWith("image/")).length === 0) {
+			return;
+		}
+		if (!docId) {
+			new Notice("请先在阅读器打开文档，再插入图片摘录");
+			return;
+		}
+		const page = this.getCurrentPage();
+		for (const file of files.filter((f) => f.type.startsWith("image/"))) {
+			void file
+				.arrayBuffer()
+				.then(async (bytes) => {
+					const ref = await this.plugin.attachments.save(bytes, imageExtOf(file.type));
+					const card = this.plugin.cards.create({
+						documentId: docId,
+						page,
+						rects: [],
+						excerptType: "photo",
+						excerptRef: ref,
+						color: "pink",
+					});
+					this.addMediaCard(page, card);
+				})
+				.catch((err) => {
+					console.error("[MarinMind] 图片保存失败", err);
+					new Notice("图片保存失败");
+				});
+		}
+	}
+
+	// ---------- 录音摘录 ----------
+
+	private async toggleRecording(): Promise<void> {
+		if (this.recorder?.active) {
+			await this.stopAndSaveRecording();
+			return;
+		}
+		if (!this.currentDocId) {
+			new Notice("请先在阅读器打开文档，再录音");
+			return;
+		}
+		try {
+			this.recorder ??= new AudioRecorder();
+			await this.recorder.start();
+			this.showRecBar();
+		} catch (err) {
+			console.warn("[MarinMind] 麦克风不可用", err);
+			new Notice("无法访问麦克风：请在系统设置中允许 Obsidian 使用麦克风");
+			this.recorder = null;
+		}
+	}
+
+	/** 停止录音并保存为 audio 卡（docId/page 在异步前同步捕获） */
+	private async stopAndSaveRecording(): Promise<void> {
+		const rec = this.recorder;
+		if (!rec?.active) {
+			return;
+		}
+		const docId = this.currentDocId;
+		const page = this.getCurrentPage();
+		this.removeRecBar();
+		try {
+			const { bytes, ext } = await rec.stop();
+			if (!docId) {
+				new Notice("录音已丢弃（未打开文档）");
+				return;
+			}
+			if (bytes.byteLength === 0) {
+				new Notice("录音为空，已忽略");
+				return;
+			}
+			const ref = await this.plugin.attachments.save(bytes, ext);
+			const card = this.plugin.cards.create({
+				documentId: docId,
+				page,
+				rects: [],
+				excerptType: "audio",
+				excerptRef: ref,
+				color: "pink",
+			});
+			this.addMediaCard(page, card);
+			new Notice(`语音摘录已保存（第 ${page} 页）`);
+		} catch (err) {
+			console.error("[MarinMind] 录音保存失败", err);
+			new Notice("录音保存失败");
+		}
+	}
+
+	/** 录音状态条：红点 + 计时 + 保存/丢弃 */
+	private showRecBar(): void {
+		this.removeRecBar();
+		const bar = this.contentEl.createDiv({ cls: "marinmind-rec-bar" });
+		bar.createSpan({ cls: "marinmind-rec-dot" });
+		const time = bar.createSpan({ cls: "marinmind-rec-time" });
+		const save = bar.createEl("button", { text: "保存并建卡" });
+		save.addEventListener("click", () => void this.stopAndSaveRecording());
+		const drop = bar.createEl("button", { text: "丢弃" });
+		drop.addEventListener("click", () => {
+			this.removeRecBar();
+			this.recorder?.discard();
+			new Notice("已丢弃录音");
+		});
+		this.recBar = bar;
+		const update = () => {
+			time.textContent = formatMs(this.recorder?.elapsedMs ?? 0);
+		};
+		update();
+		this.recTimer = setInterval(update, 500);
+	}
+
+	private removeRecBar(): void {
+		if (this.recTimer !== null) {
+			clearInterval(this.recTimer);
+			this.recTimer = null;
+		}
+		this.recBar?.remove();
+		this.recBar = null;
+	}
+
+	// ---------- photo/audio 页角徽标 ----------
+
+	private addMediaCard(page: number, card: Card): void {
+		const list = this.mediaCardsByPage.get(page) ?? [];
+		list.push(card);
+		this.mediaCardsByPage.set(page, list);
+		this.updateMediaBadge(page);
+	}
+
+	private removeMediaCard(card: Card): void {
+		if (card.page == null) {
+			return;
+		}
+		const list = this.mediaCardsByPage.get(card.page);
+		if (!list) {
+			return;
+		}
+		const next = list.filter((c) => c.id !== card.id);
+		if (next.length > 0) {
+			this.mediaCardsByPage.set(card.page, next);
+		} else {
+			this.mediaCardsByPage.delete(card.page);
+		}
+		this.updateMediaBadge(card.page);
+	}
+
+	/** 维护页角徽标 DOM（有媒体卡显示并计数，无则移除） */
+	private updateMediaBadge(page: number): void {
+		const cards = this.mediaCardsByPage.get(page) ?? [];
+		let badge = this.mediaBadges.get(page);
+		if (cards.length === 0) {
+			badge?.remove();
+			this.mediaBadges.delete(page);
+			return;
+		}
+		if (!badge) {
+			const pv = this.pageViews.find((p) => p.pageNumber === page);
+			if (!pv) {
+				return;
+			}
+			badge = pv.el.createDiv({ cls: "marinmind-media-badge" });
+			badge.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this.onMediaBadgeClick(page, evt);
+			});
+			this.mediaBadges.set(page, badge);
+		}
+		badge.setText(`${cards.length} 个媒体摘录`);
+	}
+
+	/** 页角徽标点击：列出该页媒体卡（点击查看与管理） */
+	private onMediaBadgeClick(page: number, evt: MouseEvent): void {
+		const cards = this.mediaCardsByPage.get(page) ?? [];
+		if (cards.length === 0) {
+			return;
+		}
+		const menu = new Menu();
+		for (const card of cards) {
+			const label = mediaCardLabel(card);
+			menu.addItem((item) =>
+				item
+					.setTitle(card.note ? `${label} · ${card.note.slice(0, 24)}` : label)
+					.setIcon(card.excerptType === "audio" ? "mic" : "image")
+					.onClick(() => {
+						new MediaPreviewModal(this.app, this.plugin, card, {
+							onUpdated: (updated) => this.syncMediaCardSnapshot(updated),
+							onDelete: (victim) => this.deleteCard(victim),
+						}).open();
+					}),
+			);
+		}
+		menu.showAtMouseEvent(evt);
+	}
+
+	/** 更新 mediaCardsByPage 里的卡片快照（编辑批注后） */
+	private syncMediaCardSnapshot(card: Card): void {
+		const list = this.mediaCardsByPage.get(card.page ?? -1);
+		if (!list) {
+			return;
+		}
+		const i = list.findIndex((c) => c.id === card.id);
+		if (i >= 0) {
+			list[i] = card;
 		}
 	}
 
@@ -501,11 +923,26 @@ export class MarinMindReaderView extends FileView {
 		if (card.page != null) {
 			this.excerptLayers.get(card.page)?.removeHighlight(card.id);
 		}
+		this.removeMediaCard(card);
+		// 附件随卡片级联删除：uid 唯一命名 ⇒ 一卡一附件（失败静默，下次清理兜底）
+		if (card.excerptRef) {
+			void this.plugin.attachments.remove(card.excerptRef).catch(() => undefined);
+		}
 	}
 
 	/** 释放全部资源（幂等；onLoadFile 开头 / onUnloadFile / onClose 均调用） */
 	private cleanupContent(): void {
 		++this.loadToken; // 使在途加载流程作废
+		// 录音中：保存而非丢弃（误关标签不损失已录内容；docId/page 由函数内部同步捕获）
+		void this.stopAndSaveRecording();
+		// 手写层：先提交未落库笔迹（layer.commit 同步快照，destroy 不影响其异步完成）
+		for (const [page, layer] of this.handwriteLayers) {
+			if (layer.hasInk()) {
+				this.commitHandwrite(page);
+			}
+			layer.destroy();
+		}
+		this.handwriteLayers.clear();
 		this.io?.disconnect();
 		this.io = null;
 		for (const layer of this.excerptLayers.values()) {
@@ -516,6 +953,11 @@ export class MarinMindReaderView extends FileView {
 			pv.unrender();
 		}
 		this.pageViews = [];
+		for (const badge of this.mediaBadges.values()) {
+			badge.remove();
+		}
+		this.mediaBadges.clear();
+		this.mediaCardsByPage.clear();
 		void this.pdf?.destroy();
 		this.pdf = null;
 		this.scrollEl = null;

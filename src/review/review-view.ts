@@ -20,6 +20,17 @@ const GRADE_KEYS: Record<string, ReviewGrade> = Object.fromEntries(
 	GRADES.map((g) => [g.key, g.grade]),
 );
 
+/** 媒体形态的正面标签 */
+function mediaLabel(card: Card): string {
+	if (card.excerptType === "audio") {
+		return "语音摘录";
+	}
+	if (card.excerptType === "handwriting") {
+		return "手写摘录";
+	}
+	return "照片摘录";
+}
+
 /**
  * MarinMind 复习视图：到期闪卡的翻面 + 四档评分 + 跳转原文。
  *
@@ -30,6 +41,8 @@ const GRADE_KEYS: Record<string, ReviewGrade> = Object.fromEntries(
 export class MarinMindReviewView extends ItemView {
 	private readonly plugin: MarinMindPlugin;
 	private session: ReviewSession | null = null;
+	/** excerptRef → blob URL（同 ref 复用；onClose 统一 revoke，翻页渲染不回收） */
+	private readonly mediaUrls = new Map<string, string>();
 
 	constructor(leaf: WorkspaceLeaf, plugin: MarinMindPlugin) {
 		super(leaf);
@@ -119,10 +132,35 @@ export class MarinMindReviewView extends ItemView {
 			`${card.page != null ? ` · 第 ${card.page} 页` : ""} · 剩余 ${s.remaining} 张`;
 
 		const cardBox = stage.createDiv({ cls: "marinmind-review-card" });
-		// 正面：text 卡显示摘录文字；其余形态无文本，显示占位提示
+		// 正面：text 卡显示摘录文字；媒体卡显示 img / audio；其余形态显示占位提示
 		if (card.excerptText) {
 			const excerpt = cardBox.createDiv({ cls: "marinmind-review-excerpt" });
 			excerpt.textContent = card.excerptText;
+		} else if (card.excerptRef) {
+			// fire-and-forget 加载附件：渲染后视图可能立刻被翻页重绘，isConnected 守卫丢弃
+			if (card.excerptType === "audio") {
+				const audio = cardBox.createEl("audio", { cls: "marinmind-review-media" });
+				audio.controls = true;
+				audio.preload = "metadata";
+				void this.mediaUrl(card.excerptRef).then((url) => {
+					if (audio.isConnected) {
+						audio.src = url;
+					}
+				});
+			} else {
+				const img = cardBox.createEl("img", { cls: "marinmind-review-media" });
+				img.alt = mediaLabel(card);
+				void this.mediaUrl(card.excerptRef).then((url) => {
+					if (img.isConnected) {
+						img.src = url;
+					}
+				});
+			}
+			const ph = cardBox.createDiv({ cls: "marinmind-review-placeholder" });
+			ph.textContent =
+				card.page != null
+					? `${mediaLabel(card)} · 第 ${card.page} 页`
+					: mediaLabel(card);
 		} else {
 			const ph = cardBox.createDiv({ cls: "marinmind-review-placeholder" });
 			ph.textContent = card.page != null ? `区域摘录 · 第 ${card.page} 页` : "区域摘录";
@@ -239,6 +277,22 @@ export class MarinMindReviewView extends ItemView {
 		}
 	}
 
+	/** 附件 → blob URL（同 ref 复用；onClose 统一 revoke） */
+	private mediaUrl(ref: string): Promise<string> {
+		const cached = this.mediaUrls.get(ref);
+		if (cached) {
+			return Promise.resolve(cached);
+		}
+		return this.plugin.attachments.read(ref).then((bytes) => {
+			let url = this.mediaUrls.get(ref);
+			if (!url) {
+				url = URL.createObjectURL(new Blob([bytes]));
+				this.mediaUrls.set(ref, url);
+			}
+			return url;
+		});
+	}
+
 	/** 跳转原文：打开阅读器并滚动到卡片所在页（文档/文件缺失时 Notice 降级） */
 	private async jumpToSource(card: Card): Promise<void> {
 		const doc = card.documentId ? this.plugin.documents.get(card.documentId) : undefined;
@@ -248,5 +302,13 @@ export class MarinMindReviewView extends ItemView {
 			return;
 		}
 		await this.plugin.openInReader(file, card.page ?? undefined);
+	}
+
+	async onClose(): Promise<void> {
+		// 会话内缓存的 blob URL 统一回收（翻页渲染不回收，靠这里兜底）
+		for (const url of this.mediaUrls.values()) {
+			URL.revokeObjectURL(url);
+		}
+		this.mediaUrls.clear();
 	}
 }

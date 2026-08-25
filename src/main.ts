@@ -16,6 +16,7 @@ import { MarinMindReaderView, READER_VIEW_TYPE } from "./reader/reader-view";
 import { PdfPickerModal } from "./reader/pdf-picker-modal";
 import { MarinMindReviewView, REVIEW_VIEW_TYPE } from "./review/review-view";
 import { exportBackup, promptImportBackup } from "./backup/backup-service";
+import { AttachmentStore } from "./attachments/attachment-store";
 import { DB_PATH } from "./constants";
 
 /** 工作区预设：study = 阅读 + 复习；research = 阅读 + 脑图 */
@@ -35,6 +36,8 @@ export default class MarinMindPlugin extends Plugin {
 	links!: LinkRepository;
 	reviews!: ReviewRepository;
 	mindmaps!: MindmapRepository;
+	/** 媒体附件仓（照片/手写 PNG/音频，uid 命名存 .marinmind/assets/） */
+	attachments!: AttachmentStore;
 
 	/** 数据层初始化 promise（失败在内部消化为 db 保持 undefined，不产生未处理拒绝） */
 	private readonly dbReady: Promise<void>;
@@ -42,6 +45,8 @@ export default class MarinMindPlugin extends Plugin {
 	constructor(app: App, manifest: PluginManifest) {
 		super(app, manifest);
 		this.dbReady = this.initDatabase();
+		// 附件仓不依赖 DB，构造期即可用（vault.adapter 在构造时已可用）
+		this.attachments = new AttachmentStore(this.app.vault.adapter);
 	}
 
 	/** 等待数据层就绪：视图/命令在使用仓储前应 await，再检查 this.db */

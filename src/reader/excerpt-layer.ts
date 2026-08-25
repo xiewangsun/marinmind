@@ -14,12 +14,28 @@ export interface ExcerptLayerCallbacks {
 	onCreateAreaCard(pageNumber: number, rect: DocRect): void;
 	/** 点击已有高亮（查看/管理卡片） */
 	onHighlightClick(card: Card, evt: MouseEvent): void;
+	/** 读取媒体附件（手写 PNG 回显为 <img>） */
+	readAttachment(ref: string): Promise<ArrayBuffer>;
 }
 
 /** 拖卡判定阈值：位移超过该值才升级为拖拽入图（否则视为点击弹菜单） */
 const CARD_DRAG_THRESHOLD = 5;
 /** ghost 文本截断长度 */
 const GHOST_TEXT_LIMIT = 60;
+
+/** 无文字可显示时的形态占位（与脑图节点文案一致） */
+function shapeFallbackText(type: string | undefined): string {
+	switch (type) {
+		case "photo":
+			return "（照片摘录）";
+		case "handwriting":
+			return "（手写摘录）";
+		case "audio":
+			return "（语音摘录）";
+		default:
+			return "（区域摘录）";
+	}
+}
 
 /** 拖卡（高亮 → 脑图画布）状态 */
 interface CardDragState {
@@ -50,6 +66,8 @@ export class ExcerptLayer {
 	private readonly highlightEls = new Map<string, HTMLElement[]>();
 	/** cardId → 卡片对象（点击高亮时回查） */
 	private readonly cardsById = new Map<string, Card>();
+	/** excerptRef → blob URL（手写 <img> 回显；同 ref 复用，删除/销毁时 revoke） */
+	private readonly mediaUrls = new Map<string, string>();
 	private dragStart: { x: number; y: number } | null = null;
 	private dragPreview: HTMLElement | null = null;
 	private excerptMode = false;
@@ -94,6 +112,11 @@ export class ExcerptLayer {
 	/** 新建摘录后即时回显（或重新加载单张卡片） */
 	addHighlight(card: Card): void {
 		this.cardsById.set(card.id, card);
+		// 手写摘录有精确 bbox，用 PNG 图片铺满高亮框回显（点击/拖卡复用高亮机制）
+		if (card.excerptType === "handwriting" && card.excerptRef && card.rects.length > 0) {
+			this.addHandwritingHighlight(card);
+			return;
+		}
 		const els: HTMLElement[] = [];
 		for (const rect of card.rects) {
 			const el = document.createElement("div");
@@ -116,6 +139,45 @@ export class ExcerptLayer {
 		this.highlightEls.set(card.id, els);
 	}
 
+	/** 手写摘录回显：透明高亮框内嵌 <img>（PNG 按 bbox 裁剪，铺满即等比） */
+	private addHandwritingHighlight(card: Card): void {
+		const el = document.createElement("div");
+		el.classList.add("marinmind-excerpt-highlight", "marinmind-excerpt-highlight-img");
+		el.dataset.cardId = card.id;
+		el.dataset.color = card.color ?? "green";
+		const pos = normRectToPercent(card.rects[0]);
+		el.style.left = pos.left;
+		el.style.top = pos.top;
+		el.style.width = pos.width;
+		el.style.height = pos.height;
+		el.addEventListener("click", (evt) =>
+			this.cb.onHighlightClick(this.cardsById.get(card.id) ?? card, evt),
+		);
+		const img = el.createEl("img", { cls: "marinmind-excerpt-img" });
+		img.alt = "手写摘录";
+		const ref = card.excerptRef!;
+		void this.loadMediaUrl(ref).then((url) => {
+			if (el.isConnected) {
+				img.src = url;
+			}
+		});
+		this.pageView.overlayEl.appendChild(el);
+		this.highlightEls.set(card.id, [el]);
+	}
+
+	/** 附件 → blob URL（同 ref 复用；destroy/removeHighlight 时统一 revoke） */
+	private loadMediaUrl(ref: string): Promise<string> {
+		const cached = this.mediaUrls.get(ref);
+		if (cached) {
+			return Promise.resolve(cached);
+		}
+		return this.cb.readAttachment(ref).then((bytes) => {
+			const url = URL.createObjectURL(new Blob([bytes]));
+			this.mediaUrls.set(ref, url);
+			return url;
+		});
+	}
+
 	/** 外部更新卡片（如编辑批注）后同步缓存（高亮位置不变，无需重摆 DOM） */
 	updateCardSnapshot(card: Card): void {
 		this.cardsById.set(card.id, card);
@@ -123,11 +185,20 @@ export class ExcerptLayer {
 
 	/** 删除卡片后即时移除高亮 */
 	removeHighlight(cardId: string): void {
+		const card = this.cardsById.get(cardId);
 		for (const el of this.highlightEls.get(cardId) ?? []) {
 			el.remove();
 		}
 		this.highlightEls.delete(cardId);
 		this.cardsById.delete(cardId);
+		// 附件随卡片删除：uid 唯一命名 ⇒ 一卡一附件，可安全 revoke 该 ref 的 URL
+		if (card?.excerptRef) {
+			const url = this.mediaUrls.get(card.excerptRef);
+			if (url) {
+				URL.revokeObjectURL(url);
+				this.mediaUrls.delete(card.excerptRef);
+			}
+		}
 	}
 
 	/** 摘录模式开关（切换 overlay 的事件捕获行为，样式类驱动） */
@@ -149,6 +220,10 @@ export class ExcerptLayer {
 		overlay.removeEventListener("contextmenu", this.handlers.contextmenu);
 		overlay.removeEventListener("click", this.handlers.clickCapture, true);
 		this.clearHighlights();
+		for (const url of this.mediaUrls.values()) {
+			URL.revokeObjectURL(url);
+		}
+		this.mediaUrls.clear();
 	}
 
 	private clearHighlights(): void {
@@ -333,7 +408,8 @@ export class ExcerptLayer {
 		ghost.appendChild(color);
 		const text = document.createElement("div");
 		text.className = "marinmind-drag-ghost-text";
-		const raw = card?.note ?? card?.excerptText ?? "（区域摘录）";
+		const raw =
+			card?.note ?? card?.excerptText ?? shapeFallbackText(card?.excerptType);
 		text.textContent = raw.length > GHOST_TEXT_LIMIT
 			? `${raw.slice(0, GHOST_TEXT_LIMIT)}…`
 			: raw;
