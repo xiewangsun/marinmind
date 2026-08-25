@@ -1,5 +1,5 @@
 import { Notice, Plugin, TFile } from "obsidian";
-import type { App, PluginManifest } from "obsidian";
+import type { App, PluginManifest, WorkspaceLeaf } from "obsidian";
 import { MarinMindDatabase } from "./db/database";
 import wasmBinary from "./db/wasm-bytes";
 import { CardRepository } from "./db/repositories/card-repo";
@@ -18,6 +18,9 @@ import { MarinMindReviewView, REVIEW_VIEW_TYPE } from "./review/review-view";
 
 /** 数据库文件在库内的位置：点开头目录不出现在文件列表，也不会被插件更新清除 */
 const DB_PATH = ".marinmind/marinmind.db";
+
+/** 工作区预设：study = 阅读 + 复习；research = 阅读 + 脑图 */
+type WorkspaceMode = "study" | "research";
 
 /**
  * MarinMind 插件入口
@@ -77,11 +80,14 @@ export default class MarinMindPlugin extends Plugin {
 			callback: () => this.openMindmapPicker(),
 		});
 		this.addCommand({
-			id: "open-workspace",
-			name: "打开 MarinMind 工作区",
-			callback: () => {
-				new Notice("MarinMind 工作区开发中");
-			},
+			id: "open-workspace-study",
+			name: "学习模式工作区（阅读 + 复习）",
+			callback: () => void this.openWorkspace("study"),
+		});
+		this.addCommand({
+			id: "open-workspace-research",
+			name: "研究模式工作区（阅读 + 脑图）",
+			callback: () => void this.openWorkspace("research"),
 		});
 		this.addCommand({
 			id: "show-stats",
@@ -164,14 +170,63 @@ export default class MarinMindPlugin extends Plugin {
 
 	/**
 	 * 在新标签页用阅读视图打开指定 PDF（setViewState 而非 openFile：后者会落入内置 PDF 视图），
-	 * 可携带页码滚动定位（复习界面"跳转原文"入口）。
+	 * 可携带页码滚动定位（复习界面"跳转原文"入口）。返回所在 leaf（工作区布局复用）。
 	 */
-	async openInReader(file: TFile, page?: number): Promise<void> {
+	async openInReader(file: TFile, page?: number): Promise<WorkspaceLeaf> {
 		const leaf = this.app.workspace.getLeaf("tab");
 		await leaf.setViewState({
 			type: READER_VIEW_TYPE,
 			state: { file: file.path, ...(page != null ? { page } : {}) },
 		});
+		return leaf;
+	}
+
+	// ---------- 多窗格工作区 ----------
+
+	/**
+	 * 工作区预设：阅读窗格 + 右侧复习（study）/ 脑图（research）。
+	 * 已有阅读器标签则复用；没有则弹 PDF 选择器新标签页打开
+	 * （选择器取消无回调 → 放弃布局，不动用户当前笔记）。
+	 */
+	private async openWorkspace(mode: WorkspaceMode): Promise<void> {
+		const reader = this.app.workspace.getLeavesOfType(READER_VIEW_TYPE)[0];
+		if (reader) {
+			await this.ensureSidePane(reader, mode);
+			return;
+		}
+		new PdfPickerModal(
+			this.app,
+			(file) =>
+				void (async () => {
+					const leaf = await this.openInReader(file);
+					await this.ensureSidePane(leaf, mode);
+				})(),
+		).open();
+	}
+
+	/**
+	 * 保证右侧窗格存在并就位（幂等）：
+	 * 已有目标视图标签则复用（复习重启会话，脑图保持当前图）；没有则从阅读窗格右侧分裂。
+	 */
+	private async ensureSidePane(readerLeaf: WorkspaceLeaf, mode: WorkspaceMode): Promise<void> {
+		const target = mode === "study" ? REVIEW_VIEW_TYPE : MINDMAP_VIEW_TYPE;
+		let side = this.app.workspace.getLeavesOfType(target)[0];
+		if (!side) {
+			// split 锚点是"调用时刻的激活 leaf"：setActiveLeaf 与 getLeaf('split') 之间不得有 await
+			this.app.workspace.setActiveLeaf(readerLeaf, { focus: true });
+			side = this.app.workspace.getLeaf("split", "vertical"); // 'vertical' = 右侧
+			await side.setViewState({ type: target }); // 脑图 onOpen 自动弹选图器
+			// 研究模式此刻选图器已聚焦输入框：不抢焦点；学习模式焦点还给阅读器
+			this.app.workspace.setActiveLeaf(readerLeaf, { focus: mode === "study" });
+			return;
+		}
+		// 后台标签可能是延迟加载的占位视图，需先加载拿到真实 view
+		await side.loadIfDeferred();
+		if (mode === "study" && side.view instanceof MarinMindReviewView) {
+			await side.view.startSession(); // 与"开始复习"命令一致：进入学习状态即重启会话
+		}
+		this.app.workspace.setActiveLeaf(readerLeaf, { focus: true });
+		// 脑图复用路径刻意不 loadMap：保持用户当前打开的图
 	}
 
 	private showStats(): void {

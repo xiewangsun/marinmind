@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildChildrenMap,
+	dropPlacement,
 	edgePath,
 	GAP_X,
 	isDescendantOrSelf,
@@ -79,5 +80,45 @@ describe("mindmap-graph 图纯逻辑", () => {
 		// dx = |280-200|/2 = 40 → 触发下限 40
 		const path = edgePath({ x: 0, y: 0, h: 80 }, { x: 280, y: 100, h: 60 });
 		expect(path).toBe("M 200 40 C 240 40, 240 130, 280 130");
+	});
+
+	it("dropPlacement：命中无兄弟节点 → 挂其子并对齐父 y（不用指针位置）", () => {
+		const nodes = [makeNode("a", null, 100, 200), makeNode("b", "a", 380, 200)];
+		const r = dropPlacement(nodes, "b", { x: 999, y: 999 });
+		expect(r.parentId).toBe("b");
+		expect(r.x).toBe(380 + NODE_WIDTH + GAP_X);
+		expect(r.y).toBe(200);
+	});
+
+	it("dropPlacement：命中有兄弟的节点 → 低于最低兄弟顺延", () => {
+		const nodes = [
+			makeNode("a", null),
+			makeNode("b", "a", 0, 100),
+			makeNode("c1", "b", 380, 200),
+			makeNode("c2", "b", 380, 400),
+		];
+		const r = dropPlacement(nodes, "b", { x: 0, y: 0 });
+		expect(r.parentId).toBe("b");
+		// x 由父 b（x=0）决定：0 + NODE_WIDTH + GAP_X；y 低于最低兄弟 c2 顺延
+		expect(r.x).toBe(NODE_WIDTH + GAP_X);
+		expect(r.y).toBe(400 + NODE_HEIGHT_EST + 24);
+	});
+
+	it("dropPlacement：未命中 → 根节点，指针世界坐标透传", () => {
+		const nodes = [makeNode("a", null)];
+		expect(dropPlacement(nodes, null, { x: 123.6, y: -45.2 })).toEqual({
+			parentId: null,
+			x: 123.6,
+			y: -45.2,
+		});
+	});
+
+	it("dropPlacement：脏 id（不在图中）→ 退化为根节点透传", () => {
+		const nodes = [makeNode("a", null)];
+		expect(dropPlacement(nodes, "ghost-id", { x: 5, y: 6 })).toEqual({
+			parentId: null,
+			x: 5,
+			y: 6,
+		});
 	});
 });

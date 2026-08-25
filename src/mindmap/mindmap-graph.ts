@@ -87,6 +87,30 @@ export function suggestRootPosition(existingRoots: { x: number; y: number }[]): 
 }
 
 /**
+ * 拖拽入图落位决策（阅读器高亮拖到脑图画布）：
+ * 命中节点 → 挂为其子并按兄弟顺延落位（不用指针位置，与画布内加卡一致）；
+ * 未命中 / 脏 id → 根节点，位置取指针世界坐标（调用方取整入库）。
+ */
+export function dropPlacement(
+	nodes: GraphNode[],
+	hitNodeId: string | null,
+	pointerWorld: { x: number; y: number },
+): { parentId: string | null; x: number; y: number } {
+	if (hitNodeId == null) {
+		return { parentId: null, ...pointerWorld };
+	}
+	const parent = nodes.find((n) => n.id === hitNodeId);
+	if (!parent) {
+		return { parentId: null, ...pointerWorld };
+	}
+	const pos = suggestChildPosition(
+		parent,
+		nodes.filter((n) => n.parentId === hitNodeId),
+	);
+	return { parentId: hitNodeId, ...pos };
+}
+
+/**
  * 连线路径（三次贝塞尔，世界坐标系）：
  * 起点 = 父右缘中点，终点 = 子左缘中点；控制点水平外扩，间距近时收紧、远时放宽。
  * h 由视图传实测 offsetHeight（无 DOM 时缺省估算值）。

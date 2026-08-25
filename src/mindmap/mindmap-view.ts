@@ -6,6 +6,7 @@ import { TextPromptModal } from "../reader/note-edit-modal";
 import { CardPickerModal } from "./card-picker-modal";
 import { ConfirmModal } from "./confirm-modal";
 import {
+	dropPlacement,
 	edgePath,
 	isDescendantOrSelf,
 	suggestRootPosition,
@@ -14,6 +15,33 @@ import { MindmapPickerModal } from "./mindmap-picker-modal";
 
 /** 思维导图视图的 viewType */
 export const MINDMAP_VIEW_TYPE = "marinmind-mindmap";
+
+/** 活跃脑图视图注册表（onOpen 加入 / onClose 移除），供阅读器拖拽入图定位目标 */
+const activeViews = new Set<MarinMindMindmapView>();
+
+/**
+ * 更新全部活跃脑图的落点提示（悬停的 viewport/节点上高亮类）。
+ * 返回指针悬停的视图（无则 null）——阅读器拖卡的 pointermove/pointerup 调用。
+ */
+export function updateMindmapDropHint(
+	x: number,
+	y: number,
+): MarinMindMindmapView | null {
+	let hovered: MarinMindMindmapView | null = null;
+	for (const view of activeViews) {
+		if (view.updateDropHint(x, y)) {
+			hovered = view;
+		}
+	}
+	return hovered;
+}
+
+/** 清除全部活跃脑图的落点提示（拖拽结束/取消时调用） */
+export function clearMindmapDropHints(): void {
+	for (const view of activeViews) {
+		view.clearDropHint();
+	}
+}
 
 /** 缩放边界 */
 const MIN_SCALE = 0.25;
@@ -97,6 +125,7 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
+		activeViews.add(this); // 注册先于任何 await（拖放目标解析用）
 		await this.plugin.whenReady();
 		if (!this.plugin.db) {
 			this.contentEl.empty();
@@ -140,6 +169,8 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	protected async onClose(): Promise<void> {
+		activeViews.delete(this);
+		this.clearDropHint();
 		this.drag = null;
 		this.nodeEls.clear();
 	}
@@ -326,6 +357,82 @@ export class MarinMindMindmapView extends ItemView {
 		if (this.emptyEl) {
 			this.emptyEl.style.display = this.nodes.length ? "none" : "";
 		}
+	}
+
+	// ---------- 拖拽入图（阅读器高亮拖卡落点） ----------
+
+	/**
+	 * 落点提示：viewport 含指针 → 画布轮廓高亮；指针下是本视图节点 → 节点高亮。
+	 * 返回是否悬停在本视图（供模块级 updateMindmapDropHint 汇总）。
+	 */
+	public updateDropHint(x: number, y: number): boolean {
+		this.clearDropHint();
+		const vp = this.viewportEl;
+		if (!vp) {
+			return false;
+		}
+		const rect = vp.getBoundingClientRect();
+		const inside =
+			x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+		if (!inside) {
+			return false;
+		}
+		vp.classList.add("marinmind-mm-droptarget");
+		const hitId = this.hitNodeAt(x, y);
+		if (hitId) {
+			this.nodeEls.get(hitId)?.classList.add("marinmind-mm-node-droptarget");
+		}
+		return true;
+	}
+
+	/** 清除本视图的落点提示类 */
+	public clearDropHint(): void {
+		this.viewportEl?.classList.remove("marinmind-mm-droptarget");
+		for (const el of this.nodeEls.values()) {
+			el.classList.remove("marinmind-mm-node-droptarget");
+		}
+	}
+
+	/** 拖卡落点：命中节点=挂其子（标准子落位），空白=根（指针世界坐标） */
+	public dropCard(card: Card, x: number, y: number): void {
+		this.clearDropHint();
+		if (!this.mapId) {
+			new Notice("请先打开或创建一张脑图");
+			return;
+		}
+		const hitId = this.hitNodeAt(x, y);
+		const { parentId, x: wx, y: wy } = dropPlacement(this.nodes, hitId, this.toWorld(x, y));
+		const added = this.plugin.mindmaps.addNode(
+			this.mapId,
+			card.id,
+			parentId,
+			Math.round(wx),
+			Math.round(wy),
+		);
+		if (!added) {
+			new Notice("该卡片已在此图中");
+			return;
+		}
+		this.nodes.push(added);
+		this.createNodeEl(added);
+		this.drawEdges();
+		this.updateHeader();
+		new Notice(hitId ? "已挂为子节点" : "已添加为根节点");
+	}
+
+	/**
+	 * 指针下的本视图节点 id（无则 null）。
+	 * 归属验证 nodeEls.get(id) === el：多脑图同屏时 elementFromPoint 可能命中他图节点。
+	 */
+	private hitNodeAt(x: number, y: number): string | null {
+		const hit = document
+			.elementFromPoint(x, y)
+			?.closest<HTMLElement>(".marinmind-mm-node");
+		const id = hit?.dataset.nodeId;
+		if (!id || this.nodeEls.get(id) !== hit) {
+			return null;
+		}
+		return id;
 	}
 
 	// ---------- 坐标与变换 ----------

@@ -497,3 +497,55 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
+
+/* ===== 拖卡入图（阅读器高亮 → 脑图画布） ===== */
+
+/* 拖拽进行中的全局状态：抓取光标 + 禁止文字选区（class 驱动，异常路径靠 cancelCardDrag 移除） */
+body.marinmind-card-dragging {
+	cursor: grabbing;
+	user-select: none;
+}
+
+/* 跟随指针的卡片 ghost：挂 body（跨出 leaf 仍可见），必须 pointer-events:none
+   否则 elementFromPoint 会命中它自己 */
+.marinmind-drag-ghost {
+	position: fixed;
+	z-index: var(--layer-popover, 100);
+	width: 240px;
+	box-sizing: border-box;
+	padding: 0.5em 0.6em 0.5em 0.9em;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+	pointer-events: none;
+	opacity: 0.92;
+}
+
+/* 悬停在脑图画布上时提亮，提示"松手可放入" */
+.marinmind-drag-ghost.is-over-mm {
+	border-color: var(--interactive-accent);
+	opacity: 1;
+}
+
+.marinmind-drag-ghost-text {
+	font-size: var(--font-ui-small);
+	line-height: 1.4;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	word-break: break-word;
+}
+
+/* 脑图画布落点提示：必须用 inset box-shadow——viewport 已有点阵 background-image，
+   换背景/改 background-size 会闪烁 */
+.marinmind-mm-viewport.marinmind-mm-droptarget {
+	box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
+/* 悬停节点提示：挂为其子节点 */
+.marinmind-mm-node.marinmind-mm-node-droptarget {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 2px var(--interactive-accent);
+}
