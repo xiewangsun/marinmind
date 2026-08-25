@@ -74,4 +74,30 @@ describe("数据库持久化", () => {
 		await db.flush(); // 不应抛错
 		db.close();
 	});
+
+	it("exportBytes 导出内存权威快照，重开后数据可查", async () => {
+		const adapter = new MemoryAdapter();
+		const db1 = await MarinMindDatabase.open({ adapter, path: DB_PATH });
+		const doc = new DocumentRepository(db1).upsertByPath("books/mm.pdf", "数学分析");
+		new CardRepository(db1).create({
+			documentId: doc.id,
+			page: 1,
+			rects: [],
+			excerptType: "area",
+		});
+		// 刻意不 flush（dirty 未落盘）：exportBytes 仍应包含最新写入
+		const bytes = db1.exportBytes();
+		db1.close();
+
+		// 用导出字节在全新 adapter 上恢复，验证快照自包含
+		const adapter2 = new MemoryAdapter();
+		adapter2.files.set(".marinmind/restore.db", bytes);
+		const db2 = await MarinMindDatabase.open({
+			adapter: adapter2,
+			path: ".marinmind/restore.db",
+		});
+		expect(new DocumentRepository(db2).getByPath("books/mm.pdf")?.title).toBe("数学分析");
+		expect(new CardRepository(db2).count()).toBe(1);
+		db2.close();
+	});
 });

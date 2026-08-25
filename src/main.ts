@@ -15,9 +15,8 @@ import { MindmapPickerModal } from "./mindmap/mindmap-picker-modal";
 import { MarinMindReaderView, READER_VIEW_TYPE } from "./reader/reader-view";
 import { PdfPickerModal } from "./reader/pdf-picker-modal";
 import { MarinMindReviewView, REVIEW_VIEW_TYPE } from "./review/review-view";
-
-/** 数据库文件在库内的位置：点开头目录不出现在文件列表，也不会被插件更新清除 */
-const DB_PATH = ".marinmind/marinmind.db";
+import { exportBackup, promptImportBackup } from "./backup/backup-service";
+import { DB_PATH } from "./constants";
 
 /** 工作区预设：study = 阅读 + 复习；research = 阅读 + 脑图 */
 type WorkspaceMode = "study" | "research";
@@ -93,6 +92,16 @@ export default class MarinMindPlugin extends Plugin {
 			id: "show-stats",
 			name: "显示库统计（文档 / 卡片 / 待复习）",
 			callback: () => this.showStats(),
+		});
+		this.addCommand({
+			id: "export-backup",
+			name: "导出备份（.marginpkg）",
+			callback: () => void exportBackup(this),
+		});
+		this.addCommand({
+			id: "import-backup",
+			name: "导入备份（.marginpkg）",
+			callback: () => promptImportBackup(this),
 		});
 	}
 

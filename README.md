@@ -26,7 +26,8 @@ npm test       # 运行全部测试（vitest）
 ```
 
 数据存储：SQLite（sql.js / WASM），库文件位于 Obsidian 库根目录的
-`.marinmind/marinmind.db`，写入防抖落盘。
+`.marinmind/marinmind.db`，写入防抖落盘；备份走 `.marginpkg`
+（SQLite + 全部 PDF + 附件的 zip 包，见 docs/使用教程.md）。
 
 开发调试：将本目录软链或复制到 Obsidian 库的 `.obsidian/plugins/marinmind/`
 （需包含 `main.js`、`manifest.json`、`styles.css`），在设置中启用本插件。

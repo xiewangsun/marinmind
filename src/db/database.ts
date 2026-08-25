@@ -137,14 +137,18 @@ export class MarinMindDatabase {
 		if (!this.dirty || !this.adapter || !this.path) {
 			return;
 		}
+		await this.adapter.writeBinary(this.path, this.exportBytes());
+		this.dirty = false;
+	}
+
+	/** 导出整库字节（内存权威快照；备份/导入前快照用，不改变落盘状态） */
+	exportBytes(): ArrayBuffer {
 		const data = this.db.export();
-		// 复制出独立 ArrayBuffer，避免依赖导出视图的生命周期
-		const buffer = data.buffer.slice(
+		// 复制独立 buffer，避免依赖导出视图的生命周期
+		return data.buffer.slice(
 			data.byteOffset,
 			data.byteOffset + data.byteLength,
 		) as ArrayBuffer;
-		await this.adapter.writeBinary(this.path, buffer);
-		this.dirty = false;
 	}
 
 	/** 关闭内存库（调用前应先 flush 未落盘的写入） */
