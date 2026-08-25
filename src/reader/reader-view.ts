@@ -1,10 +1,11 @@
-import { TFile, FileView, Menu, debounce } from "obsidian";
+import { TFile, FileView, Menu, Notice, debounce } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card, DocRect } from "../types";
 import { ExcerptLayer } from "./excerpt-layer";
 import { PageView } from "./page-view";
 import { PdfDocument } from "./pdf-document";
+import { rectsRelativeToPage, type ViewportRect } from "./rect-utils";
 
 /** 阅读视图的 viewType（不与内置 'pdf' 冲突，不接管默认打开方式） */
 export const READER_VIEW_TYPE = "marinmind-reader";
@@ -18,7 +19,7 @@ const ZOOM_STEP = 1.25;
 const SCROLL_PADDING_X = 24;
 
 /**
- * MarinMind 阅读视图：PDF 连续滚动渲染 + 区域摘录 + 高亮回显。
+ * MarinMind 阅读视图：PDF 连续滚动渲染 + 区域/文字摘录 + 高亮回显。
  *
  * 生命周期约定：
  * - onLoadFile 可能重入（快速切换/会话恢复），以 loadToken 代际守卫，
@@ -60,6 +61,14 @@ export class MarinMindReaderView extends FileView {
 		this.addAction("stretch-horizontal", "适应宽度", () => this.fitWidth());
 
 		this.rerenderSoon = debounce(() => this.handleResize(), 200, true);
+
+		// 划选文字摘录：鼠标松开 / Shift+方向键调整选区后尝试生成 text 卡片
+		this.registerDomEvent(this.contentEl, "mouseup", () => this.handleSelectionEnd());
+		this.registerDomEvent(this.contentEl, "keyup", (evt: KeyboardEvent) => {
+			if (evt.key === "Shift" || evt.key.startsWith("Arrow")) {
+				this.handleSelectionEnd();
+			}
+		});
 
 		// 文件重命名：FileView.onRename 只给新路径，oldPath 需从 vault 事件取
 		this.registerEvent(
@@ -300,6 +309,72 @@ export class MarinMindReaderView extends FileView {
 			color: "yellow",
 		});
 		this.excerptLayers.get(pageNumber)?.addHighlight(card);
+	}
+
+	/**
+	 * 划选文字 → text 卡片闭环：
+	 * 选区行矩形（getClientRects 实测，比 span 定位精确）按中心点归属页；
+	 * 跨页选区拦截提示分次选择；蓝色高亮区别于区域摘录的黄色。
+	 */
+	private handleSelectionEnd(): void {
+		if (this.excerptMode || !this.currentDocId) {
+			return; // 摘录模式由 overlay 接管指针，不应存在文字选区
+		}
+		const sel = window.getSelection();
+		if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+			return;
+		}
+		const text = sel.toString().trim();
+		if (!text) {
+			return;
+		}
+		const range = sel.getRangeAt(0);
+		// 选区可能来自应用其他区域（键盘残留），限定在本视图内才处理
+		if (!this.contentEl.contains(range.commonAncestorContainer)) {
+			return;
+		}
+
+		// 行矩形按中心点归属页（文本行的中心必落在渲染该文本的页面内）
+		const rectsByPage = new Map<number, ViewportRect[]>();
+		for (const r of Array.from(range.getClientRects())) {
+			if (r.width <= 0 || r.height <= 0) {
+				continue; // getClientRects 可能产生零尺寸行
+			}
+			const cx = r.left + r.width / 2;
+			const cy = r.top + r.height / 2;
+			const pv = this.pageViews.find((p) => {
+				const box = p.el.getBoundingClientRect();
+				return cx >= box.left && cx <= box.right && cy >= box.top && cy <= box.bottom;
+			});
+			if (!pv) {
+				continue;
+			}
+			const list = rectsByPage.get(pv.pageNumber) ?? [];
+			list.push({ left: r.left, top: r.top, width: r.width, height: r.height });
+			rectsByPage.set(pv.pageNumber, list);
+		}
+		if (rectsByPage.size === 0) {
+			return;
+		}
+		if (rectsByPage.size > 1) {
+			new Notice("跨页摘录请分次选择");
+			return;
+		}
+
+		const [page, rects] = [...rectsByPage.entries()][0];
+		const pageBox = this.pageViews
+			.find((p) => p.pageNumber === page)!
+			.el.getBoundingClientRect();
+		const card = this.plugin.cards.create({
+			documentId: this.currentDocId,
+			page,
+			rects: rectsRelativeToPage(rects, pageBox),
+			excerptType: "text",
+			excerptText: text,
+			color: "blue",
+		});
+		this.excerptLayers.get(page)?.addHighlight(card);
+		sel.removeAllRanges();
 	}
 
 	/** 点击高亮：弹出卡片信息与操作菜单 */

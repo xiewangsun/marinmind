@@ -19,6 +19,14 @@ export interface RenderTicket {
 	cancel(): void;
 }
 
+/** 文本层 span 的 CSS 定位规格（像素，相对页面容器左上角） */
+export interface PdfTextSpanSpec {
+	text: string;
+	left: number;
+	top: number;
+	fontSize: number;
+}
+
 /** 判定 pdf.js 抛出的"已取消 / 已销毁"类错误（属正常路径，静默即可） */
 function isCancellation(err: unknown): boolean {
 	const name = (err as { name?: string })?.name ?? "";
@@ -138,6 +146,32 @@ export class PdfDocument {
 				task?.cancel();
 			},
 		};
+	}
+
+	/**
+	 * 构建第 pageNumber 页的文本层规格（透明可选中 spans 的定位数据）。
+	 *
+	 * span 定位只需"接近正确"即可保证可选中；精确的高亮矩形来自选区的
+	 * getClientRects 实测（reader-view 侧），因此这里用基线近似（top = y - fontSize）。
+	 */
+	async buildTextLayer(pageNumber: number, cssScale: number): Promise<PdfTextSpanSpec[]> {
+		const page = await this.getPage(pageNumber);
+		const content = await page.getTextContent();
+		// 视口矩阵（含 y 轴翻转）：PDF 用户坐标 → 视口像素坐标
+		const m = page.getViewport({ scale: cssScale }).transform;
+		const specs: PdfTextSpanSpec[] = [];
+		for (const item of content.items) {
+			if (!("str" in item) || item.str === "") {
+				continue; // 跳过标记内容项与空串
+			}
+			const t = item.transform;
+			// 矩阵乘法：文本基线起点 (t[4], t[5]) 映射到视口坐标
+			const x = m[0] * t[4] + m[2] * t[5] + m[4];
+			const y = m[1] * t[4] + m[3] * t[5] + m[5];
+			const fontSize = Math.hypot(t[2], t[3]) * cssScale;
+			specs.push({ text: item.str, left: x, top: y - fontSize, fontSize });
+		}
+		return specs;
 	}
 
 	/** 销毁文档与在途渲染（幂等；不触碰 Obsidian 全局 worker 配置） */

@@ -11,12 +11,29 @@
 export interface PdfViewport {
 	width: number;
 	height: number;
+	/** 视口变换矩阵 [a,b,c,d,e,f]（含 y 轴翻转），用于 PDF 坐标 → 视口坐标 */
+	transform: number[];
 }
 
 /** 一次渲染任务：可取消（缩放切换/页面卸载时避免同 canvas 并发渲染冲突） */
 export interface PdfRenderTask {
 	promise: Promise<void>;
 	cancel(): void;
+}
+
+/** 文本项：PDF 内容流中的一个文本片段（带变换矩阵） */
+export interface PdfTextItem {
+	str: string;
+	dir: string;
+	width: number;
+	height: number;
+	/** 文本矩阵 [a,b,c,d,e,f]：(e,f) 为基线起点，纵向量模长即字号 */
+	transform: number[];
+}
+
+/** getTextContent 结果（items 中还可能混杂无 str 的标记内容项，使用时过滤） */
+export interface PdfTextContent {
+	items: (PdfTextItem | { type: string })[];
 }
 
 /** PDF 单页代理 */
@@ -28,6 +45,8 @@ export interface PdfPageProxy {
 		canvasContext: CanvasRenderingContext2D;
 		viewport: PdfViewport;
 	}): PdfRenderTask;
+	/** 页面文本项列表（pdf.js 内部有缓存，重复调用便宜） */
+	getTextContent(): Promise<PdfTextContent>;
 }
 
 /** PDF 文档代理 */

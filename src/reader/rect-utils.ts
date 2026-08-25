@@ -64,3 +64,28 @@ export function isTinyNormRect(
 ): boolean {
 	return rect.w * pageW < minPx || rect.h * pageH < minPx;
 }
+
+/** 视口坐标矩形（如 getClientRects 的结果）与页面包围盒的形状 */
+export interface ViewportRect {
+	left: number;
+	top: number;
+	width: number;
+	height: number;
+}
+
+/**
+ * 选区行矩形（相对视口）→ 归一化矩形列表。
+ * 多行选区得到多个矩形，正好对应 Card.rects 的多区域模型。
+ */
+export function rectsRelativeToPage(rects: ViewportRect[], pageBox: ViewportRect): DocRect[] {
+	const w = Math.max(1, pageBox.width);
+	const h = Math.max(1, pageBox.height);
+	return rects.map((r) =>
+		clampNormRect({
+			x: (r.left - pageBox.left) / w,
+			y: (r.top - pageBox.top) / h,
+			w: r.width / w,
+			h: r.height / h,
+		}),
+	);
+}

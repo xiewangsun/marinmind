@@ -4,6 +4,7 @@ import {
 	isTinyNormRect,
 	normRectToPercent,
 	pointsToNormRect,
+	rectsRelativeToPage,
 } from "../../src/reader/rect-utils";
 
 describe("rect-utils 坐标换算", () => {
@@ -44,5 +45,22 @@ describe("rect-utils 坐标换算", () => {
 		expect(isTinyNormRect({ x: 0, y: 0, w: 0.1, h: 0.1 }, 100, 100)).toBe(false);
 		// 高阈值下 10px 也算误触（按显示像素判定，与缩放无关）
 		expect(isTinyNormRect({ x: 0, y: 0, w: 0.1, h: 0.1 }, 100, 100, 20)).toBe(true);
+	});
+
+	it("选区行矩形（视口坐标）→ 相对页面的归一化矩形", () => {
+		const page = { left: 100, top: 200, width: 400, height: 800 };
+		const rects = [
+			{ left: 120, top: 300, width: 200, height: 20 },
+			{ left: 100, top: 330, width: 360, height: 20 },
+		];
+		const [a, b] = rectsRelativeToPage(rects, page);
+		expect(a).toEqual({ x: 0.05, y: 0.125, w: 0.5, h: 0.025 });
+		expect(b).toEqual({ x: 0, y: 0.1625, w: 0.9, h: 0.025 });
+	});
+
+	it("越出页面边界的选区矩形被钳制", () => {
+		const page = { left: 0, top: 0, width: 100, height: 100 };
+		const [r] = rectsRelativeToPage([{ left: -10, top: -5, width: 130, height: 10 }], page);
+		expect(r).toEqual({ x: 0, y: 0, w: 1, h: 0.1 });
 	});
 });

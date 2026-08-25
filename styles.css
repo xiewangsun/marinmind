@@ -46,6 +46,30 @@
 	pointer-events: none;
 }
 
+/* 文本层：透明文字、可选中（划选文字摘录）。指针事件默认开启，
+   overlay 不拦截（默认穿透）时即可原生划选 */
+.marinmind-text-layer {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	line-height: 1;
+	user-select: text;
+}
+
+/* 单个文本片段：绝对定位，透明着色，仅用于承载选区 */
+.marinmind-text-layer span {
+	position: absolute;
+	white-space: pre;
+	color: transparent;
+	cursor: text;
+	transform-origin: 0 0;
+}
+
+/* 划选可视反馈：文字透明，选中背景单独上色 */
+.marinmind-text-layer span::selection {
+	background: rgba(59, 130, 246, 0.3);
+}
+
 /* 摘录模式：整层捕获指针，触摸端禁默认手势（touch-action 是阻止触摸滚动的唯一可靠手段） */
 .marinmind-pdf-overlay.marinmind-excerpt-on {
 	pointer-events: auto;
@@ -66,6 +90,16 @@
 
 .marinmind-excerpt-highlight:hover {
 	background: rgba(255, 200, 0, 0.48);
+}
+
+/* 文字摘录卡片：蓝色变体（区别于区域摘录的黄色） */
+.marinmind-excerpt-highlight[data-color="blue"] {
+	background: rgba(59, 130, 246, 0.22);
+	border-color: rgba(59, 130, 246, 0.5);
+}
+
+.marinmind-excerpt-highlight[data-color="blue"]:hover {
+	background: rgba(59, 130, 246, 0.38);
 }
 
 /* 拖拽框选的虚线预览框 */

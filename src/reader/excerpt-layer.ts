@@ -65,6 +65,8 @@ export class ExcerptLayer {
 			const el = document.createElement("div");
 			el.classList.add("marinmind-excerpt-highlight");
 			el.dataset.cardId = card.id;
+			// 颜色变体挂 data-color（区域=yellow，文字=blue），样式表按值上色
+			el.dataset.color = card.color ?? "yellow";
 			const pos = normRectToPercent(rect);
 			el.style.left = pos.left;
 			el.style.top = pos.top;
