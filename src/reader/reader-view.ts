@@ -1,9 +1,11 @@
 import { TFile, FileView, Menu, Notice, debounce } from "obsidian";
 import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
+import { MindmapPickerModal } from "../mindmap/mindmap-picker-modal";
+import { suggestRootPosition } from "../mindmap/mindmap-graph";
 import type { Card, DocRect } from "../types";
 import { ExcerptLayer } from "./excerpt-layer";
-import { NoteEditModal } from "./note-edit-modal";
+import { TextPromptModal } from "./note-edit-modal";
 import { PageView } from "./page-view";
 import { PdfDocument } from "./pdf-document";
 import { rectsRelativeToPage, type ViewportRect } from "./rect-utils";
@@ -449,16 +451,23 @@ export class MarinMindReaderView extends FileView {
 				}),
 		);
 		menu.addItem((item) =>
+			item.setTitle("加入思维导图…").setIcon("git-fork").onClick(() => this.addToMindmap(card)),
+		);
+		menu.addItem((item) =>
 			item
 				.setTitle("编辑批注")
 				.setIcon("pencil")
 				.onClick(() => {
-					new NoteEditModal(this.app, card, (note) => {
-						const updated = this.plugin.cards.update(card.id, { note });
-						if (updated && updated.page != null) {
-							this.excerptLayers.get(updated.page)?.updateCardSnapshot(updated);
-						}
-					}).open();
+					new TextPromptModal(
+						this.app,
+						{ title: "编辑批注", initialText: card.note ?? "" },
+						(note) => {
+							const updated = this.plugin.cards.update(card.id, { note });
+							if (updated && updated.page != null) {
+								this.excerptLayers.get(updated.page)?.updateCardSnapshot(updated);
+							}
+						},
+					).open();
 				}),
 		);
 		menu.addItem((item) =>
@@ -468,6 +477,23 @@ export class MarinMindReaderView extends FileView {
 				.onClick(() => this.deleteCard(card)),
 		);
 		menu.showAtMouseEvent(evt);
+	}
+
+	/** 把卡片加入脑图：选图器（可就地新建）→ 根节点区顺延落位为根节点 */
+	private addToMindmap(card: Card): void {
+		new MindmapPickerModal(this.app, this.plugin, (map) => {
+			const roots = this.plugin.mindmaps
+				.listNodes(map.id)
+				.filter((n) => n.parentId === null)
+				.map((n) => ({ x: n.x, y: n.y }));
+			const pos = suggestRootPosition(roots);
+			const added = this.plugin.mindmaps.addNode(map.id, card.id, null, pos.x, pos.y);
+			new Notice(
+				added
+					? `已加入脑图《${map.name}》（根节点区顺延落位）`
+					: "该卡片已在此图中",
+			);
+		}).open();
 	}
 
 	private deleteCard(card: Card): void {

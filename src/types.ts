@@ -56,6 +56,30 @@ export interface CardLink {
 	createdAt: number;
 }
 
+/** 思维导图（命名脑图，任何书的卡片可混排进同一张图） */
+export interface Mindmap {
+	id: string;
+	name: string;
+	createdAt: number;
+	updatedAt: number;
+}
+
+/** 脑图节点：图内世界坐标 + 父子结构（parentId 为空即根节点，模型支持森林） */
+export interface MindmapNode {
+	id: string;
+	mapId: string;
+	cardId: string;
+	parentId: string | null;
+	x: number;
+	y: number;
+	createdAt: number;
+}
+
+/** 视图层节点快照：附带卡片本体（listNodes 的 JOIN 产物） */
+export interface MindmapNodeWithCard extends MindmapNode {
+	card: Card;
+}
+
 /** 复习评分（四档按钮） */
 export type ReviewGrade = "again" | "hard" | "good" | "easy";
 

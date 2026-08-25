@@ -306,3 +306,194 @@
 	justify-content: flex-end;
 	gap: 0.5em;
 }
+
+/* 单行输入（名称类：脑图名等），限制高度 */
+.marinmind-note-singleline {
+	min-height: 0;
+	height: 2.4em;
+	resize: none;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+/* ===== 思维导图视图 ===== */
+
+/* 视图根容器：纵向排布 header / 画布 / 提示条 */
+.marinmind-mindmap {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+/* header：图名 + 节点数 + 操作按钮 */
+.marinmind-mm-header {
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+	padding: 0.4em 0.8em;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex: none;
+}
+
+.marinmind-mm-title {
+	font-weight: 600;
+	max-width: 18em;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.marinmind-mm-count {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.marinmind-mm-header-btn {
+	background: none;
+	border: none;
+	box-shadow: none;
+	padding: 0.15em 0.3em;
+	font-size: var(--font-ui-smaller);
+	height: auto;
+	cursor: pointer;
+}
+
+/* 画布：事件宿主（世界层是 0×0 变换容器，收不到事件） */
+.marinmind-mm-viewport {
+	position: relative;
+	flex: 1;
+	overflow: hidden;
+	/* 长按拖动不触发系统手势与文字选区 */
+	touch-action: none;
+	user-select: none;
+	/* 点阵背景提示"这是画布"；背景点间距随缩放不变（背景在 viewport 上，不在 world） */
+	background-image: radial-gradient(
+		circle,
+		var(--background-modifier-border) 1px,
+		transparent 1px
+	);
+	background-size: 24px 24px;
+	cursor: grab;
+}
+
+/* 世界层：唯一变换容器；0×0 无所谓，子元素绝对定位超出部分靠 svg overflow + 自身可见 */
+.marinmind-mm-world {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 0;
+	height: 0;
+	transform-origin: 0 0;
+}
+
+/* 连线层：必须 overflow:visible——SVG 默认 300x150 视口会把画布外连线全部裁掉 */
+.marinmind-mm-edges {
+	position: absolute;
+	left: 0;
+	top: 0;
+	width: 0;
+	height: 0;
+	overflow: visible;
+	pointer-events: none;
+}
+
+.marinmind-mm-edge {
+	fill: none;
+	stroke: var(--text-faint);
+	stroke-width: 2;
+	/* 描边宽不随画布缩放（世界坐标描边在 0.25x 会细到不可见） */
+	vector-effect: non-scaling-stroke;
+}
+
+/* 节点卡片 */
+.marinmind-mm-node {
+	position: absolute;
+	width: 200px;
+	box-sizing: border-box;
+	padding: 0.5em 0.6em 0.5em 0.9em;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+	cursor: grab;
+}
+
+.marinmind-mm-node:active,
+.marinmind-mm-dragging {
+	cursor: grabbing;
+}
+
+.marinmind-mm-dragging {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+	opacity: 0.92;
+}
+
+/* 左侧颜色条：复用摘录高亮的 yellow / blue 语义 */
+.marinmind-mm-node-color {
+	position: absolute;
+	left: 0;
+	top: 0;
+	bottom: 0;
+	width: 4px;
+	border-radius: var(--radius-s, 4px) 0 0 var(--radius-s, 4px);
+	background: var(--text-faint);
+}
+
+.marinmind-mm-node-color[data-color="yellow"] {
+	background: #e8c53a;
+}
+
+.marinmind-mm-node-color[data-color="blue"] {
+	background: #4a90d9;
+}
+
+.marinmind-mm-node-color[data-color="green"] {
+	background: #5aab5a;
+}
+
+.marinmind-mm-node-color[data-color="pink"] {
+	background: #d96a9c;
+}
+
+.marinmind-mm-node-text {
+	font-size: var(--font-ui-small);
+	line-height: 1.4;
+	/* 三行截断：节点是索引不是全文阅读区 */
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	overflow: hidden;
+	word-break: break-word;
+}
+
+.marinmind-mm-node-meta {
+	margin-top: 0.3em;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+/* 空态提示（画布居中，不挡指针） */
+.marinmind-mm-empty {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	color: var(--text-faint);
+	font-size: var(--font-ui-small);
+	pointer-events: none;
+	white-space: nowrap;
+}
+
+/* 底部操作提示条 */
+.marinmind-mm-hint {
+	flex: none;
+	padding: 0.3em 0.8em;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	border-top: 1px solid var(--background-modifier-border);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}

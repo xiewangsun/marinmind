@@ -1,7 +1,7 @@
 import type { Database } from "sql.js";
 
 /** 当前 schema 版本（每新增一条迁移 +1，须与 MIGRATIONS 长度一致） */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /**
  * 按版本顺序排列的迁移脚本：MIGRATIONS[i] 将库从版本 i 升级到 i+1。
@@ -56,6 +56,29 @@ export const MIGRATIONS: string[] = [
 		lapses            INTEGER NOT NULL DEFAULT 0
 	);
 	CREATE INDEX idx_review_due ON review_states(due_at) WHERE is_flashcard = 1;
+	`,
+	// v1 → v2 思维导图：多张命名脑图 + 图内节点（节点引用既有卡片，跨书混排）
+	`
+	CREATE TABLE mindmaps (
+		id          TEXT PRIMARY KEY,
+		name        TEXT NOT NULL,
+		created_at  INTEGER NOT NULL,
+		updated_at  INTEGER NOT NULL
+	);
+
+	CREATE TABLE mindmap_nodes (
+		id          TEXT PRIMARY KEY,
+		map_id      TEXT NOT NULL REFERENCES mindmaps(id) ON DELETE CASCADE,
+		card_id     TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+		parent_id   TEXT REFERENCES mindmap_nodes(id) ON DELETE SET NULL,  -- 空即根节点（森林）
+		x           INTEGER NOT NULL,
+		y           INTEGER NOT NULL,
+		created_at  INTEGER NOT NULL,
+		UNIQUE (map_id, card_id)   -- 一张图内同一卡片只出现一次
+	);
+	CREATE INDEX idx_mmindmap_nodes_map ON mindmap_nodes(map_id);
+	CREATE INDEX idx_mmindmap_nodes_parent ON mindmap_nodes(parent_id);
+	CREATE INDEX idx_mmindmap_nodes_card ON mindmap_nodes(card_id);
 	`,
 ];
 
