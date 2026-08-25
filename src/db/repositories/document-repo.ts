@@ -69,6 +69,14 @@ export class DocumentRepository {
 		return next;
 	}
 
+	/** 文件重命名/移动时同步业务键，避免文档与其卡片孤儿化 */
+	renamePath(oldPath: string, newPath: string): void {
+		this.db.run(
+			"UPDATE documents SET file_path = ?, updated_at = ? WHERE file_path = ?",
+			[newPath, now(), oldPath],
+		);
+	}
+
 	/** 删除文档（级联删除其卡片、链接与复习状态） */
 	delete(id: string): boolean {
 		const existed = this.get(id) !== undefined;

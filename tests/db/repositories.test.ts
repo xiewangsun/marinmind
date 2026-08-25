@@ -31,6 +31,18 @@ describe("文档仓储", () => {
 		expect(documents.getByPath("books/rl.pdf")?.id).toBe(a.id);
 	});
 
+	it("renamePath 同步路径，卡片归属不变", () => {
+		const doc = documents.upsertByPath("books/a.pdf", "A");
+		cards.create({ documentId: doc.id, page: 1, rects: [], excerptType: "text", excerptText: "x" });
+
+		documents.renamePath("books/a.pdf", "books/改名后.pdf");
+
+		expect(documents.getByPath("books/a.pdf")).toBeUndefined();
+		const moved = documents.getByPath("books/改名后.pdf");
+		expect(moved?.id).toBe(doc.id);
+		expect(cards.listByDocument(doc.id)).toHaveLength(1);
+	});
+
 	it("删除文档级联删除其卡片、链接与复习状态", () => {
 		const doc = documents.upsertByPath("books/rl.pdf", "RL");
 		const a = cards.create({ documentId: doc.id, page: 1, rects: [], excerptType: "text", excerptText: "A" });

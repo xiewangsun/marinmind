@@ -1,1 +1,84 @@
-/* MarinMind 插件样式（脚手架阶段为空，后续阅读器 / 脑图 / 学习卡样式写在这里） */
+/* MarinMind 插件样式 */
+
+/* ===== PDF 阅读视图 ===== */
+
+/* 视图根容器：撑满 view-content，滚动交给内层容器 */
+.marinmind-reader {
+	height: 100%;
+	overflow: hidden;
+}
+
+.marinmind-reader-tip {
+	color: var(--text-muted);
+	text-align: center;
+	margin-top: 4em;
+	padding: 0 2em;
+}
+
+/* 连续滚动容器 */
+.marinmind-pdf-scroll {
+	height: 100%;
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding: 12px;
+	box-sizing: border-box;
+}
+
+/* 单页容器：居中 + 投影 + 占位底色（canvas 卸载时仍保持高度） */
+.marinmind-pdf-page {
+	position: relative;
+	margin: 0 auto 16px;
+	background: var(--background-primary);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+	overflow: hidden;
+}
+
+/* 透明背景的 PDF 在暗色主题下会糊黑，强制白底 */
+.marinmind-pdf-page canvas {
+	display: block;
+	background: white;
+}
+
+/* 覆盖层：平时完全穿透（滚轮/点击落到页面） */
+.marinmind-pdf-overlay {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+/* 摘录模式：整层捕获指针，触摸端禁默认手势（touch-action 是阻止触摸滚动的唯一可靠手段） */
+.marinmind-pdf-overlay.marinmind-excerpt-on {
+	pointer-events: auto;
+	touch-action: none;
+	cursor: crosshair;
+	user-select: none;
+}
+
+/* 已有摘录卡片的高亮（% 定位，随缩放自动跟随） */
+.marinmind-excerpt-highlight {
+	position: absolute;
+	box-sizing: border-box;
+	background: rgba(255, 200, 0, 0.32);
+	border: 1px solid rgba(255, 200, 0, 0.55);
+	pointer-events: auto;
+	cursor: pointer;
+}
+
+.marinmind-excerpt-highlight:hover {
+	background: rgba(255, 200, 0, 0.48);
+}
+
+/* 拖拽框选的虚线预览框 */
+.marinmind-drag-rect {
+	position: absolute;
+	box-sizing: border-box;
+	border: 1.5px dashed rgba(255, 200, 0, 0.9);
+	background: rgba(255, 200, 0, 0.12);
+	pointer-events: none;
+}
+
+/* PDF 选择弹窗的目录次行 */
+.marinmind-picker-dir {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
