@@ -1,8 +1,10 @@
-import { TFile, FileView, Menu, Notice, debounce } from "obsidian";
+import { TFile, FileView, Menu, Notice, Platform, debounce } from "obsidian";
 import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import { MindmapPickerModal } from "../mindmap/mindmap-picker-modal";
+import { ConfirmModal } from "../mindmap/confirm-modal";
 import { suggestRootPosition } from "../mindmap/mindmap-graph";
+import { ocrCanvasRegions } from "../ocr/ocr-service";
 import type { Card, DocRect } from "../types";
 import { AudioRecorder } from "./audio-recorder";
 import { ExcerptLayer } from "./excerpt-layer";
@@ -875,6 +877,19 @@ export class MarinMindReaderView extends FileView {
 		menu.addItem((item) =>
 			item.setTitle("加入思维导图…").setIcon("git-fork").onClick(() => this.addToMindmap(card)),
 		);
+		// OCR：区域/手写摘录有矩形才可识别（文字摘录已有文本，照片无矩形）
+		if (
+			(card.excerptType === "area" || card.excerptType === "handwriting") &&
+			card.page != null &&
+			card.rects.length > 0
+		) {
+			menu.addItem((item) =>
+				item
+					.setTitle("识别文字 (OCR)")
+					.setIcon("scan-text")
+					.onClick(() => void this.ocrCard(card)),
+			);
+		}
 		menu.addItem((item) =>
 			item
 				.setTitle("编辑批注")
@@ -899,6 +914,71 @@ export class MarinMindReaderView extends FileView {
 				.onClick(() => this.deleteCard(card)),
 		);
 		menu.showAtMouseEvent(evt);
+	}
+
+	/**
+	 * 区域/手写卡 OCR：离屏高清渲染该页 → 逐矩形识别 → 写回 excerptText。
+	 * 渲染用 isolated 模式（不打断显示渲染也不被打断）；已有文字时确认覆盖；
+	 * 失败 Notice 明示首次需联网下载引擎。
+	 */
+	private async ocrCard(card: Card): Promise<void> {
+		// tesseract 的 worker/WASM 在移动端 Obsidian 不可用，入口直接禁用
+		if (Platform.isMobile) {
+			new Notice("移动端暂不支持 OCR");
+			return;
+		}
+		const pdf = this.pdf;
+		const page = card.page;
+		if (!pdf || page == null || card.rects.length === 0) {
+			return;
+		}
+		const notice = new Notice(
+			"正在识别文字…（首次使用需联网下载引擎与中文语言包，约 10-20MB）",
+			0,
+		);
+		try {
+			const size = await pdf.getPageSize(page);
+			// 目标物理宽约 2200px 的离屏渲染（renderTo 内部 16M 像素钳制自动兜底）
+			const cssScale = Math.max(1, 2200 / size.width);
+			const canvas = document.createElement("canvas");
+			await pdf.renderTo(canvas, page, cssScale, { isolated: true }).done;
+			if (canvas.width === 0) {
+				return; // 渲染期文档被销毁（done 静默返回）：放弃本次识别
+			}
+			const text = await ocrCanvasRegions(canvas, card.rects, (u) => {
+				if (u.progress != null && u.progress > 0 && u.progress < 1) {
+					notice.setMessage(`正在识别文字… ${Math.round(u.progress * 100)}%`);
+				}
+			});
+			if (!text) {
+				new Notice("未识别出文字（区域可能不含文本，或清晰度不足）");
+				return;
+			}
+			const apply = () => {
+				const updated = this.plugin.cards.update(card.id, { excerptText: text });
+				if (updated && updated.page != null) {
+					this.excerptLayers.get(updated.page)?.updateCardSnapshot(updated);
+				}
+				new Notice("已识别文字并写入卡片（复习/脑图自动显示该文本）");
+			};
+			if (card.excerptText) {
+				new ConfirmModal(
+					this.app,
+					"覆盖已有识别文字？",
+					"该卡片已有摘录文字，OCR 结果将替换它。",
+					apply,
+				).open();
+			} else {
+				apply();
+			}
+		} catch (err) {
+			console.error("[MarinMind] OCR 失败", err);
+			new Notice(
+				"OCR 失败：首次使用需联网下载引擎（约 10-20MB），请检查网络或代理后重试",
+			);
+		} finally {
+			notice.hide();
+		}
 	}
 
 	/** 把卡片加入脑图：选图器（可就地新建）→ 根节点区顺延落位为根节点 */

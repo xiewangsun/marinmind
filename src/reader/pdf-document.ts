@@ -94,11 +94,21 @@ export class PdfDocument {
 	 * 渲染第 pageNumber 页到 canvas。
 	 *
 	 * @param cssScale CSS 像素缩放（决定页面在页面布局中的显示尺寸）
+	 * @param opts.isolated 隔离渲染（OCR 离屏高清渲染用）：不取消同页在途任务、
+	 *   也不注册 inFlight——与显示渲染互不抢占（pdf.js 允许同页并发渲染到不同 canvas）
+	 *
 	 * 内部乘以 dpr 提升清晰度；总像素超上限时按比例回缩渲染精度（CSS 尺寸不变）。
 	 */
-	renderTo(canvas: HTMLCanvasElement, pageNumber: number, cssScale: number): RenderTicket {
+	renderTo(
+		canvas: HTMLCanvasElement,
+		pageNumber: number,
+		cssScale: number,
+		opts?: { isolated?: boolean },
+	): RenderTicket {
 		// 取消同页在途任务（快速缩放/翻页场景）
-		this.inFlight.get(pageNumber)?.cancel();
+		if (!opts?.isolated) {
+			this.inFlight.get(pageNumber)?.cancel();
+		}
 
 		let task: PdfRenderTask | undefined;
 		let cancelled = false;
@@ -127,7 +137,9 @@ export class PdfDocument {
 					throw new Error("无法获取 canvas 2d 上下文");
 				}
 				task = page.render({ canvasContext: ctx, viewport });
-				this.inFlight.set(pageNumber, task);
+				if (!opts?.isolated) {
+					this.inFlight.set(pageNumber, task);
+				}
 				await task.promise;
 			} catch (err) {
 				if (!isCancellation(err)) {
