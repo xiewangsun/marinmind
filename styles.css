@@ -116,3 +116,193 @@
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 }
+
+/* ===== 复习视图（闪卡） ===== */
+
+/* 根容器：纵向居中滚动 */
+.marinmind-review {
+	height: 100%;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding: 2.5em 1em;
+	box-sizing: border-box;
+}
+
+.marinmind-review-stage {
+	width: 100%;
+	max-width: 640px;
+	display: flex;
+	flex-direction: column;
+	gap: 1em;
+}
+
+/* 出处/进度行 */
+.marinmind-review-meta {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	text-align: center;
+}
+
+/* 卡片盒：正面摘录 +（翻面后）背面批注/出处 */
+.marinmind-review-card {
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	padding: 2em;
+	min-height: 12em;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+}
+
+.marinmind-review-excerpt {
+	font-size: 1.15em;
+	line-height: 1.7;
+	white-space: pre-wrap;
+}
+
+/* 占位/次要文字 */
+.marinmind-review-placeholder {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+/* 背面：与正面虚线分隔 */
+.marinmind-review-back {
+	margin-top: 1.5em;
+	padding-top: 1.25em;
+	border-top: 1px dashed var(--background-modifier-border);
+}
+
+.marinmind-review-note {
+	line-height: 1.7;
+}
+
+.marinmind-review-source {
+	margin-top: 1em;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+	flex-wrap: wrap;
+}
+
+/* 操作区：翻面按钮 / 四档评分按钮 */
+.marinmind-review-actions {
+	display: flex;
+	gap: 0.75em;
+	justify-content: center;
+}
+
+.marinmind-review-btn {
+	flex: 1;
+	padding: 0.6em 0;
+	border: none;
+	border-radius: var(--radius-s, 4px);
+	background: var(--interactive-normal);
+	color: var(--text-normal);
+	font: inherit;
+	cursor: pointer;
+}
+
+.marinmind-review-btn:hover {
+	background: var(--interactive-hover);
+}
+
+/* again 档错误色、easy 档强调色，其余默认 */
+.marinmind-review-btn[data-grade="again"] {
+	color: var(--text-error);
+}
+
+.marinmind-review-btn[data-grade="easy"] {
+	color: var(--text-accent);
+}
+
+.marinmind-review-hint {
+	text-align: center;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
+/* 空态提示 */
+.marinmind-review-message {
+	text-align: center;
+	color: var(--text-muted);
+	padding: 3em 0;
+	display: flex;
+	flex-direction: column;
+	gap: 1em;
+	align-items: center;
+}
+
+/* 完成态：四格统计 */
+.marinmind-review-done {
+	text-align: center;
+	padding: 2em 0;
+	display: flex;
+	flex-direction: column;
+	gap: 1em;
+	align-items: center;
+}
+
+.marinmind-review-done-title {
+	font-size: 1.25em;
+	font-weight: 600;
+}
+
+.marinmind-review-stats {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 0.75em;
+	width: 100%;
+}
+
+.marinmind-review-stat {
+	padding: 1em 0.5em;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+}
+
+.marinmind-review-stat-num {
+	font-size: 1.6em;
+	font-weight: 600;
+}
+
+.marinmind-review-stat-label {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+/* 文字型动作按钮（再查一批 / 跳转原文） */
+.marinmind-review-link {
+	background: none;
+	border: none;
+	color: var(--text-accent);
+	font: inherit;
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+	padding: 0;
+}
+
+.marinmind-review-link:hover {
+	text-decoration: underline;
+}
+
+/* ===== 批注编辑弹窗 ===== */
+
+.marinmind-note-textarea {
+	width: 100%;
+	min-height: 8em;
+	resize: vertical;
+	box-sizing: border-box;
+	margin-bottom: 0.75em;
+}
+
+.marinmind-note-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5em;
+}

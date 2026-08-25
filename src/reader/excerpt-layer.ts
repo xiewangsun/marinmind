@@ -72,11 +72,19 @@ export class ExcerptLayer {
 			el.style.top = pos.top;
 			el.style.width = pos.width;
 			el.style.height = pos.height;
-			el.addEventListener("click", (evt) => this.cb.onHighlightClick(card, evt));
+			el.addEventListener("click", (evt) =>
+				// 从缓存回查最新快照（编辑批注后闭包里的旧对象会过期）
+				this.cb.onHighlightClick(this.cardsById.get(card.id) ?? card, evt),
+			);
 			this.pageView.overlayEl.appendChild(el);
 			els.push(el);
 		}
 		this.highlightEls.set(card.id, els);
+	}
+
+	/** 外部更新卡片（如编辑批注）后同步缓存（高亮位置不变，无需重摆 DOM） */
+	updateCardSnapshot(card: Card): void {
+		this.cardsById.set(card.id, card);
 	}
 
 	/** 删除卡片后即时移除高亮 */

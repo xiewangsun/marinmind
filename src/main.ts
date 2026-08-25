@@ -8,6 +8,7 @@ import { LinkRepository } from "./db/repositories/link-repo";
 import { ReviewRepository } from "./db/repositories/review-repo";
 import { MarinMindReaderView, READER_VIEW_TYPE } from "./reader/reader-view";
 import { PdfPickerModal } from "./reader/pdf-picker-modal";
+import { MarinMindReviewView, REVIEW_VIEW_TYPE } from "./review/review-view";
 
 /** 数据库文件在库内的位置：点开头目录不出现在文件列表，也不会被插件更新清除 */
 const DB_PATH = ".marinmind/marinmind.db";
@@ -16,8 +17,8 @@ const DB_PATH = ".marinmind/marinmind.db";
  * MarinMind 插件入口
  *
  * 定位：电子书阅读器 + 思维导图 + 学习卡"一站式学习工具"。
- * 当前阶段：SQLite 数据层 + PDF 阅读视图（区域摘录闭环）；
- * 后续模块（文字摘录、脑图、复习界面、多窗格工作区）逐步接入。
+ * 当前阶段：SQLite 数据层 + PDF 阅读视图（区域/文字摘录）+ 复习界面（闪卡）；
+ * 后续模块（脑图、多窗格工作区、OCR、备份）逐步接入。
  */
 export default class MarinMindPlugin extends Plugin {
 	db?: MarinMindDatabase;
@@ -42,6 +43,8 @@ export default class MarinMindPlugin extends Plugin {
 	async onload(): Promise<void> {
 		// 阅读视图（不 registerExtensions，不接管 PDF 默认打开方式）
 		this.registerView(READER_VIEW_TYPE, (leaf) => new MarinMindReaderView(leaf, this));
+		// 复习视图（闪卡）
+		this.registerView(REVIEW_VIEW_TYPE, (leaf) => new MarinMindReviewView(leaf, this));
 
 		// 功能区图标：打开 PDF 快速选择
 		this.addRibbonIcon("book-open", "MarinMind", () => {
@@ -53,6 +56,11 @@ export default class MarinMindPlugin extends Plugin {
 			id: "open-reader",
 			name: "打开 MarinMind 阅读器（选择 PDF）",
 			callback: () => this.openPdfPicker(),
+		});
+		this.addCommand({
+			id: "start-review",
+			name: "开始复习（到期闪卡）",
+			callback: () => void this.openReview(),
 		});
 		this.addCommand({
 			id: "open-workspace",
@@ -101,12 +109,30 @@ export default class MarinMindPlugin extends Plugin {
 		new PdfPickerModal(this.app, (file) => void this.openInReader(file)).open();
 	}
 
-	/** 在新标签页用阅读视图打开指定 PDF（setViewState 而非 openFile：后者会落入内置 PDF 视图） */
-	private async openInReader(file: TFile): Promise<void> {
+	/** 打开复习：复用已有复习标签页则激活并重启会话，否则新开标签页 */
+	private async openReview(): Promise<void> {
+		let leaf = this.app.workspace.getLeavesOfType(REVIEW_VIEW_TYPE)[0];
+		if (!leaf) {
+			leaf = this.app.workspace.getLeaf("tab");
+			await leaf.setViewState({ type: REVIEW_VIEW_TYPE });
+		}
+		this.app.workspace.setActiveLeaf(leaf, { focus: true });
+		// 后台标签页可能是延迟加载的占位视图，需先加载拿到真实 view
+		await leaf.loadIfDeferred();
+		if (leaf.view instanceof MarinMindReviewView) {
+			await leaf.view.startSession();
+		}
+	}
+
+	/**
+	 * 在新标签页用阅读视图打开指定 PDF（setViewState 而非 openFile：后者会落入内置 PDF 视图），
+	 * 可携带页码滚动定位（复习界面"跳转原文"入口）。
+	 */
+	async openInReader(file: TFile, page?: number): Promise<void> {
 		const leaf = this.app.workspace.getLeaf("tab");
 		await leaf.setViewState({
 			type: READER_VIEW_TYPE,
-			state: { file: file.path },
+			state: { file: file.path, ...(page != null ? { page } : {}) },
 		});
 	}
 

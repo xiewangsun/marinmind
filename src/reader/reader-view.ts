@@ -1,8 +1,9 @@
 import { TFile, FileView, Menu, Notice, debounce } from "obsidian";
-import type { WorkspaceLeaf } from "obsidian";
+import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card, DocRect } from "../types";
 import { ExcerptLayer } from "./excerpt-layer";
+import { NoteEditModal } from "./note-edit-modal";
 import { PageView } from "./page-view";
 import { PdfDocument } from "./pdf-document";
 import { rectsRelativeToPage, type ViewportRect } from "./rect-utils";
@@ -37,6 +38,8 @@ export class MarinMindReaderView extends FileView {
 	private loadToken = 0;
 
 	private scrollEl: HTMLElement | null = null;
+	/** 待跳转的页码（setState 暂存，加载完成后滚动定位） */
+	private pendingPage: number | null = null;
 	/** fit 模式基准页宽（取第 1 页 scale=1 宽度） */
 	private basePageWidth = 0;
 	private scale = 1;
@@ -199,6 +202,21 @@ export class MarinMindReaderView extends FileView {
 		this.currentFilePath = null;
 	}
 
+	/**
+	 * 页码经 setViewState state 传入（跳转原文入口）。
+	 * 应用点必须在 await super.setState() 之后：同文件时 FileView 不会重跑
+	 * onLoadFile，若只在加载末尾应用，pending 永不消费；
+	 * state 无 page 时清空 pending（历史导航恢复不得重置用户滚动位置）。
+	 */
+	async setState(
+		state: { file?: string; page?: number } & Record<string, unknown>,
+		result: ViewStateResult,
+	): Promise<void> {
+		this.pendingPage = typeof state.page === "number" ? state.page : null;
+		await super.setState(state, result);
+		await this.applyPendingPage();
+	}
+
 	protected async onClose(): Promise<void> {
 		this.cleanupContent();
 		this.contentEl.empty();
@@ -246,6 +264,37 @@ export class MarinMindReaderView extends FileView {
 		for (const pv of this.pageViews) {
 			this.io.observe(pv.el);
 		}
+	}
+
+	/** 滚动定位到 pending 页（跳转原文入口；加载失败分支静默丢弃） */
+	private async applyPendingPage(): Promise<void> {
+		const page = this.pendingPage;
+		this.pendingPage = null;
+		if (page == null) {
+			return;
+		}
+		const pv = this.pageViews.find((p) => p.pageNumber === page);
+		const pdf = this.pdf;
+		const scroll = this.scrollEl;
+		if (!pv || !pdf || !scroll) {
+			return;
+		}
+		const token = this.loadToken;
+		try {
+			// 目标页可能仍是第 1 页占位尺寸：先校正再滚，消除大头偏差
+			pv.setExactSize(await pdf.getPageSize(page));
+		} catch {
+			return; // 文档已销毁 / 页码越界：丢弃
+		}
+		if (token !== this.loadToken) {
+			return;
+		}
+		pv.layout(this.scale);
+		// getBoundingClientRect 差值定位（offsetTop 的 offsetParent 链不含 scrollEl，不可靠）
+		const rootTop = scroll.getBoundingClientRect().top;
+		const pageTop = pv.el.getBoundingClientRect().top;
+		scroll.scrollTop += pageTop - rootTop - 12; // 12px 顶部留白（对应容器 padding）
+		// 目标页渲染交给 IntersectionObserver：滚动后自动进入预渲染区异步渲染
 	}
 
 	/** fit 模式的目标缩放（容器宽度不可用时保持当前值，等 onResize 再算） */
@@ -385,6 +434,33 @@ export class MarinMindReaderView extends FileView {
 			item.setTitle(`第 ${card.page} 页 · ${info}`).setIcon("square-pen").setDisabled(true),
 		);
 		menu.addSeparator();
+		// 闪卡开关：每次打开菜单即时查 DB（卡片可能在会话外被改变）
+		const isFlashcard = this.plugin.reviews.get(card.id)?.isFlashcard ?? false;
+		menu.addItem((item) =>
+			item
+				.setTitle(isFlashcard ? "取消闪卡" : "转为闪卡")
+				.setIcon(isFlashcard ? "layers" : "graduation-cap")
+				.onClick(() => {
+					if (isFlashcard) {
+						this.plugin.reviews.disable(card.id);
+					} else {
+						this.plugin.reviews.enable(card.id);
+					}
+				}),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle("编辑批注")
+				.setIcon("pencil")
+				.onClick(() => {
+					new NoteEditModal(this.app, card, (note) => {
+						const updated = this.plugin.cards.update(card.id, { note });
+						if (updated && updated.page != null) {
+							this.excerptLayers.get(updated.page)?.updateCardSnapshot(updated);
+						}
+					}).open();
+				}),
+		);
 		menu.addItem((item) =>
 			item
 				.setTitle("删除卡片")
