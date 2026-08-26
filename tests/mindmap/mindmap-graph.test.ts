@@ -3,18 +3,30 @@ import {
 	buildChildrenMap,
 	dropPlacement,
 	edgePath,
+	fitViewportTransform,
 	GAP_X,
+	GAP_Y,
 	isDescendantOrSelf,
+	layoutTree,
+	MIN_SCALE,
 	NODE_HEIGHT_EST,
 	NODE_WIDTH,
+	ROOT_GAP_Y,
 	suggestChildPosition,
 	suggestRootPosition,
+	visibleNodes,
 } from "../../src/mindmap/mindmap-graph";
 import type { GraphNode } from "../../src/mindmap/mindmap-graph";
 
 /** 最小节点工厂 */
-function makeNode(id: string, parentId: string | null, x = 0, y = 0): GraphNode {
-	return { id, parentId, x, y };
+function makeNode(
+	id: string,
+	parentId: string | null,
+	x = 0,
+	y = 0,
+	collapsed = false,
+): GraphNode {
+	return { id, parentId, x, y, collapsed };
 }
 
 describe("mindmap-graph 图纯逻辑", () => {
@@ -120,5 +132,120 @@ describe("mindmap-graph 图纯逻辑", () => {
 			x: 5,
 			y: 6,
 		});
+	});
+
+	// ---------- ⑨-C 折叠 / 自动布局 / 视口适配 ----------
+
+	it("visibleNodes：无折叠全部可见", () => {
+		const nodes = [makeNode("a", null), makeNode("b", "a"), makeNode("c", "b")];
+		expect(visibleNodes(nodes)).toEqual(new Set(["a", "b", "c"]));
+	});
+
+	it("visibleNodes：折叠节点自身可见，直接子与深层后代均隐藏", () => {
+		const nodes = [
+			makeNode("a", null),
+			makeNode("b", "a", 0, 0, true), // b 折叠
+			makeNode("c", "b"), // 直接子：隐藏
+			makeNode("d", "c"), // 孙：隐藏
+			makeNode("e", "a"), // b 的兄弟：不受影响
+		];
+		expect(visibleNodes(nodes)).toEqual(new Set(["a", "b", "e"]));
+	});
+
+	it("visibleNodes：孤儿（父不在集合内）视为根，可见", () => {
+		const nodes = [makeNode("a", null), makeNode("o", "missing-parent")];
+		expect(visibleNodes(nodes)).toEqual(new Set(["a", "o"]));
+	});
+
+	it("visibleNodes：成环脏数据不死循环，环上节点均可见（链上无折叠）", () => {
+		const nodes = [makeNode("a", "b"), makeNode("b", "a"), makeNode("r", null)];
+		expect(visibleNodes(nodes)).toEqual(new Set(["a", "b", "r"]));
+	});
+
+	it("layoutTree：深度对齐列 x，叶子纵序堆叠，父垂直居中于子块", () => {
+		// r → { b1, b2 }（均为叶）：b1 y=0、b2 y=H+GAP；r 居中于 [0, 2H+GAP]
+		const nodes = [makeNode("r", null), makeNode("b1", "r"), makeNode("b2", "r")];
+		const pos = layoutTree(nodes);
+		expect(pos.get("r")).toEqual({ x: 0, y: (2 * NODE_HEIGHT_EST + GAP_Y - NODE_HEIGHT_EST) / 2 });
+		expect(pos.get("b1")).toEqual({ x: NODE_WIDTH + GAP_X, y: 0 });
+		expect(pos.get("b2")).toEqual({
+			x: NODE_WIDTH + GAP_X,
+			y: NODE_HEIGHT_EST + GAP_Y,
+		});
+	});
+
+	it("layoutTree：深层后代列 x 随深度递增", () => {
+		const nodes = [
+			makeNode("a", null),
+			makeNode("b", "a"),
+			makeNode("c", "b"),
+			makeNode("d", "c"),
+		];
+		const pos = layoutTree(nodes);
+		expect(pos.get("a")!.x).toBe(0);
+		expect(pos.get("b")!.x).toBe(NODE_WIDTH + GAP_X);
+		expect(pos.get("c")!.x).toBe(2 * (NODE_WIDTH + GAP_X));
+		expect(pos.get("d")!.x).toBe(3 * (NODE_WIDTH + GAP_X));
+	});
+
+	it("layoutTree：多根（含孤儿）自上而下纵向堆叠 ROOT_GAP_Y", () => {
+		// 两棵单叶树：r1 块 [0, H]，r2 顶 = H + ROOT_GAP_Y；孤儿 o 视为根继续顺延
+		const nodes = [
+			makeNode("r1", null),
+			makeNode("r2", null),
+			makeNode("o", "missing-parent"),
+		];
+		const pos = layoutTree(nodes);
+		expect(pos.get("r1")!.y).toBe(0);
+		expect(pos.get("r2")!.y).toBe(NODE_HEIGHT_EST + ROOT_GAP_Y);
+		expect(pos.get("o")!.y).toBe(2 * (NODE_HEIGHT_EST + ROOT_GAP_Y));
+	});
+
+	it("layoutTree：空图返回空 Map", () => {
+		expect(layoutTree([]).size).toBe(0);
+	});
+
+	it("layoutTree：父子成环脏数据不死循环（环上节点不入结果，保留旧坐标）", () => {
+		const nodes = [
+			makeNode("a", "b"),
+			makeNode("b", "a"),
+			makeNode("r", null), // 干净根照常布局
+		];
+		const pos = layoutTree(nodes);
+		expect(pos.has("a")).toBe(false);
+		expect(pos.has("b")).toBe(false);
+		expect(pos.get("r")).toEqual({ x: 0, y: 0 });
+	});
+
+	it("fitViewportTransform：小包围盒不放大（scale=1），居中", () => {
+		const t = fitViewportTransform(
+			{ minX: 0, minY: 0, maxX: 100, maxY: 100 },
+			{ width: 1000, height: 800 },
+			0,
+		);
+		expect(t.scale).toBe(1);
+		expect(t.tx).toBe((1000 - 100) / 2);
+		expect(t.ty).toBe((800 - 100) / 2);
+	});
+
+	it("fitViewportTransform：大包围盒按可用区域缩小适配（留 padding）", () => {
+		const t = fitViewportTransform(
+			{ minX: 0, minY: 0, maxX: 2000, maxY: 100 },
+			{ width: 1000, height: 800 },
+			50,
+		);
+		// availW=900、availH=700 → scale = min(1, 900/2000, 700/100) = 0.45
+		expect(t.scale).toBe(0.45);
+		expect(t.tx).toBe((1000 - 2000 * 0.45) / 2);
+		expect(t.ty).toBe((800 - 100 * 0.45) / 2);
+	});
+
+	it("fitViewportTransform：极小视口夹到 MIN_SCALE 下限", () => {
+		const t = fitViewportTransform(
+			{ minX: 0, minY: 0, maxX: 100000, maxY: 100000 },
+			{ width: 100, height: 100 },
+			10,
+		);
+		expect(t.scale).toBe(MIN_SCALE);
 	});
 });

@@ -6,10 +6,18 @@ import { TextPromptModal } from "../reader/note-edit-modal";
 import { CardPickerModal } from "./card-picker-modal";
 import { ConfirmModal } from "./confirm-modal";
 import {
+	buildChildrenMap,
 	dropPlacement,
 	edgePath,
+	fitViewportTransform,
 	isDescendantOrSelf,
+	layoutTree,
+	MAX_SCALE,
+	MIN_SCALE,
+	NODE_HEIGHT_EST,
+	NODE_WIDTH,
 	suggestRootPosition,
+	visibleNodes,
 } from "./mindmap-graph";
 import { MindmapPickerModal } from "./mindmap-picker-modal";
 
@@ -43,9 +51,6 @@ export function clearMindmapDropHints(): void {
 	}
 }
 
-/** 缩放边界 */
-const MIN_SCALE = 0.25;
-const MAX_SCALE = 2.5;
 /** Ctrl+滚轮缩放的指数步进系数 */
 const ZOOM_SENSITIVITY = 0.0015;
 /** 拖拽判定阈值：位移超过该值才算拖动（否则视为点击/右键取消） */
@@ -109,9 +114,10 @@ export class MarinMindMindmapView extends ItemView {
 		super(leaf);
 		this.plugin = plugin;
 
-		// 工具栏：添加已有卡片 / 新建文字卡片 / 手动刷新（跨视图改卡后同步）
+		// 工具栏：添加已有卡片 / 新建文字卡片 / 自动布局 / 手动刷新（跨视图改卡后同步）
 		this.addAction("list-plus", "添加卡片", () => this.openCardPicker());
 		this.addAction("plus", "新建文字卡片", () => this.createTextCard());
+		this.addAction("layout-template", "自动布局", () => this.autoLayout());
 		this.addAction("rotate-cw", "刷新", () => this.refresh());
 	}
 
@@ -252,6 +258,72 @@ export class MarinMindMindmapView extends ItemView {
 		new MindmapPickerModal(this.app, this.plugin, (map) => this.loadMap(map.id)).open();
 	}
 
+	// ---------- 自动布局（⑨-C） ----------
+
+	/**
+	 * 一键自动布局：树形层级整列（layoutTree 纯函数）→ applyLayout 单事务写回 →
+	 * 全量重拉 → 视口适配。覆盖全部节点手动位置（含折叠隐藏的子树），先确认再执行。
+	 */
+	private autoLayout(): void {
+		if (!this.mapId) {
+			new Notice("请先打开或创建一张脑图");
+			return;
+		}
+		if (this.nodes.length === 0) {
+			new Notice("画布为空，无需布局");
+			return;
+		}
+		new ConfirmModal(
+			this.app,
+			"自动布局",
+			"将按树形层级重新排列全部节点（含折叠隐藏的子树），覆盖当前手动位置。继续吗？",
+			() => {
+				if (!this.mapId) {
+					return;
+				}
+				this.plugin.mindmaps.applyLayout(this.mapId, layoutTree(this.nodes));
+				this.loadMap(this.mapId);
+				this.fitToContent();
+			},
+		).open();
+	}
+
+	/** 视口适配：可见节点包围盒缩放并居中（折叠隐藏的子树不参与适配） */
+	private fitToContent(): void {
+		const vp = this.viewportEl;
+		if (!vp) {
+			return;
+		}
+		const visible = visibleNodes(this.nodes);
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+		for (const n of this.nodes) {
+			if (!visible.has(n.id)) {
+				continue;
+			}
+			const h = this.nodeEls.get(n.id)?.offsetHeight ?? NODE_HEIGHT_EST;
+			minX = Math.min(minX, n.x);
+			minY = Math.min(minY, n.y);
+			maxX = Math.max(maxX, n.x + NODE_WIDTH);
+			maxY = Math.max(maxY, n.y + h);
+		}
+		if (minX === Infinity) {
+			return; // 无可见节点
+		}
+		const rect = vp.getBoundingClientRect();
+		const t = fitViewportTransform(
+			{ minX, minY, maxX, maxY },
+			{ width: rect.width, height: rect.height },
+			40,
+		);
+		this.tx = t.tx;
+		this.ty = t.ty;
+		this.scale = t.scale;
+		this.applyTransform();
+	}
+
 	// ---------- 渲染 ----------
 
 	/** 一次性搭好 header + viewport + world + svg + 提示条骨架（onOpen 调用） */
@@ -287,13 +359,13 @@ export class MarinMindMindmapView extends ItemView {
 		this.emptyEl.textContent = "画布空白：双击新建文字卡片，或用右上角工具栏添加卡片";
 
 		const hint = this.contentEl.createDiv({ cls: "marinmind-mm-hint" });
-		hint.textContent = "拖节点到另一节点=连线（挂为子节点）· 拖空白=平移 · Ctrl+滚轮=缩放 · 双击空白=新建卡片 · 右键节点=更多操作";
+		hint.textContent = "拖节点到另一节点=连线（挂为子节点）· 拖空白=平移 · Ctrl+滚轮=缩放 · 双击空白=新建卡片 · 节点右缘 ▾=折叠/展开子树 · 右键节点=更多操作";
 
 		this.registerCanvasEvents();
 		this.applyTransform();
 	}
 
-	/** 全量重建 world 内的节点与连线（loadMap / 刷新） */
+	/** 全量重建 world 内的节点与连线（loadMap / 刷新；折叠隐藏的节点不建 DOM） */
 	private rebuildWorld(): void {
 		if (!this.worldEl) {
 			return;
@@ -305,7 +377,11 @@ export class MarinMindMindmapView extends ItemView {
 				child.remove();
 			}
 		}
+		const visible = visibleNodes(this.nodes);
 		for (const node of this.nodes) {
+			if (!visible.has(node.id)) {
+				continue;
+			}
 			this.createNodeEl(node);
 		}
 		this.drawEdges();
@@ -341,8 +417,63 @@ export class MarinMindMindmapView extends ItemView {
 			: "手工";
 		el.appendChild(meta);
 
+		// 折叠开关（仅有子节点的节点显示）：chevron + 折叠时的后代计数。
+		// pointerdown/click 双 stopPropagation：不触发节点拖拽与画布平移/双击。
+		if (this.nodes.some((n) => n.parentId === node.id)) {
+			const toggle = document.createElement("button");
+			toggle.className = "marinmind-mm-toggle";
+			toggle.dataset.collapsed = node.collapsed ? "1" : "0";
+			toggle.setAttribute(
+				"aria-label",
+				node.collapsed ? "展开子树" : "折叠子树",
+			);
+			toggle.textContent = node.collapsed
+				? `▸ ${this.descendantCount(node.id)}`
+				: "▾";
+			toggle.addEventListener("pointerdown", (evt) => evt.stopPropagation());
+			toggle.addEventListener("click", (evt) => {
+				evt.stopPropagation();
+				this.toggleCollapsed(node.id);
+			});
+			el.appendChild(toggle);
+		}
+
 		world.appendChild(el);
 		this.nodeEls.set(node.id, el);
+	}
+
+	/** 全部后代数（折叠徽标计数用，含折叠隐藏的后代） */
+	private descendantCount(nodeId: string): number {
+		const childrenMap = buildChildrenMap(this.nodes);
+		const visited = new Set<string>([nodeId]);
+		let count = 0;
+		const stack = [...(childrenMap.get(nodeId) ?? [])];
+		while (stack.length > 0) {
+			const cur = stack.pop()!;
+			if (visited.has(cur.id)) {
+				continue; // 脏数据成环防御
+			}
+			visited.add(cur.id);
+			count += 1;
+			stack.push(...(childrenMap.get(cur.id) ?? []));
+		}
+		return count;
+	}
+
+	/**
+	 * 切换子树折叠态：写库持久化（schema v3）后全量重拉重建。
+	 * loadMap 不触碰 tx/ty/scale——平移缩放视图保持不变。
+	 */
+	private toggleCollapsed(nodeId: string): void {
+		if (!this.mapId) {
+			return;
+		}
+		const node = this.nodes.find((n) => n.id === nodeId);
+		if (!node) {
+			return;
+		}
+		this.plugin.mindmaps.setCollapsed(nodeId, !node.collapsed);
+		this.loadMap(this.mapId);
 	}
 
 	/** 节点显示文本：批注 > 摘录文字 > 形态占位 */
@@ -356,7 +487,7 @@ export class MarinMindMindmapView extends ItemView {
 		return card.excerptType === "area" ? "（区域摘录）" : `（${card.excerptType} 摘录）`;
 	}
 
-	/** 全量重画连线（父右缘中点 → 子左缘中点的三次贝塞尔） */
+	/** 全量重画连线（父右缘中点 → 子左缘中点的三次贝塞尔）；任一端被折叠隐藏的边跳过 */
 	private drawEdges(): void {
 		const svg = this.edgesSvg;
 		if (!svg) {
@@ -364,12 +495,13 @@ export class MarinMindMindmapView extends ItemView {
 		}
 		svg.replaceChildren();
 		const byId = new Map(this.nodes.map((n) => [n.id, n]));
+		const visible = visibleNodes(this.nodes);
 		for (const n of this.nodes) {
-			if (!n.parentId) {
+			if (!n.parentId || !visible.has(n.id)) {
 				continue;
 			}
 			const parent = byId.get(n.parentId);
-			if (!parent) {
+			if (!parent || !visible.has(parent.id)) {
 				continue;
 			}
 			const path = document.createElementNS("http://www.w3.org/2000/svg", "path");

@@ -28,6 +28,7 @@ interface NodeJoinRow extends CardRow {
 	node_parent_id: string | null;
 	node_x: number;
 	node_y: number;
+	node_collapsed: number;
 	node_created_at: number;
 }
 
@@ -130,6 +131,7 @@ export class MindmapRepository {
 			parentId,
 			x: Math.round(x),
 			y: Math.round(y),
+			collapsed: false, // DB 侧 DEFAULT 0，新节点一律展开
 			createdAt: now(),
 		};
 		this.db.tx(() => {
@@ -153,6 +155,7 @@ export class MindmapRepository {
 			parent_id: string | null;
 			x: number;
 			y: number;
+			collapsed: number;
 			created_at: number;
 		}>("SELECT * FROM mindmap_nodes WHERE id = ?", [nodeId]);
 		if (!row) {
@@ -165,6 +168,7 @@ export class MindmapRepository {
 			parentId: row.parent_id,
 			x: row.x,
 			y: row.y,
+			collapsed: row.collapsed === 1,
 			createdAt: row.created_at,
 		};
 	}
@@ -222,7 +226,7 @@ export class MindmapRepository {
 		const rows = this.db.all<NodeJoinRow>(
 			`SELECT n.id AS node_id, n.map_id AS node_map_id, n.card_id AS node_card_id,
 			        n.parent_id AS node_parent_id, n.x AS node_x, n.y AS node_y,
-			        n.created_at AS node_created_at,
+			        n.collapsed AS node_collapsed, n.created_at AS node_created_at,
 			        c.id, c.document_id, c.page, c.rects, c.excerpt_type, c.excerpt_text,
 			        c.excerpt_ref, c.note, c.color, c.tags, c.created_at, c.updated_at
 			 FROM mindmap_nodes n JOIN cards c ON c.id = n.card_id
@@ -237,8 +241,32 @@ export class MindmapRepository {
 			parentId: row.node_parent_id,
 			x: row.node_x,
 			y: row.node_y,
+			collapsed: row.node_collapsed === 1,
 			createdAt: row.node_created_at,
 			card: mapRowToCard(row),
 		}));
+	}
+
+	/** 切换子树折叠态（折叠时后代不渲染；视图层重拉） */
+	setCollapsed(nodeId: string, collapsed: boolean): void {
+		this.db.run("UPDATE mindmap_nodes SET collapsed = ? WHERE id = ?", [
+			collapsed ? 1 : 0,
+			nodeId,
+		]);
+	}
+
+	/**
+	 * 自动布局批量写回：单事务逐条 UPDATE（中途失败整体回滚，不留半布局）。
+	 * 只更新给定 id 的坐标，图内其余节点不动。
+	 */
+	applyLayout(mapId: string, positions: Map<string, { x: number; y: number }>): void {
+		this.db.tx(() => {
+			for (const [nodeId, pos] of positions) {
+				this.db.run(
+					"UPDATE mindmap_nodes SET x = ?, y = ? WHERE id = ? AND map_id = ?",
+					[Math.round(pos.x), Math.round(pos.y), nodeId, mapId],
+				);
+			}
+		});
 	}
 }

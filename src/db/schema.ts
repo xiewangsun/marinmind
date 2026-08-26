@@ -1,7 +1,7 @@
 import type { Database } from "sql.js";
 
 /** 当前 schema 版本（每新增一条迁移 +1，须与 MIGRATIONS 长度一致） */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 /**
  * 按版本顺序排列的迁移脚本：MIGRATIONS[i] 将库从版本 i 升级到 i+1。
@@ -79,6 +79,10 @@ export const MIGRATIONS: string[] = [
 	CREATE INDEX idx_mmindmap_nodes_map ON mindmap_nodes(map_id);
 	CREATE INDEX idx_mmindmap_nodes_parent ON mindmap_nodes(parent_id);
 	CREATE INDEX idx_mmindmap_nodes_card ON mindmap_nodes(card_id);
+	`,
+	// v2 → v3 脑图折叠态持久化：折叠是用户的组织成果，重启后保留
+	`
+	ALTER TABLE mindmap_nodes ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0;
 	`,
 ];
 

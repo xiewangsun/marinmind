@@ -474,6 +474,48 @@
 	font-size: var(--font-ui-smaller);
 }
 
+/* ===== 子树折叠开关（仅有子节点的节点显示，⑨-C） ===== */
+
+/* 悬停节点才显形（折叠态常显，带后代计数）；挂节点右缘外侧 */
+.marinmind-mm-toggle {
+	position: absolute;
+	right: -22px;
+	top: 50%;
+	transform: translateY(-50%);
+	min-width: 18px;
+	height: 20px;
+	padding: 0 3px;
+	box-sizing: border-box;
+	border: none;
+	border-radius: var(--radius-s, 4px);
+	background: transparent;
+	color: var(--text-faint);
+	font-size: 12px;
+	line-height: 1;
+	text-align: center;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.15s ease;
+	z-index: 2;
+}
+
+.marinmind-mm-node:hover .marinmind-mm-toggle,
+.marinmind-mm-toggle[data-collapsed="1"] {
+	opacity: 1;
+}
+
+.marinmind-mm-toggle:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+/* 折叠态：accent 色胶囊 + 后代计数（"▸ 3"），提示此处藏着子树 */
+.marinmind-mm-toggle[data-collapsed="1"] {
+	color: var(--interactive-accent);
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+}
+
 /* 空态提示（画布居中，不挡指针） */
 .marinmind-mm-empty {
 	position: absolute;

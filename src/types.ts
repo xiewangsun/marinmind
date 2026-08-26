@@ -72,6 +72,8 @@ export interface MindmapNode {
 	parentId: string | null;
 	x: number;
 	y: number;
+	/** 子树折叠态（v3）：折叠时后代不渲染，节点显示子树计数徽标 */
+	collapsed: boolean;
 	createdAt: number;
 }
 
