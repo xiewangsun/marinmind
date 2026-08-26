@@ -1,4 +1,4 @@
-import { ItemView, Menu, Notice, TFile } from "obsidian";
+import { ItemView, Menu, Notice } from "obsidian";
 import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card, MindmapNodeWithCard } from "../types";
@@ -706,7 +706,10 @@ export class MarinMindMindmapView extends ItemView {
 		menu.addSeparator();
 		if (card.documentId && card.page != null) {
 			menu.addItem((item) =>
-				item.setTitle("跳转原文").setIcon("book-open").onClick(() => void this.jumpToSource(card)),
+				item
+					.setTitle("跳转原文")
+					.setIcon("book-open")
+					.onClick(() => void this.plugin.openCardSource(card)),
 			);
 		}
 		menu.addItem((item) =>
@@ -889,16 +892,5 @@ export class MarinMindMindmapView extends ItemView {
 				this.showPicker();
 			},
 		).open();
-	}
-
-	/** 跳转原文：打开阅读器并滚动到卡片所在页（文档/文件缺失时 Notice 降级） */
-	private async jumpToSource(card: Card): Promise<void> {
-		const doc = card.documentId ? this.plugin.documents.get(card.documentId) : undefined;
-		const file = doc ? this.app.vault.getAbstractFileByPath(doc.filePath) : null;
-		if (!(file instanceof TFile)) {
-			new Notice("原文文件不在当前库中，无法跳转");
-			return;
-		}
-		await this.plugin.openInReader(file, card.page ?? undefined);
 	}
 }

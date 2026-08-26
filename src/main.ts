@@ -18,6 +18,7 @@ import { MarinMindReviewView, REVIEW_VIEW_TYPE } from "./review/review-view";
 import { exportBackup, promptImportBackup } from "./backup/backup-service";
 import { AttachmentStore } from "./attachments/attachment-store";
 import { DB_PATH } from "./constants";
+import type { Card } from "./types";
 
 /** 工作区预设：study = 阅读 + 复习；research = 阅读 + 脑图 */
 type WorkspaceMode = "study" | "research";
@@ -184,15 +185,33 @@ export default class MarinMindPlugin extends Plugin {
 
 	/**
 	 * 在新标签页用阅读视图打开指定 PDF（setViewState 而非 openFile：后者会落入内置 PDF 视图），
-	 * 可携带页码滚动定位（复习界面"跳转原文"入口）。返回所在 leaf（工作区布局复用）。
+	 * 可携带页码与卡片 id 滚动定位（复习/脑图"跳转原文"入口）。返回所在 leaf（工作区布局复用）。
 	 */
-	async openInReader(file: TFile, page?: number): Promise<WorkspaceLeaf> {
+	async openInReader(file: TFile, page?: number, cardId?: string): Promise<WorkspaceLeaf> {
 		const leaf = this.app.workspace.getLeaf("tab");
 		await leaf.setViewState({
 			type: READER_VIEW_TYPE,
-			state: { file: file.path, ...(page != null ? { page } : {}) },
+			state: {
+				file: file.path,
+				...(page != null ? { page } : {}),
+				...(cardId != null ? { cardId } : {}),
+			},
 		});
 		return leaf;
+	}
+
+	/**
+	 * 跳转到卡片原文位置：打开阅读器并精确定位（页码 + 矩形滚动 + 高亮闪烁）。
+	 * 复习界面与脑图的共用入口（原先两处各写一份）。文档/文件缺失时 Notice 降级。
+	 */
+	async openCardSource(card: Card): Promise<void> {
+		const doc = card.documentId ? this.documents.get(card.documentId) : undefined;
+		const file = doc ? this.app.vault.getAbstractFileByPath(doc.filePath) : null;
+		if (!(file instanceof TFile)) {
+			new Notice("原文文件不在当前库中，无法跳转");
+			return;
+		}
+		await this.openInReader(file, card.page ?? undefined, card.id);
 	}
 
 	// ---------- 多窗格工作区 ----------

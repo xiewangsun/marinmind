@@ -89,3 +89,14 @@ export function rectsRelativeToPage(rects: ViewportRect[], pageBox: ViewportRect
 		}),
 	);
 }
+
+/**
+ * 跳转定位锚点：多矩形卡片取最上沿（min y），供精确定位滚动计算。
+ * 空矩形列表（photo/audio 卡）返回 null——调用方降级为只滚到页。
+ */
+export function jumpAnchorY(rects: DocRect[]): number | null {
+	if (rects.length === 0) {
+		return null;
+	}
+	return Math.min(...rects.map((r) => r.y));
+}

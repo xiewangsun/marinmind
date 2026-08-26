@@ -7,6 +7,14 @@ import type { MarinMindMindmapView } from "../mindmap/mindmap-view";
 import type { PageView } from "./page-view";
 import { isTinyNormRect, normRectToPercent, pointsToNormRect } from "./rect-utils";
 
+/** 通用闪烁反馈：加 marinmind-flash 类 1.5s 后移除（跳转定位视觉锚点） */
+export function flashEl(el: HTMLElement): void {
+	el.classList.remove("marinmind-flash");
+	void el.offsetWidth; // 强制 reflow：连续两次定位同一目标时重启动画
+	el.classList.add("marinmind-flash");
+	window.setTimeout(() => el.classList.remove("marinmind-flash"), 1500);
+}
+
 export interface ExcerptLayerCallbacks {
 	/** 当前是否处于区域摘录模式（拖拽框选） */
 	isExcerptMode(): boolean;
@@ -181,6 +189,18 @@ export class ExcerptLayer {
 	/** 外部更新卡片（如编辑批注）后同步缓存（高亮位置不变，无需重摆 DOM） */
 	updateCardSnapshot(card: Card): void {
 		this.cardsById.set(card.id, card);
+	}
+
+	/** 闪烁该卡的全部高亮块（跳转原文定位反馈）；命中任意块返回 true */
+	flashHighlights(cardId: string): boolean {
+		const els = this.highlightEls.get(cardId);
+		if (!els || els.length === 0) {
+			return false;
+		}
+		for (const el of els) {
+			flashEl(el);
+		}
+		return true;
 	}
 
 	/** 删除卡片后即时移除高亮 */

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	clampNormRect,
 	isTinyNormRect,
+	jumpAnchorY,
 	normRectToPercent,
 	pointsToNormRect,
 	rectsRelativeToPage,
@@ -62,5 +63,25 @@ describe("rect-utils 坐标换算", () => {
 		const page = { left: 0, top: 0, width: 100, height: 100 };
 		const [r] = rectsRelativeToPage([{ left: -10, top: -5, width: 130, height: 10 }], page);
 		expect(r).toEqual({ x: 0, y: 0, w: 1, h: 0.1 });
+	});
+});
+
+describe("跳转定位锚点 jumpAnchorY", () => {
+	it("空矩形列表返回 null（photo/audio 卡降级只滚到页）", () => {
+		expect(jumpAnchorY([])).toBeNull();
+	});
+
+	it("单矩形取其 y", () => {
+		expect(jumpAnchorY([{ x: 0.1, y: 0.4, w: 0.3, h: 0.1 }])).toBe(0.4);
+	});
+
+	it("多矩形取最上沿（min y）——文字摘录多行场景", () => {
+		expect(
+			jumpAnchorY([
+				{ x: 0.1, y: 0.6, w: 0.5, h: 0.05 },
+				{ x: 0.1, y: 0.2, w: 0.5, h: 0.05 },
+				{ x: 0.1, y: 0.4, w: 0.5, h: 0.05 },
+			]),
+		).toBe(0.2);
 	});
 });

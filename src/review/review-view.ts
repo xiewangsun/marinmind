@@ -1,4 +1,4 @@
-import { ItemView, Notice, TFile } from "obsidian";
+import { ItemView } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card, ReviewGrade } from "../types";
@@ -185,7 +185,7 @@ export class MarinMindReviewView extends ItemView {
 					cls: "marinmind-review-link",
 					text: "↗ 跳转原文",
 				});
-				jump.addEventListener("click", () => void this.jumpToSource(card));
+				jump.addEventListener("click", () => void this.plugin.openCardSource(card));
 			}
 		}
 
@@ -291,17 +291,6 @@ export class MarinMindReviewView extends ItemView {
 			}
 			return url;
 		});
-	}
-
-	/** 跳转原文：打开阅读器并滚动到卡片所在页（文档/文件缺失时 Notice 降级） */
-	private async jumpToSource(card: Card): Promise<void> {
-		const doc = card.documentId ? this.plugin.documents.get(card.documentId) : undefined;
-		const file = doc ? this.app.vault.getAbstractFileByPath(doc.filePath) : null;
-		if (!(file instanceof TFile)) {
-			new Notice("原文文件不在当前库中，无法跳转");
-			return;
-		}
-		await this.plugin.openInReader(file, card.page ?? undefined);
 	}
 
 	async onClose(): Promise<void> {

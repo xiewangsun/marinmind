@@ -708,3 +708,23 @@ audio.marinmind-review-media {
 	padding: 1.5em 0;
 	text-align: center;
 }
+
+/* ---------- 跳转原文定位闪烁（⑨-A） ---------- */
+
+/* 定位反馈：outline 脉冲 2 次（高亮块与媒体徽标共用） */
+@keyframes marinmind-highlight-flash {
+	0%,
+	100% {
+		outline: 2px solid transparent;
+		outline-offset: 1px;
+	}
+
+	50% {
+		outline: 2px solid var(--interactive-accent);
+		outline-offset: 2px;
+	}
+}
+
+.marinmind-flash {
+	animation: marinmind-highlight-flash 0.75s ease-in-out 2;
+}

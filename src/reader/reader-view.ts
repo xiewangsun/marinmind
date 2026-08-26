@@ -7,13 +7,13 @@ import { suggestRootPosition } from "../mindmap/mindmap-graph";
 import { ocrCanvasRegions } from "../ocr/ocr-service";
 import type { Card, DocRect } from "../types";
 import { AudioRecorder } from "./audio-recorder";
-import { ExcerptLayer } from "./excerpt-layer";
+import { ExcerptLayer, flashEl } from "./excerpt-layer";
 import { HandwriteLayer } from "./handwrite-layer";
 import { MediaPreviewModal } from "./media-preview-modal";
 import { TextPromptModal } from "./note-edit-modal";
 import { PageView } from "./page-view";
 import { PdfDocument } from "./pdf-document";
-import { rectsRelativeToPage, type ViewportRect } from "./rect-utils";
+import { jumpAnchorY, rectsRelativeToPage, type ViewportRect } from "./rect-utils";
 
 /** 阅读视图的 viewType（不与内置 'pdf' 冲突，不接管默认打开方式） */
 export const READER_VIEW_TYPE = "marinmind-reader";
@@ -79,6 +79,8 @@ export class MarinMindReaderView extends FileView {
 	private scrollEl: HTMLElement | null = null;
 	/** 待跳转的页码（setState 暂存，加载完成后滚动定位） */
 	private pendingPage: number | null = null;
+	/** 待定位的卡片（setState 暂存，滚到页后精滚到矩形并闪烁高亮） */
+	private pendingCardId: string | null = null;
 	/** fit 模式基准页宽（取第 1 页 scale=1 宽度） */
 	private basePageWidth = 0;
 	private scale = 1;
@@ -282,16 +284,17 @@ export class MarinMindReaderView extends FileView {
 	}
 
 	/**
-	 * 页码经 setViewState state 传入（跳转原文入口）。
+	 * 页码/卡片经 setViewState state 传入（跳转原文入口）。
 	 * 应用点必须在 await super.setState() 之后：同文件时 FileView 不会重跑
 	 * onLoadFile，若只在加载末尾应用，pending 永不消费；
 	 * state 无 page 时清空 pending（历史导航恢复不得重置用户滚动位置）。
 	 */
 	async setState(
-		state: { file?: string; page?: number } & Record<string, unknown>,
+		state: { file?: string; page?: number; cardId?: string } & Record<string, unknown>,
 		result: ViewStateResult,
 	): Promise<void> {
 		this.pendingPage = typeof state.page === "number" ? state.page : null;
+		this.pendingCardId = typeof state.cardId === "string" ? state.cardId : null;
 		await super.setState(state, result);
 		await this.applyPendingPage();
 	}
@@ -345,10 +348,12 @@ export class MarinMindReaderView extends FileView {
 		}
 	}
 
-	/** 滚动定位到 pending 页（跳转原文入口；加载失败分支静默丢弃） */
+	/** 滚动定位到 pending 页（跳转原文入口；加载失败分支静默丢弃），再精确定位卡片 */
 	private async applyPendingPage(): Promise<void> {
 		const page = this.pendingPage;
+		const cardId = this.pendingCardId;
 		this.pendingPage = null;
+		this.pendingCardId = null;
 		if (page == null) {
 			return;
 		}
@@ -373,7 +378,44 @@ export class MarinMindReaderView extends FileView {
 		const rootTop = scroll.getBoundingClientRect().top;
 		const pageTop = pv.el.getBoundingClientRect().top;
 		scroll.scrollTop += pageTop - rootTop - 12; // 12px 顶部留白（对应容器 padding）
+		if (cardId) {
+			this.locateCard(cardId, pv, scroll);
+		}
 		// 目标页渲染交给 IntersectionObserver：滚动后自动进入预渲染区异步渲染
+	}
+
+	/**
+	 * 精确定位卡片：滚动到矩形上方约 1/4 视口处并闪烁高亮。
+	 * photo/audio 卡（无矩形）降级为闪烁页角徽标；卡片不属于当前文档时只滚到页。
+	 */
+	private locateCard(cardId: string, pv: PageView, scroll: HTMLElement): void {
+		const card = this.plugin.cards.get(cardId);
+		if (!card || card.documentId !== this.currentDocId) {
+			return;
+		}
+		const anchor = jumpAnchorY(card.rects);
+		if (anchor == null) {
+			// 无矩形（照片/语音卡）：闪页角徽标作为视觉锚点
+			if (card.page != null) {
+				this.flashMediaBadge(card.page);
+			}
+			return;
+		}
+		// 锚点 = 页内归一化 y × 页高（layout 后的实测高度），目标让它落在视口上部约 1/4 处
+		const anchorPx = pv.el.clientHeight * anchor;
+		const current = pv.el.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+		const target = Math.max(0, anchorPx - scroll.clientHeight * 0.25);
+		scroll.scrollTop += current + target;
+		this.excerptLayers.get(pv.pageNumber)?.flashHighlights(cardId);
+	}
+
+	/** 页角媒体徽标闪烁（photo/audio 卡跳转降级锚点） */
+	private flashMediaBadge(page: number): void {
+		const badge = this.mediaBadges.get(page);
+		if (!badge) {
+			return;
+		}
+		flashEl(badge);
 	}
 
 	/** fit 模式的目标缩放（容器宽度不可用时保持当前值，等 onResize 再算） */
