@@ -191,6 +191,18 @@ export class ExcerptLayer {
 		this.cardsById.set(card.id, card);
 	}
 
+	/**
+	 * 卡片变更统一入口（cardBus 事件驱动，⑨-B）：
+	 * 已登记的高亮只更新缓存；未登记（如另一标签页新建的摘录）则回显新增。
+	 */
+	syncCard(card: Card): void {
+		if (this.cardsById.has(card.id)) {
+			this.updateCardSnapshot(card);
+		} else {
+			this.addHighlight(card);
+		}
+	}
+
 	/** 闪烁该卡的全部高亮块（跳转原文定位反馈）；命中任意块返回 true */
 	flashHighlights(cardId: string): boolean {
 		const els = this.highlightEls.get(cardId);

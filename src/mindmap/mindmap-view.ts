@@ -97,10 +97,13 @@ export class MarinMindMindmapView extends ItemView {
 	private readonly nodeEls = new Map<string, HTMLElement>();
 
 	/** 世界变换：world.style.transform = translate(tx,ty) scale(s) */
+	/** 世界变换（纯内存不持久）：平移 + 缩放 */
 	private tx = 0;
 	private ty = 0;
 	private scale = 1;
 	private drag: DragState | null = null;
+	/** cardBus 退订器（onClose 统一退订防泄漏） */
+	private cardBusOffs: Array<() => void> = [];
 
 	constructor(leaf: WorkspaceLeaf, plugin: MarinMindPlugin) {
 		super(leaf);
@@ -126,6 +129,7 @@ export class MarinMindMindmapView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		activeViews.add(this); // 注册先于任何 await（拖放目标解析用）
+		this.subscribeCardBus();
 		await this.plugin.whenReady();
 		if (!this.plugin.db) {
 			this.contentEl.empty();
@@ -169,10 +173,45 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	protected async onClose(): Promise<void> {
+		for (const off of this.cardBusOffs) {
+			off();
+		}
+		this.cardBusOffs = [];
 		activeViews.delete(this);
 		this.clearDropHint();
 		this.drag = null;
 		this.nodeEls.clear();
+	}
+
+	// ---------- 卡片变更事件（跨视图同步，⑨-B） ----------
+
+	/** 订阅卡片变更/删除（回调只做内存与 DOM 更新，禁止写库——契约见 card-bus.ts） */
+	private subscribeCardBus(): void {
+		this.cardBusOffs.push(
+			this.plugin.cardBus.onCardChanged((card) => this.applyCardUpdate(card)),
+			this.plugin.cardBus.onCardRemoved((cardId) => this.applyCardRemoval(cardId)),
+		);
+	}
+
+	/** 卡片被改（批注/OCR 文本/转闪卡等）：图内命中节点就地更新文本，不动布局 */
+	private applyCardUpdate(card: Card): void {
+		const local = this.nodes.find((n) => n.cardId === card.id);
+		if (!local) {
+			return; // 不在当前图：与本视图无关
+		}
+		local.card = card;
+		const text = this.nodeEls.get(local.id)?.querySelector<HTMLElement>(".marinmind-mm-node-text");
+		if (text) {
+			text.textContent = this.nodeText(card);
+		}
+	}
+
+	/** 卡片被删：DB 级联已删节点行（SET NULL 上浮语义一致），本地同步移除节点 */
+	private applyCardRemoval(cardId: string): void {
+		const local = this.nodes.find((n) => n.cardId === cardId);
+		if (local) {
+			this.removeNodeLocal(local.id);
+		}
 	}
 
 	// ---------- 数据加载 ----------
@@ -746,33 +785,20 @@ export class MarinMindMindmapView extends ItemView {
 				.setTitle("删除卡片")
 				.setIcon("trash-2")
 				.onClick(() => {
+					// 节点移除由 cardBus 删除事件回环完成（DB 级联删行 + applyCardRemoval）
 					this.plugin.cards.delete(card.id);
-					this.removeNodeLocal(node.id);
 				}),
 		);
 		menu.showAtMouseEvent(evt);
 	}
 
-	/** 编辑批注后就地更新节点文本（不动布局尺寸重画连线） */
+	/** 编辑批注：只写库，节点文本就地更新由 cardBus 事件回环完成（⑨-B） */
 	private editNote(node: MindmapNodeWithCard): void {
 		new TextPromptModal(
 			this.app,
 			{ title: "编辑批注", initialText: node.card.note ?? "" },
 			(note) => {
-				const updated = this.plugin.cards.update(node.card.id, { note });
-				if (!updated) {
-					return;
-				}
-				const local = this.nodes.find((n) => n.id === node.id);
-				if (!local) {
-					return;
-				}
-				local.card = updated;
-				const el = this.nodeEls.get(node.id);
-				const text = el?.querySelector<HTMLElement>(".marinmind-mm-node-text");
-				if (text) {
-					text.textContent = this.nodeText(updated);
-				}
+				this.plugin.cards.update(node.card.id, { note });
 			},
 		).open();
 	}

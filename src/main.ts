@@ -17,6 +17,7 @@ import { PdfPickerModal } from "./reader/pdf-picker-modal";
 import { MarinMindReviewView, REVIEW_VIEW_TYPE } from "./review/review-view";
 import { exportBackup, promptImportBackup } from "./backup/backup-service";
 import { AttachmentStore } from "./attachments/attachment-store";
+import { CardEventBus } from "./events/card-bus";
 import { DB_PATH } from "./constants";
 import type { Card } from "./types";
 
@@ -39,6 +40,11 @@ export default class MarinMindPlugin extends Plugin {
 	mindmaps!: MindmapRepository;
 	/** 媒体附件仓（照片/手写 PNG/音频，uid 命名存 .marinmind/assets/） */
 	attachments!: AttachmentStore;
+	/**
+	 * 卡片变更事件总线：构造期同步创建（视图 constructor 即可订阅，先于 dbReady），
+	 * 注入 CardRepository 后所有写操作自动广播（订阅契约见 events/card-bus.ts）。
+	 */
+	readonly cardBus = new CardEventBus();
 
 	/** 数据层初始化 promise（失败在内部消化为 db 保持 undefined，不产生未处理拒绝） */
 	private readonly dbReady: Promise<void>;
@@ -126,7 +132,7 @@ export default class MarinMindPlugin extends Plugin {
 				wasmBinary,
 			});
 			this.documents = new DocumentRepository(this.db);
-			this.cards = new CardRepository(this.db);
+			this.cards = new CardRepository(this.db, this.cardBus);
 			this.links = new LinkRepository(this.db);
 			this.reviews = new ReviewRepository(this.db);
 			this.mindmaps = new MindmapRepository(this.db);

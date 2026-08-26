@@ -100,6 +100,9 @@ export class MarinMindReaderView extends FileView {
 	/** 互斥模式的两个工具栏按钮（状态同步用） */
 	private excerptBtn: HTMLElement | null = null;
 	private handwriteBtn: HTMLElement | null = null;
+	/** 卡片变更事件退订器（onClose 统一退订防泄漏） */
+	private cardBusOffs: Array<() => void> = [];
+
 	/** 滚动离开手写页后延迟提交（防抖） */
 	private readonly commitOffscreenSoon: () => void;
 
@@ -108,6 +111,11 @@ export class MarinMindReaderView extends FileView {
 	constructor(leaf: WorkspaceLeaf, plugin: MarinMindPlugin) {
 		super(leaf);
 		this.plugin = plugin;
+		// 卡片变更订阅（跨标签同步；回调只做 DOM/内存更新，禁止写库——契约见 card-bus.ts）
+		this.cardBusOffs.push(
+			plugin.cardBus.onCardChanged((card) => this.handleCardChanged(card)),
+			plugin.cardBus.onCardRemoved((cardId, last) => this.handleCardRemoved(cardId, last)),
+		);
 
 		// 工具栏：摘录开关 / 手写开关 / 插图 / 录音 / 放大 / 缩小 / 适应宽度
 		this.excerptBtn = this.addAction("square-pen", "区域摘录模式", () => {
@@ -300,8 +308,45 @@ export class MarinMindReaderView extends FileView {
 	}
 
 	protected async onClose(): Promise<void> {
+		for (const off of this.cardBusOffs) {
+			off();
+		}
+		this.cardBusOffs = [];
 		this.cleanupContent();
 		this.contentEl.empty();
+	}
+
+	// ---------- 卡片变更事件（跨标签同步，⑨-B） ----------
+
+	/**
+	 * 卡片创建/更新：本视图打开的文档才处理。
+	 * photo/audio 走页角徽标数据；其余走摘录层——已登记只更新缓存
+	 * （本标签写库的回环），未登记则回显（另一标签页新建的摘录）。
+	 */
+	private handleCardChanged(card: Card): void {
+		if (card.documentId !== this.currentDocId || card.page == null) {
+			return;
+		}
+		if (card.excerptType === "photo" || card.excerptType === "audio") {
+			const list = this.mediaCardsByPage.get(card.page);
+			const i = list?.findIndex((c) => c.id === card.id) ?? -1;
+			if (list && i >= 0) {
+				list[i] = card;
+			} else {
+				this.addMediaCard(card.page, card);
+			}
+			return;
+		}
+		this.excerptLayers.get(card.page)?.syncCard(card);
+	}
+
+	/** 卡片删除：移除高亮与徽标数据（cleanup 后各 Map 已清空，天然 no-op） */
+	private handleCardRemoved(_cardId: string, last: Card): void {
+		if (last.documentId !== this.currentDocId || last.page == null) {
+			return;
+		}
+		this.excerptLayers.get(last.page)?.removeHighlight(last.id);
+		this.removeMediaCard(last);
 	}
 
 	onResize(): void {
@@ -537,8 +582,8 @@ export class MarinMindReaderView extends FileView {
 					excerptRef: ref,
 					color: "green",
 				});
-				// cleanup 后 excerptLayers 已清空：卡片已在库中，重开文档自然回显
-				this.excerptLayers.get(page)?.addHighlight(card);
+				// 回显由 cardBus 事件回环完成（cleanup 后 excerptLayers 已清空则跳过，
+				// 重开文档自然回显）
 			})
 			.catch((err) => {
 				console.error("[MarinMind] 手写提交失败", err);
@@ -621,7 +666,8 @@ export class MarinMindReaderView extends FileView {
 				.arrayBuffer()
 				.then(async (bytes) => {
 					const ref = await this.plugin.attachments.save(bytes, imageExtOf(file.type));
-					const card = this.plugin.cards.create({
+					// 徽标回显由 cardBus 事件回环完成（本标签或另一标签打开同文档均生效）
+					this.plugin.cards.create({
 						documentId: docId,
 						page,
 						rects: [],
@@ -629,7 +675,6 @@ export class MarinMindReaderView extends FileView {
 						excerptRef: ref,
 						color: "pink",
 					});
-					this.addMediaCard(page, card);
 				})
 				.catch((err) => {
 					console.error("[MarinMind] 图片保存失败", err);
@@ -680,7 +725,8 @@ export class MarinMindReaderView extends FileView {
 				return;
 			}
 			const ref = await this.plugin.attachments.save(bytes, ext);
-			const card = this.plugin.cards.create({
+			// 徽标回显由 cardBus 事件回环完成
+			this.plugin.cards.create({
 				documentId: docId,
 				page,
 				rects: [],
@@ -688,7 +734,6 @@ export class MarinMindReaderView extends FileView {
 				excerptRef: ref,
 				color: "pink",
 			});
-			this.addMediaCard(page, card);
 			new Notice(`语音摘录已保存（第 ${page} 页）`);
 		} catch (err) {
 			console.error("[MarinMind] 录音保存失败", err);
@@ -792,7 +837,7 @@ export class MarinMindReaderView extends FileView {
 					.setIcon(card.excerptType === "audio" ? "mic" : "image")
 					.onClick(() => {
 						new MediaPreviewModal(this.app, this.plugin, card, {
-							onUpdated: (updated) => this.syncMediaCardSnapshot(updated),
+							// 批注/闪卡变更经 cardBus 事件同步；删除需发起方清附件
 							onDelete: (victim) => this.deleteCard(victim),
 						}).open();
 					}),
@@ -801,31 +846,19 @@ export class MarinMindReaderView extends FileView {
 		menu.showAtMouseEvent(evt);
 	}
 
-	/** 更新 mediaCardsByPage 里的卡片快照（编辑批注后） */
-	private syncMediaCardSnapshot(card: Card): void {
-		const list = this.mediaCardsByPage.get(card.page ?? -1);
-		if (!list) {
-			return;
-		}
-		const i = list.findIndex((c) => c.id === card.id);
-		if (i >= 0) {
-			list[i] = card;
-		}
-	}
-
 	/** 拖拽框选完成：创建 area 卡片并即时回显 */
 	private createAreaCard(pageNumber: number, rect: DocRect): void {
 		if (!this.currentDocId) {
 			return;
 		}
-		const card = this.plugin.cards.create({
+		// 高亮回显由 cardBus 事件回环完成
+		this.plugin.cards.create({
 			documentId: this.currentDocId,
 			page: pageNumber,
 			rects: [rect],
 			excerptType: "area",
 			color: "yellow",
 		});
-		this.excerptLayers.get(pageNumber)?.addHighlight(card);
 	}
 
 	/**
@@ -882,7 +915,8 @@ export class MarinMindReaderView extends FileView {
 		const pageBox = this.pageViews
 			.find((p) => p.pageNumber === page)!
 			.el.getBoundingClientRect();
-		const card = this.plugin.cards.create({
+		// 高亮回显由 cardBus 事件回环完成
+		this.plugin.cards.create({
 			documentId: this.currentDocId,
 			page,
 			rects: rectsRelativeToPage(rects, pageBox),
@@ -890,7 +924,6 @@ export class MarinMindReaderView extends FileView {
 			excerptText: text,
 			color: "blue",
 		});
-		this.excerptLayers.get(page)?.addHighlight(card);
 		sel.removeAllRanges();
 	}
 
@@ -941,10 +974,8 @@ export class MarinMindReaderView extends FileView {
 						this.app,
 						{ title: "编辑批注", initialText: card.note ?? "" },
 						(note) => {
-							const updated = this.plugin.cards.update(card.id, { note });
-							if (updated && updated.page != null) {
-								this.excerptLayers.get(updated.page)?.updateCardSnapshot(updated);
-							}
+							// 各视图同步由 cardBus 事件回环完成
+							this.plugin.cards.update(card.id, { note });
 						},
 					).open();
 				}),
@@ -997,10 +1028,8 @@ export class MarinMindReaderView extends FileView {
 				return;
 			}
 			const apply = () => {
-				const updated = this.plugin.cards.update(card.id, { excerptText: text });
-				if (updated && updated.page != null) {
-					this.excerptLayers.get(updated.page)?.updateCardSnapshot(updated);
-				}
+				// 各视图同步由 cardBus 事件回环完成
+				this.plugin.cards.update(card.id, { excerptText: text });
 				new Notice("已识别文字并写入卡片（复习/脑图自动显示该文本）");
 			};
 			if (card.excerptText) {
@@ -1041,11 +1070,8 @@ export class MarinMindReaderView extends FileView {
 	}
 
 	private deleteCard(card: Card): void {
+		// 高亮/徽标清理由 cardBus 事件回环完成（handleCardRemoved）
 		this.plugin.cards.delete(card.id);
-		if (card.page != null) {
-			this.excerptLayers.get(card.page)?.removeHighlight(card.id);
-		}
-		this.removeMediaCard(card);
 		// 附件随卡片级联删除：uid 唯一命名 ⇒ 一卡一附件（失败静默，下次清理兜底）
 		if (card.excerptRef) {
 			void this.plugin.attachments.remove(card.excerptRef).catch(() => undefined);

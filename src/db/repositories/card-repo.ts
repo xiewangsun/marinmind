@@ -1,6 +1,7 @@
 import type { MarinMindDatabase } from "../database";
 import type { Card, DocRect, ExcerptType } from "../../types";
 import { newId, now } from "../../utils";
+import type { CardEventBus } from "../../events/card-bus";
 
 /** cards 表的查询列（供其他仓储 join 复用） */
 const CARD_COLUMNS =
@@ -64,7 +65,14 @@ export interface CardPatch {
 
 /** 知识卡片仓储 */
 export class CardRepository {
-	constructor(private db: MarinMindDatabase) {}
+	/**
+	 * @param bus 可选事件总线：写方法成功后同步 emit（订阅方契约见 card-bus.ts——
+	 *   回调禁止写库）。注入而非仓储自建，便于测试与"内存库无总线"的旧行为兼容。
+	 */
+	constructor(
+		private db: MarinMindDatabase,
+		private bus?: CardEventBus,
+	) {}
 
 	/** 创建卡片，并同步生成默认复习状态（new、未启用闪卡） */
 	create(input: CreateCardInput): Card {
@@ -108,6 +116,7 @@ export class CardRepository {
 				[card.id, ts],
 			);
 		});
+		this.bus?.emitCardChanged(card);
 		return card;
 	}
 
@@ -149,16 +158,20 @@ export class CardRepository {
 				next.id,
 			],
 		);
+		this.bus?.emitCardChanged(next);
 		return next;
 	}
 
-	/** 删除卡片（复习状态、链接由外键级联删除） */
+	/** 删除卡片（复习状态、链接、脑图节点由外键级联删除） */
 	delete(id: string): boolean {
-		const existed = this.get(id) !== undefined;
-		if (existed) {
-			this.db.run("DELETE FROM cards WHERE id = ?", [id]);
+		const last = this.get(id);
+		if (!last) {
+			return false;
 		}
-		return existed;
+		this.db.run("DELETE FROM cards WHERE id = ?", [id]);
+		// 删除后已查不到，把删除前快照一并交给订阅方（DOM 清理需要 page 等信息）
+		this.bus?.emitCardRemoved(id, last);
+		return true;
 	}
 
 	/** 某文档下的全部卡片，按页码排序（无页码的排最后） */

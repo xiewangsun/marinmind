@@ -4,6 +4,8 @@ import { CardRepository } from "../../src/db/repositories/card-repo";
 import { DocumentRepository } from "../../src/db/repositories/document-repo";
 import { LinkRepository } from "../../src/db/repositories/link-repo";
 import { ReviewRepository } from "../../src/db/repositories/review-repo";
+import { CardEventBus } from "../../src/events/card-bus";
+import type { Card } from "../../src/types";
 
 let db: MarinMindDatabase;
 let documents: DocumentRepository;
@@ -150,5 +152,50 @@ describe("复习仓储", () => {
 
 		reviews.disable(a.id);
 		expect(reviews.due(3000).map((c) => c.id)).toEqual([b.id]);
+	});
+});
+
+describe("卡片仓储 × CardEventBus（⑨-B 事件同步）", () => {
+	it("create/update 成功触发 changed，delete 命中触发 removed", () => {
+		const bus = new CardEventBus();
+		const wired = new CardRepository(db, bus);
+		const changed: string[] = [];
+		let removed: { id: string; last: Card } | null = null;
+		bus.onCardChanged((c) => changed.push(c.id));
+		bus.onCardRemoved((id, last) => (removed = { id, last }));
+
+		const card = wired.create({
+			documentId: null,
+			page: 1,
+			rects: [],
+			excerptType: "area",
+		});
+		expect(changed).toEqual([card.id]);
+		const updated = wired.update(card.id, { note: "批注" });
+		expect(changed).toEqual([card.id, card.id]);
+		expect(changed[1]).toBe(updated!.id);
+
+		expect(wired.delete(card.id)).toBe(true);
+		expect(removed!.id).toBe(card.id);
+		// last 是删除前快照：删除后已查不到，但事件里仍可读 note
+		expect(removed!.last.note).toBe("批注");
+	});
+
+	it("update 未命中 / delete 未命中不触发事件", () => {
+		const bus = new CardEventBus();
+		const wired = new CardRepository(db, bus);
+		let n = 0;
+		bus.onCardChanged(() => ++n);
+		bus.onCardRemoved(() => ++n);
+
+		expect(wired.update("不存在", { note: "x" })).toBeUndefined();
+		expect(wired.delete("不存在")).toBe(false);
+		expect(n).toBe(0);
+	});
+
+	it("未注入 bus 的仓储行为不变（兼容旧用法）", () => {
+		expect(() =>
+			cards.create({ documentId: null, page: 1, rects: [], excerptType: "area" }),
+		).not.toThrow();
 	});
 });

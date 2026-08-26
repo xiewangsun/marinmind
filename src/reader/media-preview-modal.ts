@@ -18,7 +18,8 @@ function mediaLabel(card: Card): string {
 /** 预览弹窗对宿主视图的回调（同步快照 / 删除联动徽标与附件） */
 export interface MediaPreviewHooks {
 	/** 卡片被修改（编辑批注 / 闪卡开关）后同步宿主缓存 */
-	onUpdated(card: Card): void;
+	/** 卡片更新回调（可选：cardBus 事件同步后一般无需，留作扩展） */
+	onUpdated?(card: Card): void;
 	/** 删除卡片（由宿主处理附件级联与徽标更新） */
 	onDelete(card: Card): void;
 }
@@ -89,7 +90,7 @@ export class MediaPreviewModal extends Modal {
 				}
 				const updated = this.plugin.cards.get(this.card.id);
 				if (updated) {
-					this.hooks.onUpdated(updated);
+					this.hooks.onUpdated?.(updated);
 				}
 				new Notice(isFlashcard ? "已取消闪卡" : "已转为闪卡");
 				this.close();
@@ -101,7 +102,7 @@ export class MediaPreviewModal extends Modal {
 				(note) => {
 					const updated = this.plugin.cards.update(this.card.id, { note });
 					if (updated) {
-						this.hooks.onUpdated(updated);
+						this.hooks.onUpdated?.(updated);
 						this.renderNote();
 					}
 				},
