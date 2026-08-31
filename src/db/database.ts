@@ -1,16 +1,9 @@
 import initSqlJs, { type Database } from "sql.js";
 import { applyMigrations } from "./schema";
+import type { StorageAdapter } from "../storage/adapter";
 
-/**
- * 持久化适配器：结构上与 Obsidian 的 DataAdapter 兼容（vault.adapter 可直接传入），
- * 测试中用内存实现替代，使数据层不依赖 obsidian 模块。
- */
-export interface StorageAdapter {
-	exists(path: string): Promise<boolean>;
-	mkdir(path: string): Promise<void>;
-	readBinary(path: string): Promise<ArrayBuffer>;
-	writeBinary(path: string, data: ArrayBuffer): Promise<void>;
-}
+// 兼容 re-export：历史引用方（测试 / 迁移期代码）仍从本模块取 StorageAdapter
+export type { StorageAdapter };
 
 /** SQL 绑定参数（对应 sql.js 的 SqlValue） */
 export type SqlParam = string | number | Uint8Array | null;

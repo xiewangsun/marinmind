@@ -1,0 +1,182 @@
+import type { Card, DocRect, NormPoint } from "../types";
+import { highlightFallbackColor, highlightLineColor } from "./highlight-colors";
+
+/**
+ * 区域/套索摘录的内容快照（⑳）：从已渲染的页面 canvas 裁剪摘录区域为图片，
+ * 存附件（excerptRef）——脑图节点与复习界面据此显示"选择的区域内容"而非占位文字，
+ * 与手写/照片同模式（一卡一附件）；摘录区域本身在页面上仍是矢量高亮（缩放不失真）。
+ * 编码（㉛）优先 WebP：体积约为 PNG 的 1/3~1/5 且支持 alpha（套索多边形外透明，
+ * JPEG 用不了）；iOS WKWebView 的 canvas 不支持编码 WebP（toBlob 静默回退 PNG），
+ * 故先探测能力、不支持则落回 PNG——扩展名跟随实际格式写入 excerptRef。
+ */
+
+/** 快照编码结果：bytes 为图片字节，ext 为实际格式（决定附件扩展名） */
+export interface SnapshotImage {
+	bytes: ArrayBuffer;
+	ext: "webp" | "png";
+}
+
+/** WebP 有损质量（0-1）：文字页区域 0.85 肉眼无损且体积显著小于 PNG */
+const WEBP_QUALITY = 0.85;
+
+/** WebP 编码能力缓存（null = 尚未探测） */
+let webpSupported: boolean | null = null;
+
+/** 探测当前环境能否用 canvas 编码 WebP：不支持时 toDataURL 静默回退 PNG，以前缀判别 */
+function canEncodeWebp(): boolean {
+	if (webpSupported === null) {
+		const probe = document.createElement("canvas");
+		probe.width = 1;
+		probe.height = 1;
+		webpSupported = probe.toDataURL("image/webp").startsWith("data:image/webp");
+	}
+	return webpSupported;
+}
+
+/** canvas → 图片字节（WebP 优先，环境不支持回退 PNG）；ext 随实际格式返回 */
+function encodeCanvas(canvas: HTMLCanvasElement): Promise<SnapshotImage> {
+	const useWebp = canEncodeWebp();
+	return new Promise((resolve, reject) => {
+		canvas.toBlob(
+			(blob) => {
+				if (!blob) {
+					reject(new Error(`画布导出 ${useWebp ? "WebP" : "PNG"} 失败`));
+					return;
+				}
+				void blob.arrayBuffer().then(
+					(bytes) => resolve({ bytes, ext: useWebp ? "webp" : "png" }),
+					reject,
+				);
+			},
+			useWebp ? "image/webp" : "image/png",
+			useWebp ? WEBP_QUALITY : undefined,
+		);
+	});
+}
+
+/** 画布像素矩形（源画布上的裁剪窗口） */
+export interface PixelRect {
+	sx: number;
+	sy: number;
+	sw: number;
+	sh: number;
+}
+
+/**
+ * 归一化矩形 → 画布像素矩形（clamp 进画布、四舍五入；宽高至少 1px 防空裁剪）。
+ * canvas 内部像素含 dpr，与归一化坐标天然同基准（都是"相对整页"的比例）。
+ */
+export function pixelRect(rect: DocRect, canvasW: number, canvasH: number): PixelRect {
+	const x1 = Math.max(0, Math.min(canvasW, rect.x * canvasW));
+	const y1 = Math.max(0, Math.min(canvasH, rect.y * canvasH));
+	const x2 = Math.max(0, Math.min(canvasW, (rect.x + rect.w) * canvasW));
+	const y2 = Math.max(0, Math.min(canvasH, (rect.y + rect.h) * canvasH));
+	return {
+		sx: Math.round(x1),
+		sy: Math.round(y1),
+		sw: Math.max(1, Math.round(x2 - x1)),
+		sh: Math.max(1, Math.round(y2 - y1)),
+	};
+}
+
+/** 归一化多边形顶点 → 画布像素顶点（套索轮廓按用户原始形状等比映射） */
+export function pixelPoints(
+	polygon: NormPoint[],
+	canvasW: number,
+	canvasH: number,
+): Array<{ x: number; y: number }> {
+	return polygon.map((p) => ({
+		x: p.x * canvasW,
+		y: p.y * canvasH,
+	}));
+}
+
+/**
+ * 从源画布裁剪摘录区域：
+ * - area：直接按包围盒裁剪；
+ * - lasso（polygon 非空）：先按原始轮廓 clip 再裁包围盒——多边形外的部分透明，
+ *   脑图/复习中保持"套住什么显示什么"的形状语义。
+ * 返回实际编码格式（WebP 优先，探测失败 PNG），扩展名由调用方写入附件路径。
+ */
+export async function cropRegionSnapshot(
+	source: HTMLCanvasElement,
+	rect: DocRect,
+	polygon: NormPoint[] | null,
+): Promise<SnapshotImage> {
+	const win = pixelRect(rect, source.width, source.height);
+	const out = document.createElement("canvas");
+	out.width = win.sw;
+	out.height = win.sh;
+	const ctx = out.getContext("2d");
+	if (!ctx) {
+		throw new Error("无法获取裁剪 canvas 2d 上下文");
+	}
+	if (polygon && polygon.length >= 3) {
+		ctx.save();
+		ctx.beginPath();
+		const pts = pixelPoints(polygon, source.width, source.height);
+		ctx.moveTo(pts[0].x - win.sx, pts[0].y - win.sy);
+		for (let i = 1; i < pts.length; i++) {
+			ctx.lineTo(pts[i].x - win.sx, pts[i].y - win.sy);
+		}
+		ctx.closePath();
+		ctx.clip();
+	}
+	ctx.drawImage(source, win.sx, win.sy, win.sw, win.sh, 0, 0, win.sw, win.sh);
+	if (polygon && polygon.length >= 3) {
+		ctx.restore();
+	}
+	return encodeCanvas(out);
+}
+
+/**
+ * 在渲染完成的页面画布上叠加卡片摘录区域（归一化坐标 → 画布内部像素，
+ * 天然 dpr 无关）。㊹ MN3 式线稿：**只描线不填充**——套索 polygon 描原始轮廓、
+ * 文字卡每行矩形底部画粗线（下划线）、其余形态描矩形边框；线色读 card.color
+ * （highlightLineColor：四色 + 存量旧色相同源）。复习溯源缩略图（context-preview）
+ * 与主页卡片预览弹窗共用，保证两处与阅读器观感一致。线宽随画布宽度等比
+ * 放大——高倍离屏渲染后经 CSS 缩小展示时描边仍可见。
+ */
+export function paintCardHighlights(canvas: HTMLCanvasElement, card: Card): void {
+	const ctx = canvas.getContext("2d");
+	if (!ctx) {
+		return;
+	}
+	const w = canvas.width;
+	const h = canvas.height;
+	const line = highlightLineColor(highlightFallbackColor(card));
+	// 套索轮廓：只描原始形状（与阅读器 SVG 描边回显一致）
+	if (card.polygon && card.polygon.length >= 3) {
+		ctx.beginPath();
+		const pts = pixelPoints(card.polygon, w, h);
+		pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
+		ctx.closePath();
+		ctx.strokeStyle = line;
+		ctx.lineWidth = Math.max(2, w / 300);
+		ctx.stroke();
+		return;
+	}
+	// 文字卡：每行矩形底部画下划线粗条（与阅读器下划线形态同观感）
+	if (card.excerptType === "text") {
+		for (const r of card.rects) {
+			const x = r.x * w;
+			const y = r.y * h;
+			const rw = r.w * w;
+			const rh = r.h * h;
+			const lw = Math.max(2.5, rh * 0.06, w / 500);
+			ctx.fillStyle = line;
+			ctx.fillRect(x, y + rh - lw, rw, lw);
+		}
+		return;
+	}
+	// 其余形态（区域/手写/留白）：只描矩形边框
+	for (const r of card.rects) {
+		const x = r.x * w;
+		const y = r.y * h;
+		const rw = r.w * w;
+		const rh = r.h * h;
+		ctx.strokeStyle = line;
+		ctx.lineWidth = Math.max(1.5, w / 400);
+		ctx.strokeRect(x, y, rw, rh);
+	}
+}

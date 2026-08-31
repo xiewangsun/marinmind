@@ -1,85 +1,94 @@
 import { Notice, Platform, TFile, TFolder } from "obsidian";
-import type { App, DataAdapter } from "obsidian";
-import { DB_PATH, ASSETS_DIR } from "../constants";
-import { SCHEMA_VERSION } from "../db/schema";
+import type { App } from "obsidian";
+import { ASSETS_SUBDIR, SNAPSHOT_DIR, SNAPSHOT_PREFIX } from "../constants";
 import { ConfirmModal } from "../mindmap/confirm-modal";
 import type MarinMindPlugin from "../main";
+import type { ListableStorageAdapter } from "../storage/vault-rooted-adapter";
+import { isAbsoluteFsPath } from "../storage/paths";
 import {
 	BACKUP_FORMAT,
 	BACKUP_VERSION,
 	buildBackupZip,
 	parseBackupZip,
+	parseLegacyBackupZip,
 	type BackupContent,
 	type BackupManifest,
+	type LegacyBackupContent,
 } from "./backup-zip";
-
-/** 备份导出目录（vault 内可见路径，便于用户拷走/同步） */
-export const BACKUP_DIR = "Backups/MarinMind";
-
-/** 导入前安全快照文件名前缀（存于 .marinmind/，只保留最近一份） */
-const SNAPSHOT_PREFIX = "pre-import-snapshot-";
+import { legacyDbBytesToNotes } from "../store/legacy-import";
 
 /**
- * 导出备份：SQLite 库 + 全部文档 PDF + 媒体附件 → 单个 .marginpkg（zip）。
- * 大库同步打包会短暂阻塞 UI（fflate 同步 API），先出 Notice 预告。
+ * 导出备份（㉚ md 存储版）：数据根 md 树 + 全部文档 PDF + 媒体附件 → 单个 .marginpkg（zip）。
+ * 先 flush 确保磁盘为内存最新，再从数据根读文件组包。大库同步打包会短暂阻塞 UI
+ * （fflate 同步 API），先出 Notice 预告。落点为插件设置"备份目录"。
  */
 export async function exportBackup(plugin: MarinMindPlugin): Promise<void> {
 	await plugin.whenReady();
-	if (!plugin.db) {
-		new Notice("MarinMind：数据库未就绪，无法导出");
+	if (!plugin.store) {
+		new Notice("MarinMind：数据层未就绪，无法导出");
 		return;
 	}
-	const notice = new Notice("正在打包备份…（大库可能卡顿数秒）", 0);
+	// P3-1 时长档：进度类 0 手动关
+	const notice = new Notice("MarinMind：正在打包备份…（大库可能卡顿数秒）", 0);
 	try {
-		const adapter = plugin.app.vault.adapter;
+		await plugin.store.flush(); // 磁盘对齐内存权威（防抖窗口内可能有未写变更）
+		const dataAdapter = plugin.dataLoc.adapter;
 		const documents = plugin.documents.list();
-		const cards = plugin.cards;
+		const stats = plugin.store.stats();
 
-		// 文档逐个读取；库内已缺失的跳过并计数提示
+		// 文档 PDF 按路径形态分流：库内 vault 读取入包；库外绝对路径（㉞）刻意不打包
+		// ——仅保留记录（md 书文件内的 file_path），跨机器导入后显示失联走重关联
 		const docEntries: { path: string; bytes: Uint8Array }[] = [];
 		let missing = 0;
+		let externalSkipped = 0;
 		for (const doc of documents) {
+			if (isAbsoluteFsPath(doc.filePath)) {
+				externalSkipped++;
+				continue;
+			}
 			if (plugin.app.vault.getAbstractFileByPath(doc.filePath) instanceof TFile) {
 				docEntries.push({
 					path: doc.filePath,
-					bytes: new Uint8Array(await adapter.readBinary(doc.filePath)),
+					bytes: new Uint8Array(await plugin.app.vault.adapter.readBinary(doc.filePath)),
 				});
 			} else {
 				missing++;
 			}
 		}
-		const assetEntries = await collectAssetEntries(adapter);
+		const noteEntries = await collectNoteEntries(dataAdapter);
+		const assetEntries = await collectAssetEntries(dataAdapter);
 
 		const manifest: BackupManifest = {
 			format: BACKUP_FORMAT,
 			version: BACKUP_VERSION,
-			schemaVersion: SCHEMA_VERSION,
+			storage: "markdown",
 			appVersion: plugin.manifest.version,
 			exportedAt: new Date().toISOString(),
 			documentCount: documents.length,
-			cardCount: cards.count(),
+			cardCount: stats.cards,
 			assetCount: assetEntries.length,
 		};
 		const zipped = buildBackupZip(
-			{ dbBytes: new Uint8Array(plugin.db.exportBytes()), documents: docEntries, assets: assetEntries },
+			{ notes: noteEntries, documents: docEntries, assets: assetEntries },
 			manifest,
 		);
 
-		const vault = plugin.app.vault;
-		if (!(await adapter.exists(BACKUP_DIR))) {
-			await vault.createFolder(BACKUP_DIR);
-		}
-		const target = `${BACKUP_DIR}/marinmind-${timestampStamp()}.marginpkg`;
-		await vault.createBinary(target, toBuffer(zipped));
+		// 写入备份目录（适配器 writeBinary 自建父目录；vault 内与桌面绝对路径统一处理）
+		const target = `marinmind-${timestampStamp()}.marginpkg`;
+		await plugin.backupLoc.adapter.writeBinary(target, toBuffer(zipped));
+		const shown = `${plugin.backupLoc.rootDir}/${target}`;
 
 		new Notice(
-			`备份已导出：${target}` +
-				(missing > 0 ? `（${missing} 个文档文件已不在库中，未打包）` : ""),
-			8000,
+			`MarinMind：备份已导出：${shown}` +
+				(missing > 0 ? `（${missing} 个文档文件已不在库中，未打包）` : "") +
+				(externalSkipped > 0
+					? `；库外文档 ${externalSkipped} 个未打包，请自行备份原文件`
+					: ""),
+			6000,
 		);
 	} catch (err) {
 		console.error("[MarinMind] 备份导出失败", err);
-		new Notice(`备份导出失败：${err instanceof Error ? err.message : String(err)}`);
+		new Notice(`MarinMind：备份导出失败：${err instanceof Error ? err.message : String(err)}`);
 	} finally {
 		notice.hide();
 	}
@@ -90,7 +99,7 @@ export function promptImportBackup(plugin: MarinMindPlugin): void {
 	const input = document.createElement("input");
 	input.type = "file";
 	input.accept = ".marginpkg";
-	input.style.display = "none";
+	input.hidden = true; // P3-3：隐藏 file input 用 hidden 属性（UA 规则对 inline-block 生效）
 	input.addEventListener("change", () => {
 		const file = input.files?.[0];
 		input.remove();
@@ -100,7 +109,7 @@ export function promptImportBackup(plugin: MarinMindPlugin): void {
 			.then((bytes) => importBackupFromBytes(plugin, bytes))
 			.catch((err) => {
 				console.error("[MarinMind] 备份文件读取失败", err);
-				new Notice("备份文件读取失败");
+				new Notice("MarinMind：备份文件读取失败");
 			});
 	});
 	// 选完/取消后移除节点，避免残留
@@ -109,13 +118,29 @@ export function promptImportBackup(plugin: MarinMindPlugin): void {
 	input.click();
 }
 
-/** 校验备份包并弹确认框；真正落地在 doImport */
+/** 校验备份包并弹确认框；真正落地在 doImport（v1 旧包先确认再转换） */
 export function importBackupFromBytes(plugin: MarinMindPlugin, bytes: ArrayBuffer): void {
+	const u8 = new Uint8Array(bytes);
 	let content: BackupContent;
 	try {
-		content = parseBackupZip(new Uint8Array(bytes), SCHEMA_VERSION);
+		content = parseBackupZip(u8);
 	} catch (err) {
-		new Notice(`导入失败：${err instanceof Error ? err.message : String(err)}`);
+		// v1 旧包（SQLite 形态）：转换后仍可导入；其他错误原样报出
+		let legacy: LegacyBackupContent;
+		try {
+			legacy = parseLegacyBackupZip(u8);
+		} catch {
+			new Notice(`MarinMind：导入失败：${err instanceof Error ? err.message : String(err)}`);
+			return;
+		}
+		const m = legacy.manifest;
+		new ConfirmModal(
+			plugin.app,
+			"导入旧格式备份",
+			`这是 SQLite 存储时代的 v1 备份（文档 ${m.documentCount} · 卡片 ${m.cardCount} · 导出于 ${m.exportedAt}）。\n` +
+				"导入时将自动转换为 Markdown 存储。\n当前数据会先自动快照到数据目录；导入后 Obsidian 将重载。\n继续？",
+			() => void doLegacyImport(plugin, legacy),
+		).open();
 		return;
 	}
 	const m = content.manifest;
@@ -123,37 +148,80 @@ export function importBackupFromBytes(plugin: MarinMindPlugin, bytes: ArrayBuffe
 		plugin.app,
 		"导入备份",
 		`将替换全部 MarinMind 数据（文档 ${m.documentCount} · 卡片 ${m.cardCount} · 导出于 ${m.exportedAt}）。\n` +
-			"当前数据会先自动快照到 .marinmind/；导入后 Obsidian 将重载（未保存的其他编辑会丢失）。\n继续？",
+			"当前数据会先自动快照到数据目录；导入后 Obsidian 将重载（未保存的其他编辑会丢失）。\n继续？",
 		() => void doImport(plugin, content),
 	).open();
 }
 
-/** 导入落地：快照旧库 → 关闭内存库 → 覆盖 db 文件 → 恢复文档与附件 → 重载 */
-async function doImport(plugin: MarinMindPlugin, content: BackupContent): Promise<void> {
-	const notice = new Notice("正在导入备份…", 0);
+/**
+ * v1 旧包导入：库字节 → md 文件集（legacy-import 转换，含 wikilink 全格式序列化）
+ * → 组装 v2 内容走既有 doImport 整库替换链路。
+ */
+async function doLegacyImport(plugin: MarinMindPlugin, legacy: LegacyBackupContent): Promise<void> {
+	const notice = new Notice("MarinMind：正在转换旧格式备份（SQLite → Markdown）…（大库可能卡顿数秒）", 0);
 	try {
-		const adapter = plugin.app.vault.adapter;
+		const { notes, warnings } = await legacyDbBytesToNotes(legacy.dbBytes);
+		notice.hide();
+		if (warnings.length > 0) {
+			new Notice(
+				`MarinMind：转换警告 ${warnings.length} 条：\n${warnings.slice(0, 5).join("\n")}` +
+					(warnings.length > 5 ? "\n…" : ""),
+				10000,
+			);
+		}
+		if (notes.length === 0) {
+			new Notice("MarinMind：旧备份中未读到任何数据，已中止导入（原数据未动）");
+			return;
+		}
+		const content: BackupContent = {
+			manifest: { ...legacy.manifest, version: BACKUP_VERSION, storage: "markdown" },
+			notes,
+			documents: legacy.documents,
+			assets: legacy.assets,
+		};
+		await doImport(plugin, content);
+	} catch (err) {
+		console.error("[MarinMind] 旧格式备份转换失败", err);
+		notice.hide();
+		new Notice(`MarinMind：旧格式备份导入失败：${err instanceof Error ? err.message : String(err)}`);
+	}
+}
 
-		// 1) 导入前安全快照（只保留最近一份），失败不阻断导入
-		if (plugin.db) {
+/** 导入落地（㉚）：快照旧 md 树 → 停写 → 清空现有 md → 写入备份 md 树 → 恢复文档与附件 → 重载 */
+async function doImport(plugin: MarinMindPlugin, content: BackupContent): Promise<void> {
+	const notice = new Notice("MarinMind：正在导入备份…", 0);
+	try {
+		const dataAdapter = plugin.dataLoc.adapter;
+
+		// 1) 导入前安全快照（数据根下 SNAPSHOT_DIR 只保留最近一份），失败不阻断导入
+		if (plugin.store) {
 			try {
-				await writeSnapshot(plugin, adapter);
+				await writeSnapshot(plugin, dataAdapter);
 			} catch (err) {
 				console.warn("[MarinMind] 导入前快照失败（忽略）", err);
 			}
 		}
 
-		// 2) 顺序不可反：先 flush 落盘旧数据，再 close 终止定时器——
-		//    否则之后 reload 触发 onunload 的 flush 会用旧内存库覆盖刚写入的新库
-		if (plugin.db) {
-			await plugin.db.flush();
-			plugin.db.close();
+		// 2) 顺序不可反：先 flush 落盘旧数据，再 close 终止防抖定时器——
+		//    否则之后 reload 触发 onunload 的 flush 会用旧内存数据覆盖刚导入的新文件
+		if (plugin.store) {
+			await plugin.store.flush();
+			plugin.store.close();
+			plugin.store = undefined;
 		}
 
-		// 3) 覆盖数据库文件（parseBackupZip 已拷贝独立 buffer）
-		await adapter.writeBinary(DB_PATH, content.dbBytes.slice().buffer as ArrayBuffer);
+		// 3) 清空数据根现有 md（整库替换语义；快照目录与其内文件豁免）
+		for (const file of await collectMdFiles(dataAdapter, "")) {
+			if (isSnapshotPath(file)) continue;
+			await dataAdapter.remove(file);
+		}
 
-		// 4) 恢复文档：库内已存在的文件（TFile）跳过，用户本地版本优先
+		// 4) 写入备份 md 树（数据根相对路径；parseBackupZip 已拷贝独立 buffer）
+		for (const note of content.notes) {
+			await dataAdapter.writeBinary(note.path, note.bytes.slice().buffer as ArrayBuffer);
+		}
+
+		// 5) 恢复文档：库内已存在的文件（TFile）跳过，用户本地版本优先
 		let restored = 0;
 		let skipped = 0;
 		for (const doc of content.documents) {
@@ -172,21 +240,21 @@ async function doImport(plugin: MarinMindPlugin, content: BackupContent): Promis
 			}
 		}
 
-		// 5) 恢复附件（.marinmind/ 隐藏目录，直接 adapter 覆盖写）
-		if (!(await adapter.exists(ASSETS_DIR))) {
-			await adapter.mkdir(ASSETS_DIR); // 父目录 .marinmind 由数据库打开时保证
+		// 6) 恢复附件（数据根的 assets/ 子目录，适配器直接覆盖写）
+		if (!(await dataAdapter.exists(ASSETS_SUBDIR))) {
+			await dataAdapter.mkdir(ASSETS_SUBDIR); // 父目录（数据根）由目录定位解析时保证
 		}
 		for (const asset of content.assets) {
-			await adapter.writeBinary(
-				`${ASSETS_DIR}/${asset.path}`,
+			await dataAdapter.writeBinary(
+				`${ASSETS_SUBDIR}/${asset.path}`,
 				asset.bytes.slice().buffer as ArrayBuffer,
 			);
 		}
 
-		// 6) 内存中各视图仍持有旧库快照，最干净的生效方式是整库重载
+		// 7) 内存中各视图仍持有旧数据快照，最干净的生效方式是整库重载
 		notice.hide();
 		if (Platform.isDesktopApp) {
-			new Notice(`导入完成（恢复 ${restored} 个文档，跳过 ${skipped} 个），正在重载…`, 6000);
+			new Notice(`MarinMind：导入完成（恢复 ${restored} 个文档，跳过 ${skipped} 个），正在重载…`, 6000);
 			// App 类型未公开 commands 字段，做最小形状断言
 			(plugin.app as unknown as {
 				commands: { executeCommandById(id: string): unknown };
@@ -194,32 +262,59 @@ async function doImport(plugin: MarinMindPlugin, content: BackupContent): Promis
 		} else {
 			// 移动端无 app:reload；窗口期内继续操作会用旧内存库覆盖导入数据，必须立即重启
 			new Notice(
-				`导入完成（恢复 ${restored}，跳过 ${skipped}）。请立即重启 Obsidian，否则数据可能被旧会话覆盖！`,
-				15000,
+				`MarinMind：导入完成（恢复 ${restored}，跳过 ${skipped}）。请立即重启 Obsidian，否则数据可能被旧会话覆盖！`,
+				10000,
 			);
 		}
 	} catch (err) {
 		console.error("[MarinMind] 备份导入失败", err);
 		notice.hide();
-		new Notice(`备份导入失败：${err instanceof Error ? err.message : String(err)}`);
+		new Notice(`MarinMind：备份导入失败：${err instanceof Error ? err.message : String(err)}`);
 	}
 }
 
-/** 递归收集附件目录下全部文件，返回（相对 ASSETS_DIR 的路径, 字节） */
-async function collectAssetEntries(
-	adapter: DataAdapter,
+/** 收集数据根的 md 文件树（快照目录豁免）：书 / 未归类卡片 / 脑图/ 全部进备份 */
+async function collectNoteEntries(
+	adapter: ListableStorageAdapter,
 ): Promise<{ path: string; bytes: Uint8Array }[]> {
-	const files = await collectFiles(adapter, ASSETS_DIR);
+	const entries: { path: string; bytes: Uint8Array }[] = [];
+	for (const file of await collectMdFiles(adapter, "")) {
+		if (isSnapshotPath(file)) continue; // 导入前快照不入包
+		entries.push({ path: file, bytes: new Uint8Array(await adapter.readBinary(file)) });
+	}
+	return entries;
+}
+
+/** 递归收集 md 文件（根相对路径）；目录不存在返回空 */
+async function collectMdFiles(
+	adapter: ListableStorageAdapter,
+	dir: string,
+): Promise<string[]> {
+	const listed = await adapter.list(dir);
+	const files = listed.files.filter((f) => f.endsWith(".md"));
+	for (const sub of listed.folders) {
+		files.push(...(await collectMdFiles(adapter, sub)));
+	}
+	return files;
+}
+
+/** 递归收集附件目录下全部文件，返回（相对 assets/ 的路径, 字节） */
+async function collectAssetEntries(
+	adapter: ListableStorageAdapter,
+): Promise<{ path: string; bytes: Uint8Array }[]> {
+	const files = await collectFiles(adapter, ASSETS_SUBDIR);
 	const entries: { path: string; bytes: Uint8Array }[] = [];
 	for (const full of files) {
-		const rel = full.startsWith(`${ASSETS_DIR}/`) ? full.slice(ASSETS_DIR.length + 1) : full;
+		const rel = full.startsWith(`${ASSETS_SUBDIR}/`)
+			? full.slice(ASSETS_SUBDIR.length + 1)
+			: full;
 		entries.push({ path: rel, bytes: new Uint8Array(await adapter.readBinary(full)) });
 	}
 	return entries;
 }
 
-/** 递归列出目录下全部文件（vault 相对全路径）；目录不存在返回空 */
-async function collectFiles(adapter: DataAdapter, dir: string): Promise<string[]> {
+/** 递归列出目录下全部文件（根相对路径）；目录不存在返回空 */
+async function collectFiles(adapter: ListableStorageAdapter, dir: string): Promise<string[]> {
 	if (!(await adapter.exists(dir))) return [];
 	const listed = await adapter.list(dir);
 	const files = [...listed.files];
@@ -229,16 +324,39 @@ async function collectFiles(adapter: DataAdapter, dir: string): Promise<string[]
 	return files;
 }
 
-/** 写导入前快照并清理更旧的（.marinmind/ 下只留最近一份） */
-async function writeSnapshot(plugin: MarinMindPlugin, adapter: DataAdapter): Promise<void> {
-	const bytes = plugin.db!.exportBytes();
-	const stamp = timestampStamp();
-	await adapter.writeBinary(`.marinmind/${SNAPSHOT_PREFIX}${stamp}.db`, bytes);
-	for (const old of (await collectFiles(adapter, ".marinmind"))) {
-		const name = old.slice(".marinmind/".length);
-		if (name.startsWith(SNAPSHOT_PREFIX) && !name.includes(stamp)) {
+/** 是否导入前快照路径（SNAPSHOT_DIR 目录内 或 旧版 .db 快照文件） */
+function isSnapshotPath(relPath: string): boolean {
+	if (relPath === SNAPSHOT_DIR || relPath.startsWith(`${SNAPSHOT_DIR}/`)) return true;
+	const name = relPath.slice(relPath.lastIndexOf("/") + 1);
+	return name.startsWith(SNAPSHOT_PREFIX);
+}
+
+/**
+ * 写导入前快照：现有 md 树复制到 SNAPSHOT_DIR/（只保留最近一份），
+ * 并清理更旧的快照（含旧版 .db 快照文件）。
+ */
+async function writeSnapshot(
+	plugin: MarinMindPlugin,
+	adapter: ListableStorageAdapter,
+): Promise<void> {
+	// 旧快照清理（目录 + 旧版 .db 文件）
+	if (await adapter.exists(SNAPSHOT_DIR)) {
+		for (const file of await collectFiles(adapter, SNAPSHOT_DIR)) {
+			await adapter.remove(file);
+		}
+	}
+	for (const old of await collectFiles(adapter, "")) {
+		const name = old.slice(old.lastIndexOf("/") + 1);
+		if (name.startsWith(SNAPSHOT_PREFIX) && name.endsWith(".db")) {
 			await adapter.remove(old);
 		}
+	}
+	// 复制现有 md（含快照目录自身豁免——正常不存在）
+	for (const file of await collectMdFiles(adapter, "")) {
+		if (isSnapshotPath(file)) continue;
+		const target = `${SNAPSHOT_DIR}/${file}`;
+		const bytes = await adapter.readBinary(file);
+		await adapter.writeBinary(target, bytes.slice(0));
 	}
 }
 
@@ -255,7 +373,7 @@ async function ensureParentFolder(app: App, filePath: string): Promise<void> {
 	}
 }
 
-/** Uint8Array → 独立 ArrayBuffer（fflate / sql.js 返回值可能共享或带偏移） */
+/** Uint8Array → 独立 ArrayBuffer（fflate 返回值可能共享或带偏移） */
 function toBuffer(data: Uint8Array): ArrayBuffer {
 	return data.slice().buffer as ArrayBuffer;
 }

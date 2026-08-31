@@ -13,6 +13,8 @@ function makeCard(id = "c1"): Card {
 		excerptRef: null,
 		note: null,
 		color: "yellow",
+		title: null,
+		occlusions: [],
 		tags: [],
 		createdAt: 0,
 		updatedAt: 0,
@@ -61,5 +63,17 @@ describe("CardEventBus", () => {
 		bus.onCardRemoved(() => events.push("removed"));
 		bus.emitCardRemoved("a", makeCard("a"));
 		expect(events).toEqual(["removed"]);
+	});
+
+	it("created：订阅/退订与 changed 互不串扰（⑨-B 扩展，⑲）", () => {
+		const bus = new CardEventBus();
+		const events: string[] = [];
+		const off = bus.onCardCreated((card) => events.push(`created:${card.id}`));
+		bus.onCardChanged(() => events.push("changed"));
+		bus.emitCardCreated(makeCard("a"));
+		expect(events).toEqual(["created:a"]); // created 订阅方不收 changed
+		off();
+		bus.emitCardCreated(makeCard("b"));
+		expect(events).toEqual(["created:a"]);
 	});
 });

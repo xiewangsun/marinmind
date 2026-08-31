@@ -36,6 +36,21 @@ export interface PdfTextContent {
 	items: (PdfTextItem | { type: string })[];
 }
 
+/** PDF 大纲（书签）节点：getOutline 返回的树形结构（dest 可为命名目的地字符串或显式数组） */
+export interface PdfOutlineItem {
+	title: string;
+	dest: string | unknown[] | null;
+	items: PdfOutlineItem[] | null;
+	bold?: boolean;
+	italic?: boolean;
+}
+
+/** PDF 内部页引用（显式目的地数组的首元素） */
+export interface PdfPageRef {
+	num: number;
+	gen: number;
+}
+
 /** PDF 单页代理 */
 export interface PdfPageProxy {
 	/** scale=1 即 PDF 用户单位（1pt = 1px），用于计算归一化坐标基准 */
@@ -53,6 +68,12 @@ export interface PdfPageProxy {
 export interface PdfDocumentProxy {
 	numPages: number;
 	getPage(pageNumber: number): Promise<PdfPageProxy>;
+	/** 内嵌大纲（书签/目录）树；无大纲返回 null（pdf.js 4.0+ 返回 Promise） */
+	getOutline(): Promise<PdfOutlineItem[] | null>;
+	/** 命名目的地 → 显式目的地数组（outline dest 为字符串时解析用） */
+	getDestination(id: string): Promise<unknown[] | null>;
+	/** 页引用 → 0 基页码（显式目的地数组首元素解析用） */
+	getPageIndex(ref: PdfPageRef): Promise<number>;
 	destroy(): Promise<void>;
 }
 

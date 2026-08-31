@@ -1,44 +1,8 @@
-import type { MarinMindDatabase } from "../database";
-import type { Card, DocRect, ExcerptType } from "../../types";
+import type { MarinMindStore } from "../../store/marinmind-store";
+import { defaultReviewState } from "../../store/book-format";
+import type { Card, DocRect, ExcerptType, NormPoint } from "../../types";
 import { newId, now } from "../../utils";
 import type { CardEventBus } from "../../events/card-bus";
-
-/** cards 表的查询列（供其他仓储 join 复用） */
-const CARD_COLUMNS =
-	"id, document_id, page, rects, excerpt_type, excerpt_text, excerpt_ref, note, color, tags, created_at, updated_at";
-
-export interface CardRow {
-	id: string;
-	document_id: string | null;
-	page: number | null;
-	rects: string;
-	excerpt_type: ExcerptType;
-	excerpt_text: string | null;
-	excerpt_ref: string | null;
-	note: string | null;
-	color: string | null;
-	tags: string;
-	created_at: number;
-	updated_at: number;
-}
-
-/** 数据库行 → 领域对象（rects/tags 从 JSON 还原） */
-export function mapRowToCard(row: CardRow): Card {
-	return {
-		id: row.id,
-		documentId: row.document_id,
-		page: row.page,
-		rects: JSON.parse(row.rects) as DocRect[],
-		excerptType: row.excerpt_type,
-		excerptText: row.excerpt_text,
-		excerptRef: row.excerpt_ref,
-		note: row.note,
-		color: row.color,
-		tags: JSON.parse(row.tags) as string[],
-		createdAt: row.created_at,
-		updatedAt: row.updated_at,
-	};
-}
 
 /** 创建卡片的输入（可选字段缺省为空） */
 export interface CreateCardInput {
@@ -46,10 +10,16 @@ export interface CreateCardInput {
 	page: number | null;
 	rects: DocRect[];
 	excerptType: ExcerptType;
+	/** 套索摘录的原始轮廓（创建后不可变，update 不改形状） */
+	polygon?: NormPoint[] | null;
 	excerptText?: string | null;
 	excerptRef?: string | null;
 	note?: string | null;
 	color?: string | null;
+	/** 卡片标题（㊺，脑图节点标题栏）：缺省为空 */
+	title?: string | null;
+	/** 闪卡遮挡区域（㊷）：缺省为空 */
+	occlusions?: DocRect[];
 	tags?: string[];
 }
 
@@ -60,22 +30,41 @@ export interface CardPatch {
 	excerptRef?: string | null;
 	note?: string | null;
 	color?: string | null;
+	title?: string | null;
+	/** 闪卡遮挡区域（㊷）：传数组整体替换，undefined 不动 */
+	occlusions?: DocRect[];
 	tags?: string[];
 }
 
-/** 知识卡片仓储 */
+/** 全库卡片迭代（含孤儿文件；recent/count/due 等全库查询共用） */
+function* allCards(store: MarinMindStore): Generator<Card> {
+	for (const book of store.books.values()) {
+		yield* book.cards.values();
+	}
+	yield* store.orphanState.cards.values();
+}
+
+/**
+ * 知识卡片仓储（㉚ md 存储版）：内存 Map 操作 + store 标脏。
+ * 事件契约与 SQL 版一致：create 双发（created+changed）、update 只发 changed、
+ * delete 发删除前快照、未命中一律不发。
+ */
 export class CardRepository {
 	/**
 	 * @param bus 可选事件总线：写方法成功后同步 emit（订阅方契约见 card-bus.ts——
-	 *   回调禁止写库）。注入而非仓储自建，便于测试与"内存库无总线"的旧行为兼容。
+	 *   回调禁止写库）。注入而非仓储自建，便于测试与"无总线"的旧行为兼容。
 	 */
 	constructor(
-		private db: MarinMindDatabase,
+		private store: MarinMindStore,
 		private bus?: CardEventBus,
 	) {}
 
 	/** 创建卡片，并同步生成默认复习状态（new、未启用闪卡） */
 	create(input: CreateCardInput): Card {
+		// documentId 外键语义：归属文档必须已存在（旧库由 FK 约束保证）
+		if (input.documentId != null && !this.store.books.has(input.documentId)) {
+			throw new Error(`卡片归属文档不存在：${input.documentId}`);
+		}
 		const ts = now();
 		const card: Card = {
 			id: newId(),
@@ -83,55 +72,38 @@ export class CardRepository {
 			page: input.page,
 			rects: input.rects,
 			excerptType: input.excerptType,
+			polygon: input.polygon ?? null,
 			excerptText: input.excerptText ?? null,
 			excerptRef: input.excerptRef ?? null,
 			note: input.note ?? null,
 			color: input.color ?? null,
+			title: input.title ?? null,
+			occlusions: input.occlusions ?? [],
 			tags: input.tags ?? [],
 			createdAt: ts,
 			updatedAt: ts,
 		};
-		this.db.tx(() => {
-			this.db.run(
-				`INSERT INTO cards (${CARD_COLUMNS})
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				[
-					card.id,
-					card.documentId,
-					card.page,
-					JSON.stringify(card.rects),
-					card.excerptType,
-					card.excerptText,
-					card.excerptRef,
-					card.note,
-					card.color,
-					JSON.stringify(card.tags),
-					card.createdAt,
-					card.updatedAt,
-				],
-			);
-			this.db.run(
-				`INSERT INTO review_states (card_id, is_flashcard, phase, ease, interval_days, repetitions, due_at, lapses)
-				 VALUES (?, 0, 'new', 2.5, 0, 0, ?, 0)`,
-				[card.id, ts],
-			);
-		});
+		const book =
+			input.documentId == null
+				? this.store.orphanState
+				: this.store.books.get(input.documentId)!;
+		book.cards.set(card.id, card);
+		this.store.putReview(defaultReviewState(card.id, ts));
+		// created（区分新建/编辑，脑图自动收录用）+ changed（跨标签同步旧语义）双发
+		this.bus?.emitCardCreated(card);
 		this.bus?.emitCardChanged(card);
 		return card;
 	}
 
 	get(id: string): Card | undefined {
-		const row = this.db.get<CardRow>(
-			`SELECT ${CARD_COLUMNS} FROM cards WHERE id = ?`,
-			[id],
-		);
-		return row ? mapRowToCard(row) : undefined;
+		return this.store.bookOfCard(id)?.cards.get(id);
 	}
 
 	/** 合并式更新：只改动给定字段，其余保持不变 */
 	update(id: string, patch: CardPatch): Card | undefined {
-		const current = this.get(id);
-		if (!current) {
+		const book = this.store.bookOfCard(id);
+		const current = book?.cards.get(id);
+		if (!book || !current) {
 			return undefined;
 		}
 		const next: Card = {
@@ -141,34 +113,23 @@ export class CardRepository {
 			...(patch.excerptRef !== undefined ? { excerptRef: patch.excerptRef } : {}),
 			...(patch.note !== undefined ? { note: patch.note } : {}),
 			...(patch.color !== undefined ? { color: patch.color } : {}),
+			...(patch.title !== undefined ? { title: patch.title } : {}),
+			...(patch.occlusions !== undefined ? { occlusions: patch.occlusions } : {}),
 			...(patch.tags !== undefined ? { tags: patch.tags } : {}),
 			updatedAt: now(),
 		};
-		this.db.run(
-			`UPDATE cards SET page = ?, excerpt_text = ?, excerpt_ref = ?, note = ?, color = ?, tags = ?, updated_at = ?
-			 WHERE id = ?`,
-			[
-				next.page,
-				next.excerptText,
-				next.excerptRef,
-				next.note,
-				next.color,
-				JSON.stringify(next.tags),
-				next.updatedAt,
-				next.id,
-			],
-		);
+		book.cards.set(id, next);
+		this.store.markDirty(this.store.scopeOfCard(id));
 		this.bus?.emitCardChanged(next);
 		return next;
 	}
 
-	/** 删除卡片（复习状态、链接、脑图节点由外键级联删除） */
+	/** 删除卡片（复习状态、链接、脑图节点由 store 级联删除，子节点上浮为根） */
 	delete(id: string): boolean {
-		const last = this.get(id);
+		const last = this.store.deleteCardCascade(id);
 		if (!last) {
 			return false;
 		}
-		this.db.run("DELETE FROM cards WHERE id = ?", [id]);
 		// 删除后已查不到，把删除前快照一并交给订阅方（DOM 清理需要 page 等信息）
 		this.bus?.emitCardRemoved(id, last);
 		return true;
@@ -176,32 +137,33 @@ export class CardRepository {
 
 	/** 某文档下的全部卡片，按页码排序（无页码的排最后） */
 	listByDocument(documentId: string): Card[] {
-		return this.db
-			.all<CardRow>(
-				`SELECT ${CARD_COLUMNS} FROM cards WHERE document_id = ? ORDER BY page IS NULL, page, created_at`,
-				[documentId],
-			)
-			.map(mapRowToCard);
+		return [...(this.store.books.get(documentId)?.cards.values() ?? [])].sort(
+			(a, b) =>
+				(a.page ?? Infinity) - (b.page ?? Infinity) ||
+				a.createdAt - b.createdAt ||
+				(a.id < b.id ? -1 : 1),
+		);
 	}
 
 	/** 最近更新的卡片（工作区"最近"列表用） */
 	recent(limit = 50): Card[] {
-		return this.db
-			.all<CardRow>(
-				`SELECT ${CARD_COLUMNS} FROM cards ORDER BY updated_at DESC, id LIMIT ?`,
-				[limit],
-			)
-			.map(mapRowToCard);
+		return this.listAll().slice(0, limit);
+	}
+
+	/** 全库卡片（含孤儿卡），按更新时间降序——主页卡片页全量浏览的数据源 */
+	listAll(): Card[] {
+		return [...allCards(this.store)].sort(
+			(a, b) =>
+				b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1),
+		);
 	}
 
 	count(documentId?: string): number {
-		const row =
-			documentId === undefined
-				? this.db.get<{ n: number }>("SELECT COUNT(*) AS n FROM cards")
-				: this.db.get<{ n: number }>(
-						"SELECT COUNT(*) AS n FROM cards WHERE document_id = ?",
-						[documentId],
-					);
-		return row?.n ?? 0;
+		if (documentId === undefined) {
+			let n = this.store.orphanState.cards.size;
+			for (const book of this.store.books.values()) n += book.cards.size;
+			return n;
+		}
+		return this.store.books.get(documentId)?.cards.size ?? 0;
 	}
 }

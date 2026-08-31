@@ -2,6 +2,7 @@ import { FuzzySuggestModal } from "obsidian";
 import type { App, FuzzyMatch } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { BookDocument, Card } from "../types";
+import { pageWordOf } from "../storage/paths";
 
 /** 最近卡片加载上限（选择器数据量） */
 const RECENT_LIMIT = 200;
@@ -60,7 +61,8 @@ export class CardPickerModal extends FuzzySuggestModal<Card> {
 			this.docCache.set(card.documentId, this.plugin.documents.get(card.documentId) ?? null);
 		}
 		const doc = this.docCache.get(card.documentId);
-		const page = card.page != null ? ` · 第 ${card.page} 页` : "";
+		const page =
+			card.page != null && doc ? ` · 第 ${card.page} ${pageWordOf(doc.filePath)}` : "";
 		return doc ? `《${doc.title}》${page}` : "来源文档已删除";
 	}
 }

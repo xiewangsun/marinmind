@@ -2,6 +2,7 @@ import { ButtonComponent, Modal, Notice } from "obsidian";
 import type { App } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card } from "../types";
+import { pageWordOf } from "../storage/paths";
 import { TextPromptModal } from "./note-edit-modal";
 
 /** 照片/语音摘录的形态标签 */
@@ -44,9 +45,13 @@ export class MediaPreviewModal extends Modal {
 	async onOpen(): Promise<void> {
 		const { contentEl } = this;
 		contentEl.addClass("marinmind-media-preview");
+		// ㊼ 页码量词随所属文档格式（epub 章=页模型）；文档失联/手工卡兜底「页」
+		const doc = this.card.documentId
+			? this.plugin.documents.get(this.card.documentId)
+			: undefined;
 		contentEl.createDiv({
 			cls: "marinmind-media-preview-title",
-			text: `${mediaLabel(this.card)}${this.card.page != null ? ` · 第 ${this.card.page} 页` : ""}`,
+			text: `${mediaLabel(this.card)}${this.card.page != null ? ` · 第 ${this.card.page} ${doc ? pageWordOf(doc.filePath) : "页"}` : ""}`,
 		});
 		this.noteEl = contentEl.createDiv({ cls: "marinmind-media-preview-note" });
 		this.renderNote();

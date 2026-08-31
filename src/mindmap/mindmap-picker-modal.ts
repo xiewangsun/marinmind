@@ -47,8 +47,13 @@ export class MindmapPickerModal extends FuzzySuggestModal<Entry> {
 			name.textContent = "➕ 新建脑图";
 			dir.textContent = "创建一张新的思维导图";
 		} else {
-			name.textContent = match.item.name;
-			dir.textContent = `${this.plugin.mindmaps.countNodes(match.item.id)} 个节点`;
+			// 书籍默认脑图（㉗ 自动入图目标）带 📖 徽标——用户摘录后据此找图
+			const isBookMap = match.item.documentId != null;
+			const nodeCount = this.plugin.mindmaps.countNodes(match.item.id);
+			name.textContent = isBookMap ? `📖 ${match.item.name}` : match.item.name;
+			dir.textContent = isBookMap
+				? `${nodeCount} 个节点 · 书籍脑图（该书摘录自动入图）`
+				: `${nodeCount} 个节点`;
 		}
 		el.appendChild(name);
 		el.appendChild(dir);

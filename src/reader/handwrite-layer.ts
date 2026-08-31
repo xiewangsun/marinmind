@@ -7,12 +7,6 @@ import {
 } from "./handwrite-geometry";
 import type { PageView } from "./page-view";
 
-/** 手写层需要的宿主信息 */
-export interface HandwriteCallbacks {
-	/** 当前阅读缩放（容器 CSS 尺寸 ÷ PDF 基准尺寸；导出 PNG 的分辨率换算用） */
-	getScale(): number;
-}
-
 /** 视觉线宽（CSS 像素）——归一化换算基准 */
 const INK_WIDTH_PX = 2.5;
 
@@ -36,10 +30,7 @@ export class HandwriteLayer {
 	private mode = false;
 	private destroyed = false;
 
-	constructor(
-		private readonly pageView: PageView,
-		private readonly cb: HandwriteCallbacks,
-	) {
+	constructor(private readonly pageView: PageView) {
 		this.root = document.createElement("div");
 		this.root.classList.add("marinmind-handwrite-layer");
 		this.canvas = document.createElement("canvas");
@@ -47,7 +38,9 @@ export class HandwriteLayer {
 		this.root.appendChild(this.canvas);
 		this.pageView.el.appendChild(this.root); // DOM 序在 overlay 之后，自然置顶
 
-		this.ctx = this.canvas.getContext("2d");
+		// willReadFrequently 强制 CPU 后端：与 pdf-document 同因——GPU 加速 canvas 在部分
+		// 环境位图不上屏，笔迹会画了也看不见（attrs 仅首次 getContext 生效，须在此传入）
+		this.ctx = this.canvas.getContext("2d", { willReadFrequently: true });
 		if (this.ctx) {
 			this.ctx.strokeStyle = "#d7373f";
 			this.ctx.lineCap = "round";
@@ -65,7 +58,12 @@ export class HandwriteLayer {
 				? new ResizeObserver(() => this.resizeCanvas())
 				: null;
 		this.ro?.observe(this.pageView.el);
-		this.resizeCanvas();
+		// 有 RO 时不在构造器同步 resize：observe 后首帧批量派发回调，只触发一次布局；
+		// 构造器里同步读 clientWidth 会让打开文档的骨架循环每页强制重排（O(N²)）。
+		// 无 RO 环境（理论不存在）才同步兜底，保证手写模式开启前画布有尺寸。
+		if (!this.ro) {
+			this.resizeCanvas();
+		}
 	}
 
 	/** 是否有未提交笔迹 */
@@ -100,10 +98,9 @@ export class HandwriteLayer {
 			return null;
 		}
 		this.redraw(); // 清空画布
-		// 页基准尺寸 = 容器 CSS 尺寸 ÷ 缩放（同步可算，不依赖仍存活的 PDF 实例）
-		const scale = this.cb.getScale() || 1;
-		const base = { width: dispW / scale, height: dispH / scale };
-		const png = await renderStrokesToPNG(strokes, bbox, base, lineWidthNorm);
+		// 页基准尺寸直取本页 baseSize（㊳ 混合页尺寸：exact 优先，归一化坐标天然
+		// 无关缩放——此前用"容器 ÷ 全局 scale"在混合尺寸文档上本就有偏差）
+		const png = await renderStrokesToPNG(strokes, bbox, this.pageView.baseSize, lineWidthNorm);
 		return png ? { bbox, png } : null;
 	}
 

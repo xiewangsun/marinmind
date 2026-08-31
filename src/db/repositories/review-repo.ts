@@ -1,106 +1,76 @@
-import type { MarinMindDatabase } from "../database";
-import type { Card, ReviewGrade, ReviewState, SrsPhase } from "../../types";
+import type { MarinMindStore } from "../../store/marinmind-store";
+import { defaultReviewState } from "../../store/book-format";
+import type { Card, ReviewGrade, ReviewState } from "../../types";
 import { now } from "../../utils";
 import { nextReviewState } from "../../srs/sm2";
-import { mapRowToCard, type CardRow } from "./card-repo";
 
-interface ReviewRow {
-	card_id: string;
-	is_flashcard: number;
-	phase: SrsPhase;
-	ease: number;
-	interval_days: number;
-	repetitions: number;
-	due_at: number;
-	last_reviewed_at: number | null;
-	lapses: number;
-}
-
-function mapRowToReview(row: ReviewRow): ReviewState {
-	return {
-		cardId: row.card_id,
-		isFlashcard: row.is_flashcard === 1,
-		phase: row.phase,
-		ease: row.ease,
-		intervalDays: row.interval_days,
-		repetitions: row.repetitions,
-		dueAt: row.due_at,
-		lastReviewedAt: row.last_reviewed_at,
-		lapses: row.lapses,
-	};
-}
-
-/** 闪卡复习仓储 */
+/**
+ * 闪卡复习仓储（㉚ md 存储版）：复习状态存卡片机器注释（store.reviews），
+ * 调度算法仍走 src/srs/sm2.ts 纯函数。公开语义与 SQL 版一致。
+ */
 export class ReviewRepository {
-	constructor(private db: MarinMindDatabase) {}
+	constructor(private store: MarinMindStore) {}
 
 	/** 将卡片转为闪卡（幂等），可指定初始到期时间 */
 	enable(cardId: string, dueAt: number = now()): void {
-		this.db.run(
-			`INSERT INTO review_states (card_id, is_flashcard, due_at) VALUES (?, 1, ?)
-			 ON CONFLICT (card_id) DO UPDATE SET is_flashcard = 1, due_at = excluded.due_at`,
-			[cardId, dueAt],
-		);
+		if (!this.store.bookOfCard(cardId)) {
+			throw new Error(`卡片不存在，无法转为闪卡：${cardId}`);
+		}
+		const prev =
+			this.store.reviews.get(cardId) ?? defaultReviewState(cardId, now());
+		this.store.putReview({ ...prev, isFlashcard: true, dueAt });
 	}
 
 	/** 取消闪卡（保留调度历史，仅移出复习队列） */
 	disable(cardId: string): boolean {
-		if (!this.get(cardId)) {
+		const prev = this.store.reviews.get(cardId);
+		if (!prev) {
 			return false;
 		}
-		this.db.run("UPDATE review_states SET is_flashcard = 0 WHERE card_id = ?", [cardId]);
+		this.store.putReview({ ...prev, isFlashcard: false });
 		return true;
 	}
 
 	get(cardId: string): ReviewState | undefined {
-		const row = this.db.get<ReviewRow>(
-			"SELECT * FROM review_states WHERE card_id = ?",
-			[cardId],
-		);
-		return row ? mapRowToReview(row) : undefined;
+		return this.store.reviews.get(cardId);
 	}
 
 	/** 当前到期待复习的闪卡数量 */
 	dueCount(nowMs: number = now()): number {
-		const row = this.db.get<{ n: number }>(
-			"SELECT COUNT(*) AS n FROM review_states WHERE is_flashcard = 1 AND due_at <= ?",
-			[nowMs],
-		);
-		return row?.n ?? 0;
+		let n = 0;
+		for (const r of this.store.reviews.values()) {
+			if (r.isFlashcard && r.dueAt <= nowMs) n++;
+		}
+		return n;
 	}
 
-	/** 到期闪卡列表（附带卡片本体，复习时可回看摘录与上下文），按到期先后排序 */
-	due(nowMs: number = now(), limit = 20): Card[] {
-		const rows = this.db.all<CardRow>(
-			`SELECT c.* FROM cards c JOIN review_states r ON r.card_id = c.id
-			 WHERE r.is_flashcard = 1 AND r.due_at <= ?
-			 ORDER BY r.due_at ASC LIMIT ?`,
-			[nowMs, limit],
-		);
-		return rows.map(mapRowToCard);
+	/**
+	 * 到期闪卡列表（附带卡片本体，复习时可回看摘录与上下文），按到期先后排序。
+	 * documentId（㊷ 复习按书过滤）：非 null 时只返回该书卡片（先过滤后计数，limit 语义不受影响）
+	 */
+	due(nowMs: number = now(), limit = 20, documentId?: string): Card[] {
+		const states = [...this.store.reviews.values()]
+			.filter((r) => r.isFlashcard && r.dueAt <= nowMs)
+			.sort((a, b) => a.dueAt - b.dueAt || (a.cardId < b.cardId ? -1 : 1));
+		const out: Card[] = [];
+		for (const r of states) {
+			const card = this.store.bookOfCard(r.cardId)?.cards.get(r.cardId);
+			if (!card) continue; // 卡片本体必须存在（对齐旧库 INNER JOIN）
+			if (documentId != null && card.documentId !== documentId) continue;
+			out.push(card);
+			if (out.length >= limit) break;
+		}
+		return out;
 	}
 
 	/** 完成一次复习（SM-2 调度）；卡片不存在或未启用闪卡时返回 undefined */
 	review(cardId: string, grade: ReviewGrade, nowMs: number = now()): ReviewState | undefined {
-		const prev = this.get(cardId);
+		const prev = this.store.reviews.get(cardId);
 		if (!prev || !prev.isFlashcard) {
 			return undefined;
 		}
 		const next = nextReviewState(prev, grade, nowMs);
-		this.db.run(
-			`UPDATE review_states SET phase = ?, ease = ?, interval_days = ?, repetitions = ?,
-			 due_at = ?, last_reviewed_at = ?, lapses = ? WHERE card_id = ?`,
-			[
-				next.phase,
-				next.ease,
-				next.intervalDays,
-				next.repetitions,
-				next.dueAt,
-				next.lastReviewedAt,
-				next.lapses,
-				next.cardId,
-			],
-		);
+		this.store.putReview(next);
 		return next;
 	}
 }

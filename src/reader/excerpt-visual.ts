@@ -1,0 +1,164 @@
+import type { TFile } from "obsidian";
+import type MarinMindPlugin from "../main";
+import type { Card, DocRect } from "../types";
+import { excerptCropRect, occlusionBounds } from "./rect-utils";
+import { paintCardHighlights, pixelRect } from "./region-snapshot";
+import { acquirePdf, pdfCacheKey, type PdfHandle } from "./pdf-cache";
+import { readExternalBinary } from "../storage/external-file";
+import { docExtOf, isAbsoluteFsPath } from "../storage/paths";
+import { EXCERPT_LABELS } from "../home/home-data";
+
+/**
+ * 摘录视觉共享管线（㊷ 自 CardPreviewModal 上提）：只显示摘录区域本身——
+ * 1. 媒体附件（photo/handwriting/area/lasso 的 excerptRef）——"只有摘录区域"的成品图；
+ * 2. 原文页裁剪：excerptCropRect 规格渲染整页（isolated，经 pdf-cache 共享解析）
+ *    → 叠高亮 → 裁出摘录窗口（text/blank 卡主路径，带少量上下文）；
+ * 3. 全部失败 → rendered:false（调用方文本兜底）。
+ * 主页卡片预览弹窗（㶈）与复习遮挡正面（㊷）共用同一出图。
+ */
+
+/** 裁剪预览的目标尺寸上限（CSS 像素）：按裁剪窗口宽高比取小不拉伸 */
+const PREVIEW_WIDTH = 560;
+const PREVIEW_HEIGHT = 420;
+
+/** 单次整页渲染像素预算（与 pdf-document 的 16M 钳制同量级，防巨画布） */
+const MAX_RENDER_PIXELS = 16_000_000;
+
+/**
+ * renderExcerptVisual 结果：rendered=是否成功出图；objectUrl=创建的 blob URL
+ * （调用方负责 revoke）；bounds=出图对应的页归一化窗口（㊷ 复习遮挡摆位用——
+ * 快照图 = rects 并集包围盒 / 页裁剪 = 裁剪窗口；失败为 null，调用方按
+ * occlusionBounds 估算）。audio 无页面几何，bounds 无意义。
+ */
+export interface ExcerptVisualResult {
+	rendered: boolean;
+	objectUrl: string | null;
+	bounds: DocRect | null;
+}
+
+/**
+ * 渲染摘录视觉（异步三级回退，host 内追加媒体元素或裁剪画布）。
+ * host 已断开（弹窗/视图关闭）时视为成功并丢弃，不触发兜底回退。
+ */
+export async function renderExcerptVisual(
+	plugin: MarinMindPlugin,
+	card: Card,
+	host: HTMLElement,
+): Promise<ExcerptVisualResult> {
+	if (card.excerptRef) {
+		const attached = await renderAttachment(plugin, card, host);
+		if (attached.rendered) {
+			return attached;
+		}
+		// 附件读取失败（文件被移动/删除）→ 落页裁剪兜底（area/lasso/handwriting 有 rects）
+	}
+	if (card.documentId && card.page != null && card.rects.length > 0) {
+		const crop = await renderPageCrop(plugin, card, host);
+		if (crop) {
+			return { rendered: true, objectUrl: null, bounds: crop };
+		}
+	}
+	return { rendered: false, objectUrl: null, bounds: null };
+}
+
+/** 附件媒体展示（img / audio）；失败 rendered:false 供调用方回退 */
+async function renderAttachment(
+	plugin: MarinMindPlugin,
+	card: Card,
+	host: HTMLElement,
+): Promise<ExcerptVisualResult> {
+	const ref = card.excerptRef;
+	if (!ref) {
+		return { rendered: false, objectUrl: null, bounds: null };
+	}
+	try {
+		const bytes = await plugin.attachments.read(ref);
+		if (!host.isConnected) {
+			return { rendered: true, objectUrl: null, bounds: null }; // 关闭竞态：宿主已拆，丢弃且不再回退
+		}
+		const url = URL.createObjectURL(new Blob([bytes]));
+		if (card.excerptType === "audio") {
+			const audio = host.createEl("audio", { cls: "marinmind-card-preview-media" });
+			audio.controls = true;
+			audio.src = url;
+		} else {
+			const img = host.createEl("img", { cls: "marinmind-card-preview-media" });
+			img.alt = EXCERPT_LABELS[card.excerptType];
+			img.src = url;
+		}
+		// 快照图边界 = rects 并集包围盒（area/lasso/handwriting 裁剪即按此范围）
+		return { rendered: true, objectUrl: url, bounds: occlusionBounds(card) };
+	} catch (err) {
+		console.debug("[MarinMind] 摘录附件读取失败，回退页裁剪", err);
+		return { rendered: false, objectUrl: null, bounds: null };
+	}
+}
+
+/**
+ * 原文页裁剪（text/blank 卡主路径，媒体卡兜底）：整页 isolated 渲染 →
+ * 叠高亮 → 裁出 excerptCropRect 窗口。句柄用完即 release（一次性渲染不缓存）。
+ * 成功返回裁剪窗口（= 遮挡摆位的 bounds），失败返回 null。
+ */
+async function renderPageCrop(
+	plugin: MarinMindPlugin,
+	card: Card,
+	host: HTMLElement,
+): Promise<DocRect | null> {
+	const documentId = card.documentId;
+	const page = card.page;
+	if (!documentId || page == null) {
+		return null;
+	}
+	const doc = plugin.documents.get(documentId);
+	if (!doc) {
+		return null;
+	}
+	// ㊼ 页裁剪只对 PDF 成立（md/epub 无 pdf.js 位图）：短路返回 null，
+	// 调用方落文本兜底（顺手修掉 md 白读字节白解析 pdf.js 的浪费）
+	if (docExtOf(doc.filePath) !== "pdf") {
+		return null;
+	}
+	let handle: PdfHandle | null = null;
+	try {
+		// 路径双语义（㉞）：库外绝对路径桌面 fs 直读；库内经 vault（失联抛错走 catch 回退）
+		const buf = isAbsoluteFsPath(doc.filePath)
+			? await readExternalBinary(doc.filePath)
+			: await plugin.app.vault.readBinary(
+					plugin.app.vault.getAbstractFileByPath(doc.filePath) as TFile,
+				);
+		handle = await acquirePdf(pdfCacheKey(doc.filePath), buf);
+		const base = await handle.doc.getPageSize(page);
+		const crop = excerptCropRect(card.rects);
+		// 渲染尺度：裁剪窗口贴目标档位（取小不拉伸），整页像素不超预算
+		let scale = Math.min(
+			PREVIEW_WIDTH / (crop.w * base.width),
+			PREVIEW_HEIGHT / (crop.h * base.height),
+		);
+		scale = Math.min(scale, Math.sqrt(MAX_RENDER_PIXELS / (base.width * base.height)));
+		const full = document.createElement("canvas");
+		const ticket = handle.doc.renderTo(full, page, scale, { isolated: true });
+		await ticket.done;
+		paintCardHighlights(full, card);
+		// 裁出摘录窗口（含余量上下文），再挂载避免半成品闪现
+		const win = pixelRect(crop, full.width, full.height);
+		const out = document.createElement("canvas");
+		out.width = win.sw;
+		out.height = win.sh;
+		const ctx = out.getContext("2d");
+		if (!ctx) {
+			return null;
+		}
+		ctx.drawImage(full, win.sx, win.sy, win.sw, win.sh, 0, 0, win.sw, win.sh);
+		if (!host.isConnected) {
+			return crop; // 渲染期间宿主已拆——丢弃
+		}
+		out.addClass("marinmind-card-preview-crop");
+		host.appendChild(out);
+		return crop;
+	} catch (err) {
+		console.debug("[MarinMind] 摘录页裁剪渲染失败", err);
+		return null;
+	} finally {
+		handle?.release();
+	}
+}
