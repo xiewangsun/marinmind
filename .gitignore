@@ -2,3 +2,7 @@ node_modules/
 main.js
 *.map
 .DS_Store
+
+# Claude Code 技能安装产物（本机工具配置，非项目源码）
+.agents/
+skills-lock.json
