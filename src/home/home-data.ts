@@ -52,11 +52,15 @@ export interface CategoryTree {
 }
 
 /**
- * 按文档记录聚合分类树（文件夹 = category 值的派生分组，不建实体）。
- * 分组键统一走段级归一（与 normalizeCategory 一致）——手编产生的空白变体
- * （如「学习  /英语」）与规范路径归并到同一节点，不再分裂。
+ * 按路径值列表聚合文件夹树核心（category/deck 共用，73-1 自 buildCategoryTree 上收）：
+ * 文件夹 = 路径值的派生分组，不建实体。分组键由调用方先过段级归一（categoryPathOf /
+ * deckPathOf）——手编产生的空白变体（如「学习  /英语」）与规范路径归并到同一节点，不再分裂。
+ *
+ * 76 explicitPaths：用户显式创建的空分组清单（数据根 分类.md/卡组.md）——仅长出
+ * 节点**不计 count**（空分组徽标恒 0，all/uncategorized 不受影响）；与派生路径重复时
+ * ensure 幂等命中同节点，不虚增。
  */
-export function buildCategoryTree(docs: readonly BookDocument[]): CategoryTree {
+function buildPathTree(paths: (string | null)[], explicitPaths?: readonly string[]): CategoryTree {
 	// 根占位节点（fullName=""，仅聚合用不导出）
 	const root: CategoryNode = { name: "", fullName: "", count: 0, total: 0, children: [] };
 	const nodes = new Map<string, CategoryNode>([["", root]]);
@@ -78,13 +82,19 @@ export function buildCategoryTree(docs: readonly BookDocument[]): CategoryTree {
 		return node;
 	};
 	let uncategorized = 0;
-	for (const doc of docs) {
-		const path = categoryPathOf(doc);
+	for (const path of paths) {
 		if (!path) {
 			uncategorized++;
 			continue;
 		}
 		ensure(path).count++;
+	}
+	// 76 显式清单：只长节点不计数（空分组在树上可见、徽标 0）；空值防御跳过
+	if (explicitPaths) {
+		for (const path of explicitPaths) {
+			if (!path) continue;
+			ensure(path);
+		}
 	}
 	// 自底向上累计 total（含子孙）
 	const sumTotals = (node: CategoryNode): number => {
@@ -93,7 +103,64 @@ export function buildCategoryTree(docs: readonly BookDocument[]): CategoryTree {
 	};
 	sumTotals(root);
 	sortCategoryNodes(root.children);
-	return { all: docs.length, uncategorized, roots: root.children };
+	return { all: paths.length, uncategorized, roots: root.children };
+}
+
+/**
+ * 按文档记录聚合分类树（category 路径 → 虚拟文件夹）。
+ * 76 explicitFolders：用户显式创建的空分类清单（store.getFolders）——union 进树
+ * 持久可见，徽标 0 不影响文档计数。
+ */
+export function buildCategoryTree(
+	docs: readonly BookDocument[],
+	explicitFolders?: readonly string[],
+): CategoryTree {
+	return buildPathTree(docs.map(categoryPathOf), explicitFolders);
+}
+
+/** 文档 category 的段级归一完整路径（空/全空段/超长 → null = 未分类） */
+function categoryPathOf(doc: BookDocument): string | null {
+	return doc.category ? normalizeCategory(doc.category) : null;
+}
+
+/** 卡片 deck 的段级归一完整路径（空/全空段/超长 → null = 未分组；与 categoryPathOf 同构，73） */
+function deckPathOf(card: Card): string | null {
+	return card.deck ? normalizeCategory(card.deck) : null;
+}
+
+/**
+ * 按卡片记录聚合卡组树（73 deck 路径化——与文档分类树同一核心，读侧归一防变体分裂）。
+ * 76 explicitDecks：用户显式创建的空卡组清单（store.getDecks）——union 同分类。
+ */
+export function buildDeckTree(
+	cards: readonly Card[],
+	explicitDecks?: readonly string[],
+): CategoryTree {
+	return buildPathTree(cards.map(deckPathOf), explicitDecks);
+}
+
+/**
+ * 全部已知卡组（76 设卡组选择器 items）：卡片实际卡组 ∪ 显式清单去重，拼音序。
+ * 与 buildDeckTree 同源（卡片侧 distinct + 清单 union），保证选择器与左列树所见一致。
+ */
+export function allKnownDecks(
+	cards: readonly Card[],
+	explicitDecks?: readonly string[],
+): string[] {
+	const set = new Set<string>();
+	for (const card of cards) {
+		const d = deckPathOf(card);
+		if (d !== null) set.add(d);
+	}
+	for (const d of explicitDecks ?? []) {
+		if (d) set.add(d);
+	}
+	return [...set].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+/** 路径是否在目标子树内（自身或以「目标/」为前缀；斜杠边界——「学」不匹配「学习」） */
+export function inPathSubtree(path: string, target: string): boolean {
+	return path === target || path.startsWith(`${target}/`);
 }
 
 /** 递归按段名拼音序排序（zh-Hans-CN，与旧扁平分组排序一致） */
@@ -124,11 +191,6 @@ export function injectCategoryPath(roots: CategoryNode[], fullName: string | nul
 	}
 	if (created) sortCategoryNodes(roots); // 注入节点并入整体拼音序
 	return roots;
-}
-
-/** 文档 category 的段级归一完整路径（空/全空段/超长 → null = 未分类） */
-function categoryPathOf(doc: BookDocument): string | null {
-	return doc.category ? normalizeCategory(doc.category) : null;
 }
 
 /**
@@ -175,10 +237,22 @@ export function filterDocsByQuery(docs: readonly BookDocument[], query: string):
 	);
 }
 
-/** 卡片筛选条件（null = 不限） */
+/** 卡片筛选条件（null = 不限；tag 含即命中——卡可多标签） */
 export interface CardsFilter {
 	documentId: string | null;
 	excerptType: string | null;
+	/**
+	 * 卡组（卡组批；73 路径化树选中）：null=不限（树「全部」）/ UNSET_DECK 哨兵=未分组
+	 * / 路径=含子树（选「学习」含「学习/英语」，归一后匹配）。
+	 */
+	deck: string | null;
+	/** 标签（卡组批）：卡 tags 数组含该值即命中 */
+	tag: string | null;
+	/**
+	 * 颜色（70）：精确匹配 card.color；UNSET_COLOR 哨兵 = 未设色（card.color 空）。
+	 * 候选不取 settings.excerptColors——从实际卡片派生才含旧色相与未设色。
+	 */
+	color: string | null;
 }
 
 /** 卡片页视图状态：筛选 + 当前页码（页码从 1 起） */
@@ -186,13 +260,83 @@ export interface CardsPageState extends CardsFilter {
 	page: number;
 }
 
-/** 按文档/形态筛选卡片（null 字段不限，保持传入序） */
+/** 颜色筛选「未设色」哨兵值（card.color 为 null 的卡；下拉 value 空间内专用，不与真实颜色撞） */
+export const UNSET_COLOR = "__mm_unset__";
+
+/** 卡组树「未分组」哨兵值（card.deck 为 null 的卡；树/筛选 value 空间内专用，不与真实路径撞，73） */
+export const UNSET_DECK = "__mm_deck_unset__";
+
+/**
+ * 当前卡组筛选的有效路径（73）：null（不限）或 UNSET_DECK（未分组）→ null，真实路径原样返回。
+ * 消费方三处——「复习本组」按钮（防哨兵字符串被当卡组名传给复习）、树注入
+ * （injectCategoryPath 会为任意非空字符串长出真节点，哨兵必须先剥）、
+ * 重命名/删除卡组后的选中态级联判定。
+ */
+export function activeDeckPath(deck: string | null): string | null {
+	return deck === null || deck === UNSET_DECK ? null : deck;
+}
+
+/**
+ * filterCards 的 deck 维谓词（73 路径化三态）：
+ * UNSET_DECK=未分组（path 为 null）/ 其余值=归一后含子树匹配
+ * （卡片侧先过 deckPathOf 归一，空白变体不漏配；归一失败的超长筛选值不命中任何卡）。
+ */
+function matchesDeckPath(path: string | null, filterDeck: string): boolean {
+	if (filterDeck === UNSET_DECK) return path === null;
+	const target = normalizeCategory(filterDeck);
+	return target !== null && path !== null && inPathSubtree(path, target);
+}
+
+/** 按书籍/形态/卡组/标签/颜色五维 AND 筛选卡片（null 字段不限，保持传入序） */
 export function filterCards(cards: readonly Card[], filter: CardsFilter): Card[] {
 	return cards.filter(
 		(c) =>
 			(filter.documentId === null || c.documentId === filter.documentId) &&
-			(filter.excerptType === null || c.excerptType === filter.excerptType),
+			(filter.excerptType === null || c.excerptType === filter.excerptType) &&
+			(filter.deck === null || matchesDeckPath(deckPathOf(c), filter.deck)) &&
+			(filter.tag === null || c.tags.includes(filter.tag)) &&
+			(filter.color === null ||
+				c.color === filter.color ||
+				(filter.color === UNSET_COLOR && c.color == null)),
 	);
+}
+
+/**
+ * 全库去重卡组名（拼音序，「按卡组复习」选卡器用；空输入返回空数组）。
+ * 73 路径化：归一后去重——空白变体合并为单条，超长归一失败值不列出（落未分组桶）。
+ */
+export function distinctDecks(cards: readonly Card[]): string[] {
+	const decks = new Set<string>();
+	for (const c of cards) {
+		const path = deckPathOf(c);
+		if (path) decks.add(path);
+	}
+	return [...decks].sort((a, b) => a.localeCompare(b, "zh"));
+}
+
+/** 全库去重标签名（拼音序，主页筛选下拉共用；空输入返回空数组） */
+export function distinctTags(cards: readonly Card[]): string[] {
+	const tags = new Set<string>();
+	for (const c of cards) {
+		for (const t of c.tags) tags.add(t);
+	}
+	return [...tags].sort((a, b) => a.localeCompare(b, "zh"));
+}
+
+/**
+ * 全库去重卡片颜色（70 主页颜色筛选下拉用）：含旧色相（teal/orange/… 存量卡
+ * 继续渲染故可筛），「未设色」以 UNSET_COLOR 哨兵殿后（有未设色卡才出现该选项）。
+ */
+export function distinctColors(cards: readonly Card[]): string[] {
+	const colors = new Set<string>();
+	let hasUnset = false;
+	for (const c of cards) {
+		if (c.color) colors.add(c.color);
+		else hasUnset = true;
+	}
+	const out = [...colors].sort((a, b) => a.localeCompare(b));
+	if (hasUnset) out.push(UNSET_COLOR);
+	return out;
 }
 
 /** 总页数（空集也至少 1 页，避免「第 0/0 页」） */

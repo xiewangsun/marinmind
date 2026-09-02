@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
 	autoCollectPlacement,
 	buildChildrenMap,
+	bulkCollapsePlan,
 	dropPlacement,
 	dropZoneFor,
+	edgeDots,
 	edgePath,
 	effectiveBranchStyle,
 	fitViewportTransform,
@@ -16,11 +18,16 @@ import {
 	isDescendantOrSelf,
 	layoutSubtree,
 	layoutTree,
+	linkEdgePath,
 	MIN_SCALE,
 	NODE_HEIGHT_EST,
 	NODE_WIDTH,
+	navigateTree,
 	restackRoots,
 	ROOT_GAP_Y,
+	GRID_SNAP,
+	SNAP_THRESHOLD,
+	snapDragPosition,
 	subtreeIds,
 	suggestChildPosition,
 	suggestRootPosition,
@@ -173,6 +180,94 @@ describe("mindmap-graph 图纯逻辑", () => {
 		expect(visibleNodes(nodes)).toEqual(new Set(["a", "b", "r"]));
 	});
 
+	it("bulkCollapsePlan：折叠全部只取有子且未折叠的节点", () => {
+		const nodes = [
+			makeNode("a", null), // 有子（b）未折叠 → 折叠
+			makeNode("b", "a"), // 无子 → 不动
+			makeNode("c", null, 0, 0, true), // 有子已折叠 → 不动（保持折叠）
+			makeNode("d", "c"), // 无子
+		];
+		const plan = bulkCollapsePlan(nodes, true);
+		expect(plan).toEqual([{ id: "a", collapsed: true }]);
+	});
+
+	it("bulkCollapsePlan：展开全部只取已折叠的节点（无子也展开，幂等清零）", () => {
+		const nodes = [
+			makeNode("a", null, 0, 0, true),
+			makeNode("b", "a"), // 未折叠
+			makeNode("leaf", null, 0, 0, true), // 叶子但折叠态置位：也归零
+		];
+		const plan = bulkCollapsePlan(nodes, false);
+		expect(plan).toEqual([
+			{ id: "a", collapsed: false },
+			{ id: "leaf", collapsed: false },
+		]);
+	});
+
+	it("bulkCollapsePlan：无变化返回空数组（全展开折叠全部重复调用 / 全展开时展开全部）", () => {
+		const allOpen = [makeNode("a", null), makeNode("b", "a")];
+		expect(bulkCollapsePlan(allOpen, false)).toEqual([]); // 没有已折叠
+		const allClosed = [makeNode("a", null, 0, 0, true), makeNode("b", "a")];
+		expect(bulkCollapsePlan(allClosed, true)).toEqual([]); // 唯一有子的已折叠
+		expect(bulkCollapsePlan([], true)).toEqual([]); // 空图
+	});
+
+	it("navigateTree：parent 到父，根返回 null", () => {
+		const nodes = [makeNode("r", null), makeNode("b", "r"), makeNode("c", "b")];
+		expect(navigateTree(nodes, "c", "parent")).toBe("b");
+		expect(navigateTree(nodes, "r", "parent")).toBeNull();
+	});
+
+	it("navigateTree：firstChild 到首个子（compareSiblings 序），折叠中返回 null", () => {
+		const nodes = [
+			makeNode("r", null),
+			{ ...makeNode("k1", "r"), order: 1 },
+			{ ...makeNode("k0", "r"), order: 0 }, // order 让 k0 排前
+		];
+		expect(navigateTree(nodes, "r", "firstChild")).toBe("k0");
+		const collapsed = [{ ...makeNode("r2", null), collapsed: true }, makeNode("x", "r2")];
+		expect(navigateTree(collapsed, "r2", "firstChild")).toBeNull(); // 折叠中视为无子
+		expect(navigateTree(nodes, "k0", "firstChild")).toBeNull(); // 叶子
+	});
+
+	it("navigateTree：prev/nextSibling 同级移动，根集视为兄弟（多根互通）", () => {
+		const nodes = [
+			makeNode("r1", null),
+			makeNode("r2", null),
+			makeNode("r3", null),
+			makeNode("a", "r1"),
+			makeNode("b", "r1"),
+		];
+		expect(navigateTree(nodes, "r1", "nextSibling")).toBe("r2"); // 根间互通
+		expect(navigateTree(nodes, "r3", "prevSibling")).toBe("r2");
+		expect(navigateTree(nodes, "r3", "nextSibling")).toBeNull(); // 末尾
+		expect(navigateTree(nodes, "r1", "prevSibling")).toBeNull(); // 首位
+		expect(navigateTree(nodes, "a", "nextSibling")).toBe("b"); // 普通层级
+		expect(navigateTree(nodes, "b", "nextSibling")).toBeNull(); // 不会跨到根
+	});
+
+	it("navigateTree：fromId 不存在返回 null", () => {
+		expect(navigateTree([makeNode("a", null)], "missing", "parent")).toBeNull();
+	});
+
+	it("linkEdgePath：水平主导（b 在 a 右）取 a 右缘中点 → b 左缘中点", () => {
+		const d = linkEdgePath({ x: 0, y: 0 }, { x: NODE_WIDTH + GAP_X, y: 0 });
+		expect(d).toBe(`M ${NODE_WIDTH} ${NODE_HEIGHT_EST / 2} L ${NODE_WIDTH + GAP_X} ${NODE_HEIGHT_EST / 2}`);
+	});
+
+	it("linkEdgePath：左侧镜像（b 在 a 左）取 a 左缘 → b 右缘", () => {
+		const d = linkEdgePath({ x: 1000, y: 0 }, { x: 0, y: 0 });
+		expect(d).toBe(`M 1000 ${NODE_HEIGHT_EST / 2} L ${NODE_WIDTH} ${NODE_HEIGHT_EST / 2}`);
+	});
+
+	it("linkEdgePath：垂直主导（tree-down）取 a 底缘中点 → b 顶缘中点；实测高优先于估值", () => {
+		const d = linkEdgePath({ x: 0, y: 0, h: 120 }, { x: 0, y: 200 });
+		expect(d).toBe(`M ${NODE_WIDTH / 2} 120 L ${NODE_WIDTH / 2} 200`);
+		// dy 向上镜像
+		const up = linkEdgePath({ x: 0, y: 200, h: 120 }, { x: 0, y: 0 });
+		expect(up).toBe(`M ${NODE_WIDTH / 2} 200 L ${NODE_WIDTH / 2} ${NODE_HEIGHT_EST}`);
+	});
+
 	it("layoutTree：深度对齐列 x，叶子纵序堆叠，父垂直居中于子块", () => {
 		// r → { b1, b2 }（均为叶）：b1 y=0、b2 y=H+GAP；r 居中于 [0, 2H+GAP]
 		const nodes = [makeNode("r", null), makeNode("b1", "r"), makeNode("b2", "r")];
@@ -320,17 +415,64 @@ describe("mindmap-graph 图纯逻辑", () => {
 		expect(edgePath({ x: 0, y: 0 }, { x: 500, y: 0 }, "frame")).toBeNull();
 	});
 
-	it("frameRectFor：子节点包围盒外扩 FRAME_PADDING；空子返回 null", () => {
-		expect(frameRectFor([])).toBeNull();
-		const rect = frameRectFor([
+	it("edgePath 斜树（57）：连线与 tree 同款贝塞尔——斜向感来自布局的父对齐而非连线形状", () => {
+		const parent = { x: 0, y: 0, h: 80 };
+		const child = { x: 500, y: 200, h: 60 };
+		expect(edgePath(parent, child, "tree-slant-down")).toBe(edgePath(parent, child, "tree"));
+		expect(edgePath(parent, child, "tree-slant-up")).toBe(edgePath(parent, child, "tree"));
+	});
+
+	it("edgePath line-elbow（57）：父缘 → 垂直总线 → 子缘的直角折线；总线距父缘 40、近距向中点收缩", () => {
+		const parent = { x: 0, y: 0, h: 80 };
+		// 右向：父右缘(200,40) → 总线 240 → 子缘(500,130)
+		expect(edgePath(parent, { x: 500, y: 100, h: 60 }, "line-elbow")).toBe(
+			"M 200 40 H 240 V 130 H 500",
+		);
+		// 左向镜像：父左缘 → 子右缘，总线向左
+		expect(edgePath(parent, { x: -600, y: 100, h: 60 }, "line-elbow")).toBe(
+			`M 0 40 H -40 V 130 H ${-600 + NODE_WIDTH}`,
+		);
+		// 间距不足（子缘距父缘 < 2×40）时总线向中点收缩，不越过子缘
+		expect(edgePath(parent, { x: 240, y: 100, h: 60 }, "line-elbow")).toBe(
+			"M 200 40 H 220 V 130 H 240",
+		);
+		// 同高时为纯水平折线（V 段退化）
+		expect(edgePath(parent, { x: 500, y: 0, h: 80 }, "line-elbow")).toBe(
+			"M 200 40 H 240 V 40 H 500",
+		);
+	});
+
+	it("edgeDots（57）：line 族返回两端点（父/子相邻缘中点），其他样式 null", () => {
+		const parent = { x: 0, y: 0, h: 80 };
+		const child = { x: 500, y: 100, h: 60 };
+		expect(edgeDots(parent, child, "line")).toEqual([
+			{ x: NODE_WIDTH, y: 40 },
+			{ x: 500, y: 130 },
+		]);
+		expect(edgeDots(parent, child, "line-elbow")).toEqual(edgeDots(parent, child, "line"));
+		expect(edgeDots(parent, child, "tree")).toBeNull();
+		expect(edgeDots(parent, child, "tree-slant-down")).toBeNull();
+		expect(edgeDots(parent, child, "frame")).toBeNull();
+		// 左向镜像：父左缘中点 → 子右缘中点
+		expect(edgeDots(parent, { x: -600, y: 0 }, "line")).toEqual([
+			{ x: 0, y: 40 },
+			{ x: -600 + NODE_WIDTH, y: NODE_HEIGHT_EST / 2 },
+		]);
+	});
+
+	it("frameRectFor（57 标题栏式）：父+子包围盒并集外扩 FRAME_PADDING；空子返回 null", () => {
+		const parent = { x: 100, y: 50, w: NODE_WIDTH, h: 72 };
+		expect(frameRectFor(parent, [])).toBeNull();
+		const rect = frameRectFor(parent, [
 			{ x: 300, y: 100, w: NODE_WIDTH, h: 72 },
 			{ x: 300, y: 200, w: NODE_WIDTH, h: 90 },
 		]);
+		// 父（100,50,300,122）把并集向左上扩展；子块决定右下
 		expect(rect).toEqual({
-			x: 300 - FRAME_PADDING,
-			y: 100 - FRAME_PADDING,
-			w: NODE_WIDTH + FRAME_PADDING * 2,
-			h: (200 + 90 - 100) + FRAME_PADDING * 2,
+			x: 100 - FRAME_PADDING,
+			y: 50 - FRAME_PADDING,
+			w: 300 + NODE_WIDTH - 100 + FRAME_PADDING * 2,
+			h: 200 + 90 - 50 + FRAME_PADDING * 2,
 		});
 	});
 
@@ -425,25 +567,86 @@ describe("mindmap-graph 图纯逻辑", () => {
 		expect(dp.get("c1")!.x).toBe(2 * (NODE_WIDTH + GAP_X)); // 右侧延续而非二次分叉
 	});
 
-	it("layoutTree frame：子节点两列网格收纳，孙节点在格右侧展开不压相邻格", () => {
+	it("layoutTree frame（57 标题栏式）：父嵌框内顶部，子两列网格排父下方，孙在格内右侧展开不压相邻格", () => {
 		const nodes = [
 			makeNode("r", null, 0, 0, false, "frame"),
 			makeNode("b1", "r"),
 			makeNode("b2", "r"),
 			makeNode("b3", "r"),
-			makeNode("c1", "b1"), // b1 的子树（继承 frame）在 b1 右侧展开
+			makeNode("c1", "b1"), // b1 的子树（继承 frame）在 b1 下方格内展开
 		];
 		const pos = layoutTree(nodes);
-		const fx = NODE_WIDTH + GAP_X; // 网格行首（父右缘一列）
-		expect(pos.get("b1")).toEqual({ x: fx, y: 0 });
-		// b1 的子节点 c1 在其右侧一列
-		expect(pos.get("c1")!.x).toBe(2 * (NODE_WIDTH + GAP_X));
-		// b2 被 b1 的整棵子树（含收纳框 padding）推到更右，不压格
-		expect(pos.get("b2")!.y).toBe(0);
+		const innerX = FRAME_PADDING; // 网格行首（框内缩进，不再从父右缘起）
+		const gridY = NODE_HEIGHT_EST + GAP_Y; // 网格首行（父下方）
+		expect(pos.get("r")).toEqual({ x: 0, y: 0 }); // 父在框内顶部
+		expect(pos.get("b1")).toEqual({ x: innerX, y: gridY });
+		// b1 的子节点 c1 在 b1 的框内（进一步缩进 + 下方）
+		expect(pos.get("c1")!.x).toBe(innerX + FRAME_PADDING);
+		expect(pos.get("c1")!.y).toBe(gridY + NODE_HEIGHT_EST + GAP_Y);
+		// b2 与 b1 同行右侧，被 b1 的整棵子树（含收纳框 padding）推到更右，不压格
+		expect(pos.get("b2")!.y).toBe(gridY);
 		expect(pos.get("b2")!.x).toBeGreaterThan(pos.get("c1")!.x + NODE_WIDTH);
 		// 第三子换行：回到行首、落在第一行子块下方
-		expect(pos.get("b3")!.x).toBe(fx);
-		expect(pos.get("b3")!.y).toBeGreaterThan(NODE_HEIGHT_EST);
+		expect(pos.get("b3")!.x).toBe(innerX);
+		expect(pos.get("b3")!.y).toBeGreaterThan(gridY + NODE_HEIGHT_EST);
+	});
+
+	it("layoutTree tree-slant-down（57）：父顶对齐首子（不居中），子级右侧纵向堆叠成瀑布", () => {
+		const nodes = [
+			makeNode("r", null, 0, 0, false, "tree-slant-down"),
+			makeNode("b1", "r"),
+			makeNode("b2", "r"),
+		];
+		const pos = layoutTree(nodes);
+		expect(pos.get("b1")).toEqual({ x: NODE_WIDTH + GAP_X, y: 0 });
+		expect(pos.get("b2")).toEqual({ x: NODE_WIDTH + GAP_X, y: NODE_HEIGHT_EST + GAP_Y });
+		// tree 会把父居中到子块中点；斜右下树父顶对齐子块顶
+		expect(pos.get("r")).toEqual({ x: 0, y: 0 });
+	});
+
+	it("layoutTree tree-slant-up（57）：父底对齐子块底——父在左下、子级向右上展开", () => {
+		const nodes = [
+			makeNode("r", null, 0, 0, false, "tree-slant-up"),
+			makeNode("b1", "r"),
+			makeNode("b2", "r"),
+		];
+		const pos = layoutTree(nodes);
+		expect(pos.get("b1")).toEqual({ x: NODE_WIDTH + GAP_X, y: 0 });
+		const blockBottom = NODE_HEIGHT_EST * 2 + GAP_Y;
+		expect(pos.get("r")).toEqual({ x: 0, y: blockBottom - NODE_HEIGHT_EST });
+	});
+
+	it("layoutTree line-elbow（57）：布局与 line 同形——子级与父同高横向排链", () => {
+		const nodes = [
+			makeNode("r", null, 0, 0, false, "line-elbow"),
+			makeNode("b1", "r"),
+			makeNode("b2", "r"),
+		];
+		const pos = layoutTree(nodes);
+		expect(pos.get("r")).toEqual({ x: 0, y: 0 });
+		expect(pos.get("b1")).toEqual({ x: NODE_WIDTH + GAP_X, y: 0 });
+		expect(pos.get("b2")).toEqual({ x: 2 * (NODE_WIDTH + GAP_X), y: 0 });
+	});
+
+	it("suggestChildPosition（57）：三种新样式与 tree 同落父右侧一列（首子对齐父 y）", () => {
+		const parent = { x: 100, y: 200 };
+		for (const style of ["tree-slant-down", "tree-slant-up", "line-elbow"] as const) {
+			expect(suggestChildPosition(parent, [], style)).toEqual({
+				x: 100 + NODE_WIDTH + GAP_X,
+				y: 200,
+			});
+		}
+	});
+
+	it("effectiveBranchStyle（57）：新样式枚举合法（isBranchStyle 收录，覆盖/继承全链可用）", () => {
+		const nodes = [
+			makeNode("a", null, 0, 0, false, "tree-slant-down"),
+			makeNode("b", "a"),
+			makeNode("c", "b"),
+		];
+		expect(effectiveBranchStyle(nodes, "a", "tree")).toBe("tree-slant-down");
+		expect(effectiveBranchStyle(nodes, "b", "tree")).toBe("tree-slant-down"); // 最近祖先覆盖
+		expect(effectiveBranchStyle(nodes, "b", "line-elbow")).toBe("tree-slant-down"); // 覆盖优先于图默认
 	});
 
 	it("layoutTree：图默认样式作用于未覆盖节点（mapDefault=line）", () => {
@@ -661,5 +864,83 @@ describe("autoCollectPlacement 摘录自动入图落点（⑲）", () => {
 		expect(plan.parentId).toBe("g");
 		// tree-left：子落分组左侧一列
 		expect(plan.childPos).toEqual({ x: -(NODE_WIDTH + GAP_X), y: 0 });
+	});
+});
+
+
+describe("snapDragPosition（58 拖拽对齐吸附 + 网格兜底）", () => {
+	it("无候选：两轴都回落 20px 网格取整，无参考线", () => {
+		const r = snapDragPosition(37, 51, []);
+		expect(r.x).toBe(40); // 37 → round(37/20)*20 = 40
+		expect(r.y).toBe(60);
+		expect(r.guides).toEqual([]);
+	});
+
+	it("x 命中候选：x 对齐 + 垂直参考线；y 未命中回落网格", () => {
+		const r = snapDragPosition(102, 51, [{ x: 100, y: 0 }]);
+		expect(r.x).toBe(100);
+		expect(r.y).toBe(60);
+		expect(r.guides).toEqual([{ axis: "v", at: 100 }]);
+	});
+
+	it("y 命中候选：y 对齐 + 水平参考线；x 未命中回落网格", () => {
+		const r = snapDragPosition(37, 203, [{ x: 0, y: 200 }]);
+		expect(r.x).toBe(40);
+		expect(r.y).toBe(200);
+		expect(r.guides).toEqual([{ axis: "h", at: 200 }]);
+	});
+
+	it("双轴命中：x/y 都对齐，两条参考线", () => {
+		const r = snapDragPosition(103, 47, [{ x: 100, y: 50 }]);
+		expect(r).toEqual({
+			x: 100,
+			y: 50,
+			guides: [
+				{ axis: "v", at: 100 },
+				{ axis: "h", at: 50 },
+			],
+		});
+	});
+
+	it("边界：|差| 恰等于 threshold 命中，超 1 落回网格（候选 y 远离不干扰 y 轴）", () => {
+		// dx = 8（SNAP_THRESHOLD 默认值）→ 命中
+		expect(snapDragPosition(108, 100, [{ x: 100, y: 0 }]).x).toBe(100);
+		// dx = 9 → 未命中，109 回落网格 100（恰好同值，看参考线区分两路径）
+		const r = snapDragPosition(109, 100, [{ x: 100, y: 0 }]);
+		expect(r.x).toBe(100); // 109 → round(109/20)*20 = 100
+		expect(r.guides).toEqual([]); // 无参考线 = 走网格而非对齐
+		// 对齐点不在网格上的候选彻底区分两路径
+		const r2 = snapDragPosition(107, 100, [{ x: 105, y: 0 }]); // dx=2 命中 105（非网格值）
+		expect(r2.x).toBe(105);
+		expect(r2.guides).toEqual([{ axis: "v", at: 105 }]);
+	});
+
+	it("多候选：同轴最近者胜", () => {
+		const r = snapDragPosition(104, 100, [
+			{ x: 100, y: 0 },
+			{ x: 106, y: 0 }, // 距离 2 < 4
+		]);
+		expect(r.x).toBe(106);
+		expect(r.guides).toEqual([{ axis: "v", at: 106 }]);
+	});
+
+	it("自定义 threshold：收紧后原命中变未命中", () => {
+		// dx = 4 > threshold 3 → 未命中，回落网格
+		const r = snapDragPosition(104, 100, [{ x: 100, y: 0 }], 3);
+		expect(r.x).toBe(100);
+		expect(r.guides).toEqual([]);
+	});
+
+	it("负坐标网格取整：就近取整（-13 → -20；-11 → -20；-9 → ±0）", () => {
+		const r = snapDragPosition(-13, -11, []);
+		expect(r.x).toBe(-20);
+		expect(r.y).toBe(-20);
+		// Math.round(-9/20) = -0（Object.is 区分 ±0，用 +1 归一断言）
+		expect(snapDragPosition(0, -9, []).y + 1).toBe(1);
+	});
+
+	it("常量：默认阈值 8、网格 20", () => {
+		expect(SNAP_THRESHOLD).toBe(8);
+		expect(GRID_SNAP).toBe(20);
 	});
 });

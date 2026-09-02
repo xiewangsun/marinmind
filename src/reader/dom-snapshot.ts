@@ -106,6 +106,26 @@ const INVALID_XML_CHARS_RE = new RegExp(
 let rasterQueue: Promise<unknown> = Promise.resolve();
 
 /**
+ * 克隆选项（63 PNG 导出扩展）：脑图整图导出与阅读器快照共用 buildStyleClone，
+ * 差异经选项注入——缺省 = 阅读器旧行为（page-view 调用方零改动）。
+ */
+export interface CloneOptions {
+	/** 克隆树中删除的选择器（默认 overlay/textLayer 之外追加；原树遍历同步跳过保持配对一致） */
+	excludeSelectors?: string[];
+	/** 瞬态状态类（selected/flash/dragging 等）：捕获前从原树临时摘除、算完恢复——
+	 * 只删克隆树 class 属性无用（计算值已带着高亮态烘焙进 cssText） */
+	stripClasses?: string[];
+	/** 克隆根背景色（缺省 = 原根背景色，透明烘焙 #ffffff） */
+	rootBackground?: string;
+	/** 剥除克隆根 transform（world 容器的 translate/scale 是视口平移不是内容
+	 * 的一部分，不剥则镜像内整图二次位移——transform 不在 DENIED_STYLE_PROPS） */
+	stripRootTransform?: boolean;
+}
+
+/** 默认删除选择器：高亮/文本层不得入镜（pdf 快照来自无高亮的干净位图） */
+const DEFAULT_EXCLUDE_SELECTORS = [".marinmind-pdf-overlay", ".marinmind-text-layer"];
+
+/**
  * 把页容器 DOM 的摘录区域栅格化为快照（foreignObject 窗口化技术）。
  * el 为归一化坐标的基准盒（pv.el）；任何失败返回 null（宁拒不赌）。
  */
@@ -118,6 +138,58 @@ export function snapshotDomRegion(
 	// 队列尾只关心完成与否，吞掉结果保持链条不断（capture 自身不再抛出）
 	rasterQueue = run.catch(() => undefined);
 	return run;
+}
+
+/**
+ * 元素像素窗口快照单入口（63 PNG 导出）：与 snapshotDomRegion 的差异——
+ * win 由调用方直供像素窗口（脑图 = edgesSvg viewBox，drawEdges 每次重画同步
+ * 维护可见包围盒，调用方复刻 bbox 逻辑必漂移）、返回裸 canvas 不做编码
+ * （调用方自选 PNG/WebP）、opts 透传 buildStyleClone（脑图剥 world transform /
+ * 摘瞬态状态类 / 换主题底色）。rasterQueue 串行共享不旁路——导出与摘录快照
+ * 并发正是队列要防的内存尖峰。任何失败返回 null（宁拒不赌）。
+ */
+export async function snapshotElementRegion(
+	el: HTMLElement,
+	win: PixelRect,
+	opts?: CloneOptions,
+): Promise<{ canvas: HTMLCanvasElement; scale: number } | null> {
+	const run = rasterQueue.then(() => captureElementRegion(el, win, opts));
+	rasterQueue = run.then(
+		() => undefined,
+		() => undefined,
+	);
+	return run;
+}
+
+async function captureElementRegion(
+	el: HTMLElement,
+	win: PixelRect,
+	opts?: CloneOptions,
+): Promise<{ canvas: HTMLCanvasElement; scale: number } | null> {
+	if (!el.isConnected) {
+		return null; // 视图刚关闭的残留调用：计算值全空，防垃圾图
+	}
+	try {
+		if (win.sw <= 0 || win.sh <= 0) {
+			return null;
+		}
+		const s = rasterScale(win.sw, win.sh);
+		const cw = Math.max(1, Math.round(win.sw * s));
+		const ch = Math.max(1, Math.round(win.sh * s));
+		// 脑图语义：world 是 0×0 transform 容器，子元素绝对定位于世界坐标——
+		// 克隆根钉窗口盒 + foreignObject 以 -sx/-sy 负偏移承载窗口坐标系
+		// （fo 视口恰与 viewBox 重合，窗外内容被 SVG 视口天然裁掉）
+		const clone = buildStyleClone(el, win.sw, win.sh, opts);
+		const xml = buildMirrorSvg(clone, win, win.sw, win.sh, cw, ch);
+		if (xml.length > MAX_MIRROR_XML_CHARS) {
+			return null; // 内容过大（iOS data URL 限制）：宁拒不赌
+		}
+		const canvas = await rasterizeWindow(xml, cw, ch);
+		return canvas ? { canvas, scale: s } : null;
+	} catch (err) {
+		console.warn("[MarinMind] 元素区域快照失败", err);
+		return null;
+	}
 }
 
 async function captureDomRegion(
@@ -180,54 +252,90 @@ async function captureDomRegion(
 
 /**
  * 构建内联了计算样式的克隆树：
- * - 删 .marinmind-pdf-overlay / .marinmind-text-layer（高亮/文本层不得入镜——
- *   pdf 快照同样来自无高亮的干净位图）
+ * - 删除排除选择器命中的子树（默认 overlay/textLayer + opts.excludeSelectors；
+ *   原树遍历同步跳过，与克隆删法一致——见 collectPairs）
  * - 属性保洁：带冒号且无命名空间的字面属性（epub-session setAttribute
  *   ("xlink:href") 产物）序列化后缺 xmlns:xlink 声明、整份 SVG 加载失败——
  *   href 语义值搬进平 href 后删除
- * - 原树/克隆树同序配对（原树遍历跳过 overlay/textLayer，与克隆删法一致），
+ * - 原树/克隆树同序配对（原树遍历跳过排除子树，与克隆删法一致），
  *   逐元素内联计算值；图片（img / svg image）换成 data URL
+ * - stripClasses 瞬态类从原树临时摘除（同步 remove → 读计算值 → finally 恢复，
+ *   同一任务内完成不触发可见重绘），导出图不带选中/闪烁等操作痕迹
  */
-function buildStyleClone(el: HTMLElement, w: number, h: number): HTMLElement {
-	const clone = el.cloneNode(true) as HTMLElement;
-	for (const extra of clone.querySelectorAll<HTMLElement>(
-		".marinmind-pdf-overlay, .marinmind-text-layer",
-	)) {
-		extra.remove();
-	}
-	sanitizeCloneAttributes(clone);
-	const pairs = collectPairs(el, clone);
-	for (const [orig, dest] of pairs) {
-		// HTMLElement 与 SVGElement 都有 style（Element 基类没有），窄化取用
-		const destStyle = (dest as HTMLElement).style;
-		destStyle.cssText = computedStyleText(orig);
-		if (destStyle.position === "fixed" || destStyle.position === "sticky") {
-			destStyle.setProperty("position", "static"); // 脱离取景窗的定位归一
-		}
-		if (orig.tagName === "IMG" || orig.localName === "image") {
-			inlineImagePixels(orig, dest);
+function buildStyleClone(el: HTMLElement, w: number, h: number, opts?: CloneOptions): HTMLElement {
+	const exclude = DEFAULT_EXCLUDE_SELECTORS.concat(opts?.excludeSelectors ?? []);
+	const stripped: Array<[Element, string]> = [];
+	for (const cls of opts?.stripClasses ?? []) {
+		for (const node of [el, ...el.querySelectorAll("*")]) {
+			if (node.classList.contains(cls)) {
+				node.classList.remove(cls);
+				stripped.push([node, cls]);
+			}
 		}
 	}
-	// 克隆根钉盒：与 pv.el 显示盒严格同尺寸（.marinmind-pdf-page 无边框无 padding，
-	// clientWidth==offsetWidth），归一化 rect 的基准盒才能对上；背景显式烘焙保文字可读
-	const bg = getComputedStyle(el).backgroundColor;
-	clone.style.width = `${w}px`;
-	clone.style.height = `${h}px`;
-	clone.style.margin = "0";
-	clone.style.boxSizing = "border-box";
-	clone.style.backgroundColor = isTransparentColor(bg) ? "#ffffff" : bg;
-	return clone;
+	try {
+		const clone = el.cloneNode(true) as HTMLElement;
+		if (exclude.length > 0) {
+			for (const extra of clone.querySelectorAll<HTMLElement>(exclude.join(", "))) {
+				extra.remove();
+			}
+		}
+		sanitizeCloneAttributes(clone);
+		const pairs = collectPairs(el, clone, exclude);
+		for (const [orig, dest] of pairs) {
+			// HTMLElement 与 SVGElement 都有 style（Element 基类没有），窄化取用
+			const destStyle = (dest as HTMLElement).style;
+			destStyle.cssText = computedStyleText(orig);
+			if (destStyle.position === "fixed" || destStyle.position === "sticky") {
+				destStyle.setProperty("position", "static"); // 脱离取景窗的定位归一
+			}
+			if (orig.tagName === "IMG" || orig.localName === "image") {
+				inlineImagePixels(orig, dest);
+			}
+		}
+		// 克隆根钉盒：与原树显示盒同尺寸（阅读器路径——.marinmind-pdf-page 无边框
+		// 无 padding，clientWidth==offsetWidth）；脑图路径传窗口盒（world 是 0×0
+		// transform 容器无自有布局尺寸，见 snapshotElementRegion）。背景显式烘焙保文字可读
+		const bg = opts?.rootBackground ?? getComputedStyle(el).backgroundColor;
+		clone.style.width = `${w}px`;
+		clone.style.height = `${h}px`;
+		clone.style.margin = "0";
+		clone.style.boxSizing = "border-box";
+		clone.style.backgroundColor = isTransparentColor(bg) ? "#ffffff" : bg;
+		if (opts?.stripRootTransform) {
+			// transform 及 CSS Transforms L2 独立属性一并归零（setProperty 防 lib 差异）
+			clone.style.setProperty("transform", "none");
+			clone.style.setProperty("translate", "none");
+			clone.style.setProperty("rotate", "none");
+			clone.style.setProperty("scale", "none");
+		}
+		return clone;
+	} finally {
+		// 原树瞬态类恢复（同步区间内完成，用户不可见）
+		for (const [node, cls] of stripped) {
+			node.classList.add(cls);
+		}
+	}
 }
 
-/** 原树（跳过 overlay/textLayer 子树）与克隆树同序配对；结构不一致视为竞态直接抛 */
-function collectPairs(el: HTMLElement, clone: HTMLElement): Array<[Element, Element]> {
+/** 原树（跳过排除子树）与克隆树同序配对；结构不一致视为竞态直接抛 */
+function collectPairs(
+	el: HTMLElement,
+	clone: HTMLElement,
+	excludeSelectors: string[],
+): Array<[Element, Element]> {
+	const excluded = (node: Element): boolean => {
+		for (const sel of excludeSelectors) {
+			if (node.matches(sel)) {
+				return true;
+			}
+		}
+		return false;
+	};
 	const originals: Element[] = [el];
 	const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT, {
 		acceptNode: (node) =>
-			(node as Element).classList.contains("marinmind-pdf-overlay") ||
-			(node as Element).classList.contains("marinmind-text-layer")
-				? NodeFilter.FILTER_REJECT
-				: NodeFilter.FILTER_ACCEPT,
+			excluded(node as Element) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
 	});
 	for (let n = walker.nextNode(); n; n = walker.nextNode()) {
 		originals.push(n as Element);

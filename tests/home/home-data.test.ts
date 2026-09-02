@@ -1,15 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
+	activeDeckPath,
+	allKnownDecks,
 	buildCategoryTree,
+	buildDeckTree,
 	cardPreview,
+	distinctColors,
+	distinctDecks,
+	distinctTags,
 	filterCards,
 	filterDocsByCategory,
 	filterDocsByQuery,
 	formatRelativeTime,
 	injectCategoryPath,
+	inPathSubtree,
 	normalizeCategory,
 	pageCount,
 	paginate,
+	UNSET_COLOR,
+	UNSET_DECK,
 } from "../../src/home/home-data";
 import type { BookDocument, Card } from "../../src/types";
 
@@ -40,6 +49,7 @@ function card(partial: Partial<Card> = {}): Card {
 		note: null,
 		color: null,
 		title: null,
+		deck: null,
 		occlusions: [],
 		tags: [],
 		createdAt: 1700000000000,
@@ -180,6 +190,89 @@ describe("injectCategoryPath（㊲ 空分类注入）", () => {
 	});
 });
 
+describe("buildDeckTree（73 卡组路径树，与分类树同一核心）", () => {
+	it("空库：全零无卡组", () => {
+		expect(buildDeckTree([])).toEqual({ all: 0, uncategorized: 0, roots: [] });
+	});
+
+	it("多层分组：count 只算直接归入，total 含子孙；children 拼音序", () => {
+		const tree = buildDeckTree([
+			card({ deck: "学习/英语" }),
+			card({ deck: "学习/英语" }),
+			card({ deck: "学习" }),
+			card({ deck: "工作" }),
+			card({ deck: null }),
+		]);
+		expect(tree.all).toBe(5);
+		expect(tree.uncategorized).toBe(1);
+		// localeCompare zh 拼音序：工作(g) < 学习(x)
+		expect(tree.roots.map((n) => n.fullName)).toEqual(["工作", "学习"]);
+		const study = tree.roots[1];
+		expect(study.count).toBe(1);
+		expect(study.total).toBe(3); // 含 学习/英语 ×2
+		expect(study.children[0].count).toBe(2);
+	});
+
+	it("段级归一防分裂：空白变体归并同节点；超长归一失败落未分组桶", () => {
+		const tree = buildDeckTree([
+			card({ deck: "学习/英语" }),
+			card({ deck: "学习 /  英语" }), // 存量变体
+			card({ deck: "长".repeat(121) }), // 归一失败 → 未分组
+		]);
+		expect(tree.uncategorized).toBe(1);
+		const study = tree.roots[0];
+		expect(study.children).toHaveLength(1);
+		expect(study.children[0].count).toBe(2);
+	});
+
+	it("三层嵌套：中间层无直接卡片也有节点", () => {
+		const tree = buildDeckTree([card({ deck: "a/b/c" })]);
+		expect(tree.roots[0].name).toBe("a");
+		expect(tree.roots[0].children[0].children[0].fullName).toBe("a/b/c");
+	});
+});
+
+describe("filterCards deck 三态 + activeDeckPath（73 路径化）", () => {
+	const deckCards = [
+		card({ id: "p1", deck: "学习" }),
+		card({ id: "p2", deck: "学习/英语" }),
+		card({ id: "p3", deck: "工作" }),
+		card({ id: "p4", deck: null }),
+		card({ id: "p5", deck: "学习 /  数学" }), // 空白变体
+	];
+	const all = { documentId: null, excerptType: null, deck: null, tag: null, color: null };
+
+	it("路径选中含子树；前缀不误伤（斜杠边界）；归一变体同命中", () => {
+		expect(filterCards(deckCards, { ...all, deck: "学习" }).map((c) => c.id)).toEqual([
+			"p1",
+			"p2",
+			"p5",
+		]);
+		expect(filterCards(deckCards, { ...all, deck: "学习/英语" }).map((c) => c.id)).toEqual(["p2"]);
+		expect(filterCards(deckCards, { ...all, deck: "学" })).toEqual([]); // 「学」≠「学习」
+		expect(filterCards(deckCards, { ...all, deck: "学习/数学" }).map((c) => c.id)).toEqual(["p5"]);
+	});
+
+	it("UNSET_DECK 哨兵筛未分组；null 不限；归一失败的筛选值不命中任何卡", () => {
+		expect(filterCards(deckCards, { ...all, deck: UNSET_DECK }).map((c) => c.id)).toEqual(["p4"]);
+		expect(filterCards(deckCards, all)).toHaveLength(5);
+		expect(filterCards(deckCards, { ...all, deck: "长".repeat(121) })).toEqual([]);
+	});
+
+	it("activeDeckPath：null/哨兵 → null，路径原样（复习本组与树注入的守卫单源）", () => {
+		expect(activeDeckPath(null)).toBeNull();
+		expect(activeDeckPath(UNSET_DECK)).toBeNull();
+		expect(activeDeckPath("学习/英语")).toBe("学习/英语");
+	});
+
+	it("inPathSubtree：斜杠边界——前缀近似名不误伤", () => {
+		expect(inPathSubtree("学习", "学习")).toBe(true);
+		expect(inPathSubtree("学习/英语", "学习")).toBe(true);
+		expect(inPathSubtree("学习后", "学习")).toBe(false);
+		expect(inPathSubtree("学习", "学习/英语")).toBe(false);
+	});
+});
+
 describe("filterDocsByQuery（㊲ 文档搜索）", () => {
 	const docs = [
 		doc({ id: "a", title: "强化学习导论", filePath: "books/rl.pdf" }),
@@ -203,18 +296,96 @@ describe("filterDocsByQuery（㊲ 文档搜索）", () => {
 	});
 });
 
-describe("filterCards + paginate（㊲ 卡片筛选分页）", () => {
+describe("filterCards + paginate（㊲ 卡片筛选分页；卡组批扩四维）", () => {
 	const cards = [
 		card({ id: "t1", documentId: "d1", excerptType: "text" }),
 		card({ id: "a1", documentId: "d1", excerptType: "area" }),
 		card({ id: "t2", documentId: null, excerptType: "text" }),
 	];
+	const all = { documentId: null, excerptType: null, deck: null, tag: null, color: null };
 
-	it("null 不限全量；按文档/形态单独与组合筛选", () => {
-		expect(filterCards(cards, { documentId: null, excerptType: null })).toHaveLength(3);
-		expect(filterCards(cards, { documentId: "d1", excerptType: null }).map((c) => c.id)).toEqual(["t1", "a1"]);
-		expect(filterCards(cards, { documentId: null, excerptType: "text" }).map((c) => c.id)).toEqual(["t1", "t2"]);
-		expect(filterCards(cards, { documentId: "d1", excerptType: "text" }).map((c) => c.id)).toEqual(["t1"]);
+	it("null 不限全量；按书籍/形态单独与组合筛选", () => {
+		expect(filterCards(cards, all)).toHaveLength(3);
+		expect(filterCards(cards, { ...all, documentId: "d1" }).map((c) => c.id)).toEqual(["t1", "a1"]);
+		expect(filterCards(cards, { ...all, excerptType: "text" }).map((c) => c.id)).toEqual(["t1", "t2"]);
+		expect(filterCards(cards, { ...all, documentId: "d1", excerptType: "text" }).map((c) => c.id)).toEqual(["t1"]);
+	});
+
+	it("卡组批：按 deck 精确筛选（null 不限；未分组卡用空串筛不到）", () => {
+		const deckCards = [
+			card({ id: "x1", deck: "考研单词" }),
+			card({ id: "x2", deck: "考研单词" }),
+			card({ id: "x3", deck: "面试题" }),
+			card({ id: "x4", deck: null }),
+		];
+		expect(filterCards(deckCards, all)).toHaveLength(4);
+		expect(filterCards(deckCards, { ...all, deck: "考研单词" }).map((c) => c.id)).toEqual(["x1", "x2"]);
+		expect(filterCards(deckCards, { ...all, deck: "面试题" }).map((c) => c.id)).toEqual(["x3"]);
+	});
+
+	it("卡组批：按 tag 含即命中（多标签卡）", () => {
+		const tagCards = [
+			card({ id: "y1", tags: ["英语", "词汇"] }),
+			card({ id: "y2", tags: ["英语"] }),
+			card({ id: "y3", tags: [] }),
+		];
+		expect(filterCards(tagCards, { ...all, tag: "英语" }).map((c) => c.id)).toEqual(["y1", "y2"]);
+		expect(filterCards(tagCards, { ...all, tag: "词汇" }).map((c) => c.id)).toEqual(["y1"]);
+	});
+
+	it("70：按颜色精确筛选 + UNSET_COLOR 哨兵筛未设色；distinctColors 派生（含旧色相与哨兵殿后）", () => {
+		const colorCards = [
+			card({ id: "c1", color: "yellow" }),
+			card({ id: "c2", color: "teal" }), // 旧色相存量卡可筛
+			card({ id: "c3", color: null }),
+		];
+		expect(filterCards(colorCards, { ...all, color: "yellow" }).map((c) => c.id)).toEqual(["c1"]);
+		expect(filterCards(colorCards, { ...all, color: UNSET_COLOR }).map((c) => c.id)).toEqual(["c3"]);
+		expect(distinctColors(colorCards)).toEqual(["teal", "yellow", UNSET_COLOR]);
+		// 无未设色卡时不出现哨兵选项；空输入空数组
+		expect(distinctColors([card({ color: "red" })])).toEqual(["red"]);
+		expect(distinctColors([])).toEqual([]);
+	});
+
+	it("卡组批：四维 AND 组合（书×形态×卡组×标签交集）", () => {
+		const mix = [
+			card({ id: "z1", documentId: "d1", excerptType: "text", deck: "G", tags: ["a"] }),
+			card({ id: "z2", documentId: "d1", excerptType: "text", deck: "G", tags: ["b"] }),
+			card({ id: "z3", documentId: "d1", excerptType: "text", deck: "H", tags: ["a"] }),
+			card({ id: "z4", documentId: "d2", excerptType: "text", deck: "G", tags: ["a"] }),
+		];
+		expect(
+			filterCards(mix, {
+				documentId: "d1",
+				excerptType: "text",
+				deck: "G",
+				tag: "a",
+				color: null,
+			}).map((c) => c.id),
+		).toEqual(["z1"]);
+	});
+
+	it("卡组批：distinctDecks / distinctTags 去重 + 拼音序，空输入空数组", () => {
+		const pool = [
+			card({ deck: "面试题", tags: ["英语", "词汇"] }),
+			card({ deck: "考研单词", tags: ["英语"] }),
+			card({ deck: "考研单词", tags: [] }),
+			card({ deck: null, tags: ["zzz"] }),
+		];
+		expect(distinctDecks(pool)).toEqual(["考研单词", "面试题"]);
+		// zh 拼音序：词汇(cíhuì) < 英语(yīngyǔ) < zzz
+		expect(distinctTags(pool)).toEqual(["词汇", "英语", "zzz"]);
+		expect(distinctDecks([])).toEqual([]);
+		expect(distinctTags([])).toEqual([]);
+	});
+
+	it("73：distinctDecks 归一去重——空白变体合并单条，超长归一失败不列出", () => {
+		const pool = [
+			card({ deck: "学习 /  英语" }),
+			card({ deck: "学习/英语" }),
+			card({ deck: "长".repeat(121) }),
+		];
+		expect(distinctDecks(pool)).toEqual(["学习/英语"]);
 	});
 
 	it("paginate：切片、页码从 1 起、越界钳到最后一页", () => {
@@ -267,5 +438,64 @@ describe("cardPreview 卡片预览文本（㶈 与主页列表/预览弹窗共�
 	it("㊺ 标题最高优先（trim）；空白标题让位于批注", () => {
 		expect(cardPreview(card({ title: "  标题 ", note: "问题", excerptText: "原文" }))).toBe("标题");
 		expect(cardPreview(card({ title: "   ", note: "问题", excerptText: "原文" }))).toBe("问题");
+	});
+});
+
+describe("buildCategoryTree/buildDeckTree 显式清单 union（76 空分组持久化）", () => {
+	it("空分类只长节点不计 count：徽标 0、all/uncategorized 不受影响", () => {
+		const tree = buildCategoryTree(
+			[doc({ category: "学习" }), doc({ category: null })],
+			["工作", "学习/英语"], // 「工作」全空 + 「学习/英语」空子分类
+		);
+		expect(tree.all).toBe(2);
+		expect(tree.uncategorized).toBe(1);
+		const work = tree.roots.find((n) => n.fullName === "工作")!;
+		expect(work.count).toBe(0);
+		expect(work.total).toBe(0);
+		const study = tree.roots.find((n) => n.fullName === "学习")!;
+		expect(study.count).toBe(1);
+		expect(study.total).toBe(1); // 空子分类不虚增 total
+		expect(study.children.map((n) => n.fullName)).toEqual(["学习/英语"]);
+	});
+
+	it("多层清单路径长出父链（无文档的中间层也在树上）", () => {
+		const tree = buildCategoryTree([], ["a/b/c"]);
+		expect(tree.all).toBe(0);
+		expect(tree.roots.map((n) => n.fullName)).toEqual(["a"]);
+		expect(tree.roots[0].children[0].children[0].fullName).toBe("a/b/c");
+	});
+
+	it("清单与派生路径重复：ensure 幂等不虚增计数", () => {
+		const tree = buildCategoryTree([doc({ category: "学习" })], ["学习"]);
+		const study = tree.roots.find((n) => n.fullName === "学习")!;
+		expect(study.count).toBe(1);
+		expect(tree.roots).toHaveLength(1);
+	});
+
+	it("buildDeckTree 第二参同构", () => {
+		const tree = buildDeckTree([card({ deck: "英语" })], ["空组"]);
+		expect(tree.all).toBe(1);
+		const names = tree.roots.map((n) => n.fullName);
+		expect(names).toContain("空组");
+		expect(names).toContain("英语");
+	});
+});
+
+describe("allKnownDecks（76 设卡组选择器 items 源）", () => {
+	it("卡片实际卡组 ∪ 显式清单去重，拼音序", () => {
+		const decks = allKnownDecks(
+			[card({ deck: "学习" }), card({ deck: " 学习 " }), card({ deck: null })],
+			["工作", "学习"], // 「学习」与派生重复 → 去重
+		);
+		expect(decks).toEqual(["工作", "学习"]); // 归一去重后拼音序
+	});
+
+	it("无清单：与 distinctDecks 等价", () => {
+		const cards = [card({ deck: "a" }), card({ deck: "b" })];
+		expect(allKnownDecks(cards)).toEqual(distinctDecks(cards));
+	});
+
+	it("仅清单（全空卡组）也返回", () => {
+		expect(allKnownDecks([], ["空组"])).toEqual(["空组"]);
 	});
 });

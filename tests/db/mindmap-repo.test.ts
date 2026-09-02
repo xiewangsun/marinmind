@@ -342,4 +342,124 @@ describe("脑图仓储", () => {
 		expect(mindmaps.fixedRoot()).toBeNull();
 		expect(mindmaps.list()).toHaveLength(0);
 	});
+
+	// ---------- 61 子脑图坍缩 ----------
+
+	it("moveSubtreeToMap 整子树链迁移：父链完整搬走、目标图引用隔离", () => {
+		const c1 = makeCard("根");
+		const c2 = makeCard("子");
+		const c3 = makeCard("孙");
+		const mapA = mindmaps.create("A");
+		const mapB = mindmaps.create("B");
+		const root = mindmaps.addNode(mapA.id, c1.id, null, 0, 0)!;
+		const child = mindmaps.addNode(mapA.id, c2.id, root.id, 100, 0)!;
+		const grand = mindmaps.addNode(mapA.id, c3.id, child.id, 200, 0)!;
+
+		expect(mindmaps.moveSubtreeToMap(child.id, mapB.id)).toBe(true);
+		expect(mindmaps.countNodes(mapA.id)).toBe(1); // 源图只剩根
+		expect(mindmaps.countNodes(mapB.id)).toBe(2);
+		const bChild = mindmaps.getNode(child.id)!;
+		expect(bChild.mapId).toBe(mapB.id);
+		expect(bChild.parentId).toBeNull(); // 缺省父 = 成根
+		expect(mindmaps.getNode(grand.id)?.parentId).toBe(child.id); // 孙仍挂子下
+		// 迁移后双图节点为独立对象：改 B 坐标不影响（getNode 每次取，验证 mapId 已换）
+		mindmaps.moveNode(child.id, 500, 500);
+		expect(mindmaps.getNode(child.id)?.x).toBe(500);
+		expect(mindmaps.getNode(root.id)?.mapId).toBe(mapA.id);
+	});
+
+	it("moveSubtreeToMap targetParentId 两语义：null 保 order 成根 / 非 null 追加末位", () => {
+		const mapA = mindmaps.create("A");
+		const mapB = mindmaps.create("B");
+		const pa = mindmaps.addNode(mapA.id, makeCard("父").id, null, 0, 0)!;
+		const c0 = mindmaps.addNode(mapA.id, makeCard("兄0").id, pa.id, 0, 0)!;
+		const c1 = mindmaps.addNode(mapA.id, makeCard("兄1").id, pa.id, 0, 0)!;
+		// B 图内既有根（解除坍缩场景：坍缩期间新加的子）
+		const bHost = mindmaps.addNode(mapB.id, makeCard("宿主").id, null, 0, 0)!;
+
+		// 兄0 成根（order 保留 0）；兄1 挂宿主下（追加末位 order=0：宿主原无子）
+		expect(mindmaps.moveSubtreeToMap(c0.id, mapB.id)).toBe(true);
+		expect(mindmaps.moveSubtreeToMap(c1.id, mapB.id, bHost.id)).toBe(true);
+		const r0 = mindmaps.getNode(c0.id)!;
+		const r1 = mindmaps.getNode(c1.id)!;
+		expect(r0.parentId).toBeNull();
+		expect(r0.order).toBe(c0.order); // order 保留 → 坍缩后 B 内根序 = 原兄弟序
+		expect(r1.parentId).toBe(bHost.id);
+		expect(r1.order).toBe(0); // 追加末位（宿主下第一个子）
+		// 再迁一个到宿主下：order 递增（排在坍缩期间新加子之后）
+		const c2 = mindmaps.addNode(mapA.id, makeCard("弟2").id, pa.id, 0, 0)!;
+		mindmaps.moveSubtreeToMap(c2.id, mapB.id, bHost.id);
+		expect(mindmaps.getNode(c2.id)?.order).toBe(1);
+	});
+
+	it("moveSubtreeToMap 整批预检：子树任一卡已在目标图 → 整批拒绝零改动", () => {
+		const shared = makeCard("同卡");
+		const c2 = makeCard("子");
+		const mapA = mindmaps.create("A");
+		const mapB = mindmaps.create("B");
+		const root = mindmaps.addNode(mapA.id, shared.id, null, 0, 0)!;
+		const child = mindmaps.addNode(mapA.id, c2.id, root.id, 100, 0)!;
+		mindmaps.addNode(mapB.id, shared.id, null, 0, 0); // B 已有该卡
+
+		expect(mindmaps.moveSubtreeToMap(root.id, mapB.id)).toBe(false);
+		expect(mindmaps.countNodes(mapA.id)).toBe(2); // 零改动
+		expect(mindmaps.countNodes(mapB.id)).toBe(1);
+		expect(mindmaps.getNode(root.id)?.mapId).toBe(mapA.id);
+	});
+
+	it("moveSubtreeToMap 失败分支：目标图不存在 / 源=目标 / 挂点不在目标图", () => {
+		const mapA = mindmaps.create("A");
+		const mapB = mindmaps.create("B");
+		const aNode = mindmaps.addNode(mapA.id, makeCard("a").id, null, 0, 0)!;
+		const aOther = mindmaps.addNode(mapA.id, makeCard("other").id, null, 0, 0)!;
+
+		expect(mindmaps.moveSubtreeToMap(aNode.id, "ghost")).toBe(false);
+		expect(mindmaps.moveSubtreeToMap(aNode.id, mapA.id)).toBe(false); // 源=目标
+		expect(mindmaps.moveSubtreeToMap(aNode.id, mapB.id, aOther.id)).toBe(false); // 挂点属 A
+		expect(mindmaps.moveSubtreeToMap("ghost", mapB.id)).toBe(false);
+		expect(mindmaps.countNodes(mapA.id)).toBe(2);
+	});
+
+	it("moveSubtreeToMap：源图固定根在子树内 → 解钉（对齐 removeNode）", () => {
+		const c1 = makeCard("根");
+		const c2 = makeCard("子");
+		const mapA = mindmaps.create("A");
+		const mapB = mindmaps.create("B");
+		const root = mindmaps.addNode(mapA.id, c1.id, null, 0, 0)!;
+		const child = mindmaps.addNode(mapA.id, c2.id, root.id, 100, 0)!;
+		mindmaps.setFixedRoot(mapA.id, root.id);
+		expect(mindmaps.fixedRoot()).not.toBeNull();
+
+		mindmaps.moveSubtreeToMap(child.id, mapB.id);
+		expect(mindmaps.fixedRoot()).not.toBeNull(); // 固定根本身未迁，钉保持
+
+		expect(mindmaps.moveSubtreeToMap(root.id, mapB.id)).toBe(true);
+		expect(mindmaps.fixedRoot()).toBeNull(); // 固定根随子树迁走 → 解钉
+	});
+
+	it("setChildMap：设置/清除 portal 引用（61 唯一写入口）", () => {
+		const mapA = mindmaps.create("A");
+		const mapB = mindmaps.create("B");
+		const node = mindmaps.addNode(mapA.id, makeCard("卡").id, null, 0, 0)!;
+		expect(node.childMapId).toBeNull(); // addNode 默认非 portal
+
+		mindmaps.setChildMap(node.id, mapB.id);
+		expect(mindmaps.getNode(node.id)?.childMapId).toBe(mapB.id);
+		mindmaps.setChildMap(node.id, null);
+		expect(mindmaps.getNode(node.id)?.childMapId).toBeNull();
+	});
+
+	it("delete portal 清扫：删子图后其他图指向它的引用置 null", () => {
+		const mapA = mindmaps.create("A");
+		const mapB = mindmaps.create("B");
+		const n1 = mindmaps.addNode(mapA.id, makeCard("portal").id, null, 0, 0)!;
+		const n2 = mindmaps.addNode(mapA.id, makeCard("普通").id, null, 0, 0)!;
+		mindmaps.setChildMap(n1.id, mapB.id);
+		mindmaps.setChildMap(n2.id, mapB.id); // 多个 portal 同指一图
+
+		expect(mindmaps.delete(mapB.id)).toBe(true);
+		expect(mindmaps.getNode(n1.id)?.childMapId).toBeNull();
+		expect(mindmaps.getNode(n2.id)?.childMapId).toBeNull();
+		expect(mindmaps.get(mapB.id)).toBeUndefined();
+	});
 });

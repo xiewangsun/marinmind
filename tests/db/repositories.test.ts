@@ -6,6 +6,7 @@ import { MindmapRepository } from "../../src/db/repositories/mindmap-repo";
 import { LinkRepository } from "../../src/db/repositories/link-repo";
 import { ReviewRepository } from "../../src/db/repositories/review-repo";
 import { CardEventBus } from "../../src/events/card-bus";
+import { recordReview } from "../../src/store/review-log";
 import type { Card } from "../../src/types";
 import { MemoryAdapter } from "../helpers/memory-adapter";
 
@@ -209,6 +210,62 @@ describe("卡片仓储", () => {
 		expect(cards.get(card.id)!.title).toBeNull(); // null 显式清空
 	});
 
+	it("deck 三态（卡组）：undefined 不动 / 值更新 / null 移出；创建缺省与传值", () => {
+		const plain = cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "未分组",
+		});
+		expect(plain.deck).toBeNull(); // 创建缺省
+		cards.update(plain.id, { note: "x" });
+		expect(cards.get(plain.id)!.deck).toBeNull(); // 未指定不动
+		cards.update(plain.id, { deck: "考研单词" });
+		expect(cards.get(plain.id)!.deck).toBe("考研单词");
+		cards.update(plain.id, { deck: null });
+		expect(cards.get(plain.id)!.deck).toBeNull(); // null 显式移出卡组
+
+		// 创建时直接传值
+		const decked = cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "组内卡",
+			deck: "雅思口语",
+		});
+		expect(decked.deck).toBe("雅思口语");
+	});
+
+	it("lineStyle 三态（77 线型）：undefined 不动 / 值更新 / null 改回下划线；创建缺省与传值", () => {
+		const plain = cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "默认",
+		});
+		expect(plain.lineStyle).toBeNull(); // 创建缺省 = 下划线
+		cards.update(plain.id, { note: "x" });
+		expect(cards.get(plain.id)!.lineStyle).toBeNull(); // 未指定不动
+		cards.update(plain.id, { lineStyle: "squiggle" });
+		expect(cards.get(plain.id)!.lineStyle).toBe("squiggle");
+		cards.update(plain.id, { lineStyle: null });
+		expect(cards.get(plain.id)!.lineStyle).toBeNull(); // null 显式改回下划线（高亮菜单改回下划线路径）
+
+		// 创建时直接传值
+		const wavy = cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "波浪",
+			lineStyle: "strikethrough",
+		});
+		expect(wavy.lineStyle).toBe("strikethrough");
+	});
+
 	it("listByDocument 按页码排序，recent 按更新时间倒序", async () => {
 		const doc = documents.upsertByPath("books/rl.pdf", "RL");
 		const p3 = cards.create({ documentId: doc.id, page: 3, rects: [], excerptType: "text", excerptText: "p3" });
@@ -311,10 +368,60 @@ describe("复习仓储", () => {
 		// 指定书：跨文档混合到期中只留该书（先过滤后计数）
 		expect(reviews.due(5000, undefined, docA.id).map((c) => c.id)).toEqual([a1.id, a2.id]);
 		expect(reviews.due(5000, undefined, docB.id).map((c) => c.id)).toEqual([b1.id]);
-		// limit 在过滤之后生效：A 书第 1 张到期即止（b1 不占名额）
-		expect(reviews.due(5000, 1, docA.id).map((c) => c.id)).toEqual([a1.id]);
+		// 68 语义更新：limit 只封顶复习段——全新卡场景（phase 均 new）不截断，
+		// A 书两张新卡全出（旧行为截到 a1；新卡独立计量见下方混排 describe）
+		expect(reviews.due(5000, 1, docA.id).map((c) => c.id)).toEqual([a1.id, a2.id]);
 		// 缺省 = 全部书籍（含孤儿卡）——既有语义零回归
 		expect(reviews.due(5000).map((c) => c.id)).toEqual([a1.id, b1.id, a2.id, orphan.id]);
+	});
+
+	it("due 按卡组过滤：只返回该组到期卡；limit 在过滤之后生效；与书过滤取交集；缺省不过滤", () => {
+		const docA = documents.upsertByPath("books/a.pdf", "书A");
+		const docB = documents.upsertByPath("books/b.pdf", "书B");
+		// 到期顺序：g1(1000) < g2(2000) < 无组(3000) < g3(4000)
+		const g1 = cards.create({ documentId: docA.id, page: 1, rects: [], excerptType: "text", excerptText: "g1", deck: "考研单词" });
+		const g2 = cards.create({ documentId: docB.id, page: 1, rects: [], excerptType: "text", excerptText: "g2", deck: "考研单词" });
+		const none = cards.create({ documentId: docA.id, page: 2, rects: [], excerptType: "text", excerptText: "无组" });
+		const g3 = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "g3", deck: "雅思口语" });
+		reviews.enable(g1.id, 1000);
+		reviews.enable(g2.id, 2000);
+		reviews.enable(none.id, 3000);
+		reviews.enable(g3.id, 4000);
+
+		// 指定卡组：跨组到期中只留该组（无组卡被排除）
+		expect(reviews.due(5000, undefined, undefined, "考研单词").map((c) => c.id)).toEqual([g1.id, g2.id]);
+		// 68 语义更新：limit 只封顶复习段——全新卡场景不截断，组内两张全出
+		expect(reviews.due(5000, 1, undefined, "考研单词").map((c) => c.id)).toEqual([g1.id, g2.id]);
+		// 与书过滤取交集
+		expect(reviews.due(5000, undefined, docA.id, "考研单词").map((c) => c.id)).toEqual([g1.id]);
+		// 缺省 = 全部卡片（含无组卡）——既有语义零回归
+		expect(reviews.due(5000).map((c) => c.id)).toEqual([g1.id, g2.id, none.id, g3.id]);
+	});
+
+	it("due 按卡组子树过滤（73 路径化）：父路径含子路径卡；空白变体归一命中；归一失败不命中", () => {
+		// 到期顺序：s1(1000) < s2(2000) < s3(3000) < other(4000) < none(5000)
+		const mk = (text: string, deck: string | null) =>
+			cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: text, deck });
+		const s1 = mk("s1", "学习");
+		const s2 = mk("s2", "学习/英语");
+		const s3 = mk("s3", "学习 /  英语"); // 存量空白变体
+		const other = mk("o", "工作");
+		const none = mk("无组", null);
+		reviews.enable(s1.id, 1000);
+		reviews.enable(s2.id, 2000);
+		reviews.enable(s3.id, 3000);
+		reviews.enable(other.id, 4000);
+		reviews.enable(none.id, 5000);
+
+		// 父路径「学习」含子树（学习/英语 + 空白变体归一命中）；无组与异组排除
+		expect(reviews.due(9000, undefined, undefined, "学习").map((c) => c.id)).toEqual([s1.id, s2.id, s3.id]);
+		// 深路径只含子树（变体同样命中）；前缀近似「学」不命中（斜杠边界）
+		expect(reviews.due(9000, undefined, undefined, "学习/英语").map((c) => c.id)).toEqual([s2.id, s3.id]);
+		expect(reviews.due(9000, undefined, undefined, "学")).toEqual([]);
+		// 归一失败的 deck 参数（超长）不命中任何卡（宁拒不赌，不静默放行）
+		expect(reviews.due(9000, undefined, undefined, "长".repeat(121))).toEqual([]);
+		// 扁平名行为逐字节不变（存量兼容：无 / 时子树 ≡ 精确）
+		expect(reviews.due(9000, undefined, undefined, "工作").map((c) => c.id)).toEqual([other.id]);
 	});
 
 	it("enable 覆盖到期时间（幂等重设），disable 后再 enable 恢复队列", () => {
@@ -326,6 +433,164 @@ describe("复习仓储", () => {
 
 		expect(reviews.disable(a.id)).toBe(true);
 		expect(reviews.disable("不存在")).toBe(false);
+	});
+
+	it("restoreReview（67 撤销）：直写评分前快照（时间倒流不走 SM-2），状态逐值复原", () => {
+		const card = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "Q" });
+		reviews.enable(card.id, 1000);
+		const before = reviews.get(card.id)!;
+		const ts = new Date(2026, 8, 1, 10, 0).getTime();
+		const next = reviews.review(card.id, "good", ts)!;
+		expect(next.repetitions).toBe(before.repetitions + 1);
+		expect(reviews.get(card.id)).toEqual(next);
+
+		reviews.restoreReview(before, ts, "good");
+		expect(reviews.get(card.id)).toEqual(before); // 快照原样写回
+	});
+
+	it("restoreReview 日志镜像回退（67）：评分记 newCards、撤销递减归零删日键", async () => {
+		const adapter = new MemoryAdapter();
+		const s1 = await MarinMindStore.open(adapter);
+		const c1 = new CardRepository(s1);
+		const r1 = new ReviewRepository(s1);
+		const card = c1.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "Q" });
+		r1.enable(card.id, 1000);
+		const before = r1.get(card.id)!;
+		const ts = new Date(2026, 8, 1, 10, 0).getTime();
+		r1.review(card.id, "good", ts); // 首考 = 新卡
+		expect(s1.getReviewLog()["2026-09-01"]).toEqual({ reviews: 1, newCards: 1, again: 0 });
+
+		r1.restoreReview(before, ts, "good"); // 撤销：newCards 递减归零 → 删日键
+		expect(s1.getReviewLog()).toEqual({});
+		s1.close();
+	});
+});
+
+describe("复习仓储 due 分批与新卡混排（68）", () => {
+	/** 造一张"复习态"到期卡：enable 后立即评分（首考出 new），1 天后到期再现 */
+	function makeReviewDueCard(text: string, reviewTs: number): string {
+		const card = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: text });
+		reviews.enable(card.id, 1000);
+		reviews.review(card.id, "good", reviewTs); // phase→review，dueAt = reviewTs + 1 天
+		return card.id;
+	}
+
+	it("全新卡场景回归钉住：dueAt 升序 + cardId 次键（旧位置式调用排序逐字节等价）", () => {
+		const a = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "A" });
+		const b = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "B" });
+		reviews.enable(a.id, 2000);
+		reviews.enable(b.id, 1000);
+		expect(reviews.due(5000).map((c) => c.id)).toEqual([b.id, a.id]);
+	});
+
+	it("复习卡优先新卡殿后：即使新卡 dueAt 更早（Anki 语义——先清欠账再引新）", () => {
+		const r = makeReviewDueCard("R", 1500); // 复习态，dueAt = 1500 + 1 天
+		const n = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "N" });
+		reviews.enable(n.id, 500); // 新卡 dueAt 500 ≪ r
+		expect(reviews.due(1500 + 86_400_000).map((c) => c.id)).toEqual([r, n.id]);
+	});
+
+	it("limit 只封顶复习段：3 复习 + 1 新 limit=2 → 前 2 复习 + 新卡照常", () => {
+		const r1 = makeReviewDueCard("r1", 1000);
+		const r2 = makeReviewDueCard("r2", 1001);
+		const r3 = makeReviewDueCard("r3", 1002);
+		const n = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "N" });
+		reviews.enable(n.id, 500);
+		expect(reviews.due(1002 + 86_400_000, 2).map((c) => c.id)).toEqual([r1, r2, n.id]);
+	});
+
+	it("无复习卡时新卡独立成批：limit 不封顶新段", () => {
+		const a = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "A" });
+		const b = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "B" });
+		reviews.enable(a.id, 1000);
+		reviews.enable(b.id, 2000);
+		expect(reviews.due(5000, 1).map((c) => c.id)).toEqual([a.id, b.id]);
+	});
+
+	it("newPerDay 截断：3 新卡上限 2 → 只出 2 张", () => {
+		const ids = ["a", "b", "c"].map((t) =>
+			cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: t }).id);
+		ids.forEach((id, i) => reviews.enable(id, 1000 + i));
+		expect(reviews.due(5000, 20, undefined, undefined, 2).map((c) => c.id)).toEqual([ids[0], ids[1]]);
+	});
+
+	it("newPerDay=0 = 不限：新卡全量", () => {
+		const ids = ["a", "b", "c"].map((t) =>
+			cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: t }).id);
+		ids.forEach((id, i) => reviews.enable(id, 1000 + i));
+		expect(reviews.due(5000, 20, undefined, undefined, 0).map((c) => c.id)).toEqual(ids);
+	});
+
+	it("当日已考新卡计入配额：日志预置 newCards=1，上限 2 → 只补 1 张", () => {
+		const ts = new Date(2026, 8, 2, 10, 0).getTime();
+		const ids = ["a", "b", "c"].map((t) =>
+			cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: t }).id);
+		ids.forEach((id, i) => reviews.enable(id, 1000 + i));
+		store.mutateReviewLog((log) => recordReview(log, ts, true, "good"));
+		expect(reviews.due(ts, 20, undefined, undefined, 2).map((c) => c.id)).toEqual([ids[0]]);
+	});
+
+	it("配额耗尽：当日已考 ≥ 上限 → 新卡 0 张，复习段照常", () => {
+		const ts = new Date(2026, 8, 2, 10, 0).getTime();
+		const r = makeReviewDueCard("R", 0); // 复习态 dueAt = 86400000 < ts
+		const n = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "N" });
+		reviews.enable(n.id, 500);
+		store.mutateReviewLog((log) => {
+			recordReview(log, ts, true, "good");
+			recordReview(log, ts, true, "good");
+		});
+		expect(reviews.due(ts, 20, undefined, undefined, 2).map((c) => c.id)).toEqual([r]);
+	});
+
+	it("书过滤在混排下仍取交集：复习段与新段各自过滤", () => {
+		const docA = documents.upsertByPath("books/a.pdf", "书A");
+		const r = makeReviewDueCard("R", 0);
+		const n1 = cards.create({ documentId: docA.id, page: 1, rects: [], excerptType: "text", excerptText: "n1" });
+		const n2 = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "n2" });
+		reviews.enable(n1.id, 2000);
+		reviews.enable(n2.id, 3000);
+		expect(reviews.due(86_400_000 + 1, 20, docA.id).map((c) => c.id)).toEqual([n1.id]);
+		expect(r).toBeTruthy();
+	});
+});
+
+describe("复习仓储 dueByIds（70 cards 范围）", () => {
+	/** 造一张"复习态"到期卡（与 68 describe 同式）：enable 后立即评分，1 天后到期 */
+	function makeReviewDueCard(text: string, reviewTs: number): string {
+		const card = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: text });
+		reviews.enable(card.id, 1000);
+		reviews.review(card.id, "good", reviewTs);
+		return card.id;
+	}
+
+	it("id 集合过滤 + 忽略未启用/未到期/不存在的 id；同混排语义（复习卡在前新卡殿后）", () => {
+		const r = makeReviewDueCard("R", 1500); // 复习态 dueAt = 1500 + 1 天
+		const n1 = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "N1" });
+		const n2 = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "N2" });
+		const off = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "off" });
+		reviews.enable(n1.id, 500);
+		reviews.enable(n2.id, 600);
+		// off 不启用闪卡；future 启用但未到期；ghost 不存在
+		const future = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "future" });
+		reviews.enable(future.id, Number.MAX_SAFE_INTEGER);
+		const out = reviews.dueByIds([r, n1.id, n2.id, off.id, future.id, "ghost"], {
+			nowMs: 1500 + 86_400_000,
+		});
+		expect(out.map((c) => c.id)).toEqual([r, n1.id, n2.id]);
+	});
+
+	it("无 limit：集合内到期卡全量返回（cards 范围由调用方框定，20 截断反而漏卡）", () => {
+		const ids = Array.from({ length: 25 }, (_, i) =>
+			cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: `t${i}` }).id);
+		ids.forEach((id, i) => reviews.enable(id, 1000 + i));
+		expect(reviews.dueByIds(ids, { nowMs: 5000 })).toHaveLength(25);
+	});
+
+	it("newPerDay 配额同源：上限 2 → 新卡只出 2 张", () => {
+		const ids = ["a", "b", "c"].map((t) =>
+			cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: t }).id);
+		ids.forEach((id, i) => reviews.enable(id, 1000 + i));
+		expect(reviews.dueByIds(ids, { nowMs: 5000, newPerDay: 2 }).map((c) => c.id)).toEqual([ids[0], ids[1]]);
 	});
 });
 

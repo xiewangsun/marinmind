@@ -127,7 +127,9 @@ export function isDescendantOrSelf(
 
 /**
  * 新子节点落位（方向随父节点生效分支样式）：
- * tree/line/bidir/frame → 父右侧一列；tree-left → 父左侧一列；
+ * tree/line/line-elbow/bidir/frame/tree-slant-down/tree-slant-up → 父右侧一列
+ * （57 三新样式同 tree 落位——斜树的"斜"只体现在自动布局的父对齐方式，顺延追加语义不变）；
+ * tree-left → 父左侧一列；
  * tree-down → 父下方一行顺延（按兄弟数粗略推进，仅求方向对）。
  */
 export function suggestChildPosition(
@@ -246,11 +248,80 @@ export function insertOrder(
 	return (prev + next) / 2;
 }
 
+/** 58 对齐吸附阈值（世界坐标）：被拖节点与候选节点坐标差 ≤ 该值时吸附对齐 */
+export const SNAP_THRESHOLD = 8;
+/** 58 网格吸附间距（世界坐标）：对齐未命中的轴回落到该网格取整（落库坐标整洁，
+ *  与 viewport 屏幕空间点阵背景（24px 固定不随缩放）无视觉对应，仅取整语义） */
+export const GRID_SNAP = 20;
+
+/** 58 吸附参考线：v = 垂直线（x 对齐到 at），h = 水平线（y 对齐到 at） */
+export interface SnapGuide {
+	axis: "v" | "h";
+	at: number;
+}
+
+/**
+ * 拖拽吸附定位（58）：x/y 两轴独立——各找 |差| ≤ threshold 的**最近**候选对齐并给参考线；
+ * 未命中的轴回落 GRID_SNAP 网格取整（无候选的图也有可预期落点；网格吸附不画参考线）。
+ * candidates 为其余可见节点左上角世界坐标（调用方排除被拖子树自身）。
+ */
+export function snapDragPosition(
+	x: number,
+	y: number,
+	candidates: Array<{ x: number; y: number }>,
+	threshold = SNAP_THRESHOLD,
+): { x: number; y: number; guides: SnapGuide[] } {
+	let bestX: { at: number; d: number } | null = null;
+	let bestY: { at: number; d: number } | null = null;
+	for (const c of candidates) {
+		const dx = Math.abs(c.x - x);
+		if (dx <= threshold && (!bestX || dx < bestX.d)) {
+			bestX = { at: c.x, d: dx };
+		}
+		const dy = Math.abs(c.y - y);
+		if (dy <= threshold && (!bestY || dy < bestY.d)) {
+			bestY = { at: c.y, d: dy };
+		}
+	}
+	const guides: SnapGuide[] = [];
+	if (bestX) {
+		guides.push({ axis: "v", at: bestX.at });
+	}
+	if (bestY) {
+		guides.push({ axis: "h", at: bestY.at });
+	}
+	return {
+		x: bestX ? bestX.at : Math.round(x / GRID_SNAP) * GRID_SNAP,
+		y: bestY ? bestY.at : Math.round(y / GRID_SNAP) * GRID_SNAP,
+		guides,
+	};
+}
+
 /** 水平肘弯贝塞尔：从 (x1,y1) 指向 (x2,y2)，控制点向 x2 方向水平外扩（间距近收紧、远放宽） */
 function hElbow(x1: number, y1: number, x2: number, y2: number): string {
 	const dx = Math.min(Math.max(Math.abs(x2 - x1) / 2, 40), 160);
 	const sign = x2 >= x1 ? 1 : -1;
 	return `M ${x1} ${y1} C ${x1 + sign * dx} ${y1}, ${x2 - sign * dx} ${y2}, ${x2} ${y2}`;
+}
+
+/** 直角连线的垂直总线距父缘的水平段长（57）：同 hElbow 近距收紧下限 40 */
+const ELBOW_SEG = 40;
+
+/** line 族连线端点（57）：按子相对方位取父/子相邻缘中点——line 与 line-elbow 共用，
+ *  也是端点圆点（edgeDots）的坐标源 */
+function lineEnds(
+	parent: { x: number; y: number; h?: number },
+	child: { x: number; y: number; h?: number },
+): { x1: number; y1: number; x2: number; y2: number } {
+	const ph = parent.h ?? NODE_HEIGHT_EST;
+	const ch = child.h ?? NODE_HEIGHT_EST;
+	const right = child.x >= parent.x;
+	return {
+		x1: right ? parent.x + NODE_WIDTH : parent.x,
+		y1: parent.y + ph / 2,
+		x2: right ? child.x : child.x + NODE_WIDTH,
+		y2: child.y + ch / 2,
+	};
 }
 
 /**
@@ -262,7 +333,12 @@ function hElbow(x1: number, y1: number, x2: number, y2: number): string {
  *   孙节点延续父辈所在侧（布局侧见 layoutTree 的 bidir 分支）；
  * - tree-down：组织架构图正交折线——父底缘中点 → 垂直短线 → 水平段 → 子顶缘中点
  *   （子在父上方时自动镜像为 顶→底）；
+ * - tree-slant-down / tree-slant-up（57）：连线与 tree 同款贝塞尔（走 default 分支）——
+ *   斜树的"斜"来自布局的父对齐方式（父顶/底对齐子块），连线形状不另设变体；
  * - line：直线——水平段为主（高度不齐时中段直角校正），MN 直线链同款；
+ *   57 起视图对 line 族两端画端点圆点（edgeDots）；
+ * - line-elbow（57，MN4 直线细节差异·垂直支线直角化）：父缘 → 短水平段 →
+ *   垂直总线（同一父的全部子对齐在同一条总线上，组织感）→ 子缘的直角折线；
  * - frame：无连线（返回 null，层级由收纳框表达，视图画 frameRectFor 矩形）。
  * h 由视图传实测 offsetHeight（无 DOM 时缺省估算值）。
  */
@@ -302,11 +378,17 @@ export function edgePath(
 		}
 		case "line": {
 			// 直线：水平段 + 高度不齐时的中段直角校正（同高时即纯水平直线）
-			const right = child.x >= parent.x;
-			const x1 = right ? parent.x + NODE_WIDTH : parent.x;
-			const x2 = right ? child.x : child.x + NODE_WIDTH;
+			const { x1, y1, x2, y2 } = lineEnds(parent, child);
 			const midX = (x1 + x2) / 2;
-			return `M ${x1} ${py} H ${midX} V ${cy} H ${x2}`;
+			return `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`;
+		}
+		case "line-elbow": {
+			// 57 直角连线：父缘短水平段 → 垂直总线 → 子缘；总线距父缘 ELBOW_SEG，
+			// 同一父的全部子对齐在同一条总线上（组织感）；间距不足时向中点收缩防越过子缘
+			const { x1, y1, x2, y2 } = lineEnds(parent, child);
+			const midX = (x1 + x2) / 2;
+			const bus = x2 >= x1 ? Math.min(x1 + ELBOW_SEG, midX) : Math.max(x1 - ELBOW_SEG, midX);
+			return `M ${x1} ${y1} H ${bus} V ${y2} H ${x2}`;
 		}
 		case "frame":
 			return null; // 框架：不画连线（视图画收纳框）
@@ -318,6 +400,25 @@ export function edgePath(
 				: hElbow(parent.x, py, child.x + NODE_WIDTH, cy);
 		}
 	}
+}
+
+/**
+ * line 族连线端点圆点（57，MN4 直线 1/2 的端点细节）：返回 [起点, 终点] 世界坐标；
+ * 非 line/line-elbow 样式返回 null（调用方跳过绘制）。端点在节点盒缘上不扩包围盒。
+ */
+export function edgeDots(
+	parent: { x: number; y: number; h?: number },
+	child: { x: number; y: number; h?: number },
+	style: BranchStyle,
+): Array<{ x: number; y: number }> | null {
+	if (style !== "line" && style !== "line-elbow") {
+		return null;
+	}
+	const { x1, y1, x2, y2 } = lineEnds(parent, child);
+	return [
+		{ x: x1, y: y1 },
+		{ x: x2, y: y2 },
+	];
 }
 
 /**
@@ -401,21 +502,26 @@ export function fixedRootPlacement(
 	);
 }
 
-/** 框架收纳框内边距（框矩形 = 子节点实际包围盒外扩该值） */
+/** 框架收纳框内边距（框矩形 = 父+子实际包围盒并集外扩该值） */
 export const FRAME_PADDING = 20;
 export const FRAME_COLS = 2;
 
-/** 框架收纳框：全部可见子节点的实际包围盒外扩 FRAME_PADDING（无子返回 null） */
+/**
+ * 框架收纳框（57 标题栏式）：**父节点与全部可见子节点**的包围盒并集外扩 FRAME_PADDING
+ * ——57 布局把父嵌进框内顶部作标题栏，框必须把父也围住（此前只包子、父独立于框外）。
+ * 无可见子返回 null（孤节点不画框，与旧语义一致）。
+ */
 export function frameRectFor(
-	children: { x: number; y: number; w: number; h: number }[],
+	parent: { x: number; y: number; w: number; h: number },
+	children: Array<{ x: number; y: number; w: number; h: number }>,
 ): { x: number; y: number; w: number; h: number } | null {
 	if (children.length === 0) {
 		return null;
 	}
-	let minX = Infinity;
-	let minY = Infinity;
-	let maxX = -Infinity;
-	let maxY = -Infinity;
+	let minX = parent.x;
+	let minY = parent.y;
+	let maxX = parent.x + parent.w;
+	let maxY = parent.y + parent.h;
 	for (const c of children) {
 		minX = Math.min(minX, c.x);
 		minY = Math.min(minY, c.y);
@@ -455,6 +561,108 @@ export function visibleNodes(nodes: GraphNode[]): Set<string> {
 		}
 	}
 	return visible;
+}
+
+/**
+ * 批量折叠/展开计划（51）：collapseAll=true 收集"有子节点且未折叠"的节点置 true；
+ * false 收集已折叠的节点置 false。只含真正需要变化的节点，无变化返回空数组——
+ * 调用方据此提示"没有可折叠/展开的节点"并避免无谓写库。
+ */
+export function bulkCollapsePlan(
+	nodes: GraphNode[],
+	collapseAll: boolean,
+): Array<{ id: string; collapsed: boolean }> {
+	const hasChild = new Set<string>();
+	for (const n of nodes) {
+		if (n.parentId != null) {
+			hasChild.add(n.parentId);
+		}
+	}
+	const plan: Array<{ id: string; collapsed: boolean }> = [];
+	for (const n of nodes) {
+		if (collapseAll) {
+			if (hasChild.has(n.id) && !n.collapsed) {
+				plan.push({ id: n.id, collapsed: true });
+			}
+		} else if (n.collapsed) {
+			plan.push({ id: n.id, collapsed: false });
+		}
+	}
+	return plan;
+}
+
+/** 键盘树内导航方向（52）：父 / 首个可见子 / 前一个同级 / 后一个同级 */
+export type NavigateDir = "parent" | "firstChild" | "prevSibling" | "nextSibling";
+
+/**
+ * 键盘树内导航（52，MarginNote 风格）：从 fromId 出发按方向取目标节点 id，无目标 null。
+ * parent：根返回 null；firstChild：折叠中的节点视为无子、子按 compareSiblings 序取首；
+ * prev/nextSibling：同级列表含根集合——多根之间互通（根集视为兄弟）。
+ */
+export function navigateTree(
+	nodes: GraphNode[],
+	fromId: string,
+	dir: NavigateDir,
+): string | null {
+	const from = nodes.find((n) => n.id === fromId);
+	if (!from) {
+		return null;
+	}
+	if (dir === "parent") {
+		return from.parentId ?? null;
+	}
+	const childrenMap = buildChildrenMap(nodes);
+	if (dir === "firstChild") {
+		if (from.collapsed) {
+			return null; // 折叠中：子树收起，↓ 无目标
+		}
+		const kids = childrenMap.get(from.id) ?? [];
+		return kids.length > 0 ? kids[0].id : null;
+	}
+	const siblings = childrenMap.get(from.parentId) ?? [];
+	const idx = siblings.findIndex((n) => n.id === fromId);
+	if (idx < 0) {
+		return null;
+	}
+	if (dir === "prevSibling") {
+		return idx > 0 ? siblings[idx - 1].id : null;
+	}
+	return idx < siblings.length - 1 ? siblings[idx + 1].id : null;
+}
+
+/**
+ * 卡片互链虚线边路径（53）：按两节点相对方位取相邻侧边缘中点连直线段。
+ * 水平主导 → a 右/左缘中点 ↔ b 对侧缘中点；垂直主导（tree-down 等布局）镜像。
+ * 端点都在节点盒内——调用方无需为互链边扩包围盒（viewBox 计算零改动）。
+ */
+export function linkEdgePath(
+	a: { x: number; y: number; h?: number },
+	b: { x: number; y: number; h?: number },
+): string {
+	const ha = a.h ?? NODE_HEIGHT_EST;
+	const hb = b.h ?? NODE_HEIGHT_EST;
+	const dx = b.x + NODE_WIDTH / 2 - (a.x + NODE_WIDTH / 2);
+	const dy = b.y + hb / 2 - (a.y + ha / 2);
+	// 距离按"一跳步长"归一后比较，取主导轴决定相邻侧
+	const horiz = Math.abs(dx) / (NODE_WIDTH + GAP_X) >= Math.abs(dy) / (ha + hb);
+	let x1: number;
+	let y1: number;
+	let x2: number;
+	let y2: number;
+	if (horiz) {
+		const right = dx >= 0;
+		x1 = right ? a.x + NODE_WIDTH : a.x;
+		y1 = a.y + ha / 2;
+		x2 = right ? b.x : b.x + NODE_WIDTH;
+		y2 = b.y + hb / 2;
+	} else {
+		const below = dy >= 0;
+		x1 = a.x + NODE_WIDTH / 2;
+		y1 = below ? a.y + ha : a.y;
+		x2 = b.x + NODE_WIDTH / 2;
+		y2 = below ? b.y : b.y + hb;
+	}
+	return `M ${x1} ${y1} L ${x2} ${y2}`;
 }
 
 /** 子树包围盒（世界坐标；兄弟堆叠与多根堆叠由调用方用包围盒推进游标） */
@@ -542,8 +750,10 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 				result.set(node.id, { x: (x + rowRight - W) / 2, y: top });
 				return { minX: x, minY: top, maxX: rowRight, maxY };
 			}
-			case "line": {
-				// 直线链：子节点与父同高横向排链，各子子树按包围盒占位
+			case "line":
+			case "line-elbow": {
+				// 直线链（57 起含直角连线变体，布局同形）：子节点与父同高横向排链，
+				// 各子子树按包围盒占位
 				let cx = x + W + GAP_X;
 				let maxY = top + nh;
 				for (const c of kids) {
@@ -580,16 +790,46 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 				result.set(node.id, { x, y: (top + bottom - nh) / 2 });
 				return { minX, minY: top, maxX, maxY: bottom };
 			}
+			case "tree-slant-down": {
+				// 57 斜右下树（MN4 树形3）：子级与 tree 同款右侧一列纵向堆叠，
+				// 但父**顶对齐首子**（不做垂直居中）——子级瀑布向下形成斜向瀑布
+				let cursor = top;
+				let maxX = x + W;
+				for (const c of kids) {
+					const b = layoutNode(c, x + W + GAP_X, cursor, style, visit);
+					cursor = b.maxY + GAP_Y;
+					maxX = Math.max(maxX, b.maxX);
+				}
+				const bottom = Math.max(cursor - GAP_Y, top + nh);
+				result.set(node.id, { x, y: top }); // 父顶对齐子块顶（斜树签名）
+				return { minX: x, minY: top, maxX, maxY: bottom };
+			}
+			case "tree-slant-up": {
+				// 57 斜右上树（MN4 树形4）：子级右侧一列纵向堆叠（序不变），
+				// 父**底对齐子块底**——父在左下、子级向右上展开
+				let cursor = top;
+				let maxX = x + W;
+				for (const c of kids) {
+					const b = layoutNode(c, x + W + GAP_X, cursor, style, visit);
+					cursor = b.maxY + GAP_Y;
+					maxX = Math.max(maxX, b.maxX);
+				}
+				const bottom = Math.max(cursor - GAP_Y, top + nh);
+				result.set(node.id, { x, y: bottom - nh }); // 父底对齐子块底（斜树签名）
+				return { minX: x, minY: top, maxX, maxY: bottom };
+			}
 			case "frame": {
-				// 框架：子节点在父右侧按 FRAME_COLS 列网格收纳（行满换行，行高取本行最高子块）
-				const fx = x + W + GAP_X;
-				let cx = fx;
-				let cy = top;
-				let rowBottom = top;
-				let gridMaxX = fx;
+				// 57 标题栏式框架：父嵌框内顶部，子按 FRAME_COLS 列网格排父下方——
+				// 收纳框（frameRectFor）围住 父+子 并集；网格起点缩进 FRAME_PADDING
+				// 使子块落在框内（右缘由 frameRectFor 按实际位置兜住）
+				const innerX = x + FRAME_PADDING;
+				let cx = innerX;
+				let cy = top + nh + GAP_Y;
+				let rowBottom = cy;
+				let gridMaxX = innerX;
 				kids.forEach((c, i) => {
 					if (i > 0 && i % FRAME_COLS === 0) {
-						cx = fx;
+						cx = innerX;
 						cy = rowBottom + GAP_Y;
 					}
 					const b = layoutNode(c, cx, cy, style, visit);
@@ -598,13 +838,12 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 					gridMaxX = Math.max(gridMaxX, b.maxX);
 				});
 				result.set(node.id, { x, y: top });
-				// 收纳框渲染时按实际节点位置重算（frameRectFor），此处包围盒只负责
-				// 兄弟/多根间距——外扩 FRAME_PADDING 防视觉框压到相邻子树
+				// 包围盒 = 框整体（父 + 子网格 + 两侧内边距）；兄弟/多根间距据此推进
 				return {
-					minX: Math.min(x, fx - FRAME_PADDING),
-					minY: top,
+					minX: x - FRAME_PADDING,
+					minY: top - FRAME_PADDING,
 					maxX: gridMaxX + FRAME_PADDING,
-					maxY: Math.max(rowBottom + FRAME_PADDING, top + nh),
+					maxY: rowBottom + FRAME_PADDING,
 				};
 			}
 			default: {
@@ -661,10 +900,14 @@ function subtreeIdsFromMap(
  * - tree-left：镜像"右根左叶"——子节点左侧一列（世界坐标可为负）；
  * - tree-down：组织架构图——子节点横排在父下方一行，父水平居中于子行；
  * - line：直线链——子节点与父同高横向排链，各子子树按包围盒占位互不重叠；
+ * - line-elbow（57）：直角连线——布局与 line 同形（横向排链），仅连线形状不同；
+ * - tree-slant-down / tree-slant-up（57）：斜树——子级右侧一列堆叠同 tree，
+ *   但父不居中：slant-down 父顶对齐子块顶（瀑布向下）、slant-up 父底对齐子块底
+ *   （瀑布向上）；
  * - bidir：双向——前半子节点挂父右侧、后半挂左侧（父居中），子节点继承所在侧的
  *   单侧样式（孙节点不再二次分叉，与 MN 语义一致）；
- * - frame：框架——子节点在父右侧以 FRAME_COLS 列网格收纳，格大小 = 子树包围盒
- *   （子树可向右展开不压相邻格），返回包围盒含 FRAME_PADDING 间距。
+ * - frame：框架（57 标题栏式）——父嵌框内顶部，子节点以 FRAME_COLS 列网格排父
+ *   下方，格大小 = 子树包围盒（子树可向右展开不压相邻格），收纳框围住父+子并集。
  * 节点生效样式 = 自身覆盖 ?? 父层下传继承（bidir 侧别）?? 图默认。
  * 返回**全量节点**（含折叠隐藏的后代——展开后位置也合理）的新坐标；
  * 多根（含孤儿）按 order 自上而下纵向堆叠（间隔 ROOT_GAP_Y）；

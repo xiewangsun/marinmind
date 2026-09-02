@@ -4,11 +4,23 @@ import {
 	HIGHLIGHT_COLORS,
 	highlightFallbackColor,
 	highlightLineColor,
+	highlightLineStyle,
 	isHighlightColor,
+	LINE_STYLE_ICONS,
 } from "../../src/reader/highlight-colors";
+import {
+	isLineStyle,
+	LINE_STYLES,
+	LINE_STYLE_LABELS,
+	type LineStyle,
+} from "../../src/types";
 
-/** 测试用最小卡片（highlightFallbackColor 只读 color/excerptType） */
-function cardOf(excerptType: Card["excerptType"], color: string | null): Card {
+/** 测试用最小卡片（highlightFallbackColor/highlightLineStyle 只读 color/lineStyle/excerptType） */
+function cardOf(
+	excerptType: Card["excerptType"],
+	color: string | null,
+	lineStyle: LineStyle | null = null,
+): Card {
 	return {
 		id: "c1",
 		documentId: "d1",
@@ -20,7 +32,9 @@ function cardOf(excerptType: Card["excerptType"], color: string | null): Card {
 		excerptRef: null,
 		note: null,
 		color,
+		lineStyle,
 		title: null,
+		deck: null,
 		occlusions: [],
 		tags: [],
 		createdAt: 0,
@@ -76,5 +90,39 @@ describe("高亮颜色体系（㊹ MN3 四色化）", () => {
 		expect(highlightLineColor("teal")).toBe("#14b8a6");
 		expect(highlightLineColor("pink")).toBe("#d96a9c");
 		expect(highlightLineColor("unknown")).toBe("#d9a916");
+	});
+});
+
+describe("文字摘录线型（77 下划线/波浪线/删除线）", () => {
+	it("LINE_STYLES 三值且顺序固定（下划线在前=默认值位）", () => {
+		expect(LINE_STYLES).toEqual(["underline", "squiggle", "strikethrough"]);
+	});
+
+	it("isLineStyle：三值为真，未知/空/非字符串为假（解析层守卫）", () => {
+		expect(isLineStyle("underline")).toBe(true);
+		expect(isLineStyle("squiggle")).toBe(true);
+		expect(isLineStyle("strikethrough")).toBe(true);
+		expect(isLineStyle("wavy")).toBe(false);
+		expect(isLineStyle("")).toBe(false);
+		expect(isLineStyle(123)).toBe(false);
+		expect(isLineStyle(null)).toBe(false);
+	});
+
+	it("highlightLineStyle：squiggle/strikethrough 直返，null 回退下划线", () => {
+		expect(highlightLineStyle(cardOf("text", null, "squiggle"))).toBe("squiggle");
+		expect(highlightLineStyle(cardOf("text", null, "strikethrough"))).toBe("strikethrough");
+		expect(highlightLineStyle(cardOf("text", null))).toBe("underline");
+	});
+
+	it("LINE_STYLE_LABELS 三键非空（菜单/Notice 文案可用性）", () => {
+		for (const style of LINE_STYLES) {
+			expect(LINE_STYLE_LABELS[style].length).toBeGreaterThan(0);
+		}
+	});
+
+	it("LINE_STYLE_ICONS 三键非空（工具栏钮与菜单条目共用，均经 asar 验证）", () => {
+		expect(LINE_STYLE_ICONS.underline).toBe("underline");
+		expect(LINE_STYLE_ICONS.squiggle).toBe("waves");
+		expect(LINE_STYLE_ICONS.strikethrough).toBe("strikethrough");
 	});
 });

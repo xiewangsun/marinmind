@@ -190,8 +190,10 @@ export function convertLegacyDb(db: MarinMindDatabase): LegacyImportData & { war
 			// ㊹ 读取归一：旧库文字摘录的 blue 视觉一直是黄（MN 黄历史值），
 			// 四色化后 blue = 浅蓝真义，导入时归一为 yellow（与 book-format 解析同源）
 			color: r.color === "blue" ? "yellow" : r.color,
+			lineStyle: null, // 旧库无线型列（77），导入一律下划线
 			occlusions: [], // 旧库无遮挡列（㊷），导入一律无遮挡
 			title: null, // 旧库无标题列（㊺），导入一律无标题
+			deck: null, // 旧库无卡组（本次新增），导入一律未分组
 			tags: parseTags(r.tags, r.id, warnings),
 			createdAt: r.created_at,
 			updatedAt: r.updated_at,
@@ -277,6 +279,7 @@ export function convertLegacyDb(db: MarinMindDatabase): LegacyImportData & { war
 			y: r.y,
 			collapsed: r.collapsed !== 0,
 			branchStyle: r.branch_style && isBranchStyle(r.branch_style) ? r.branch_style : null,
+			childMapId: null, // 61 旧库无子脑图概念，一律普通节点
 			createdAt: r.created_at,
 		}));
 

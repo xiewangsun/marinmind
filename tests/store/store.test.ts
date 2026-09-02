@@ -10,6 +10,7 @@ import { newId } from "../../src/utils";
 import type { ListableStorageAdapter } from "../../src/storage/vault-rooted-adapter";
 import { MarinMindStore, ORPHAN_SCOPE } from "../../src/store/marinmind-store";
 import { defaultReviewState } from "../../src/store/book-format";
+import { serializeGroupListMd } from "../../src/store/group-list";
 
 /** 内存版可列举适配器：模拟 vault.adapter，并按路径统计写次数（零写契约断言用） */
 class MemoryAdapter implements ListableStorageAdapter {
@@ -87,7 +88,9 @@ function card(partial: Partial<Card> & Pick<Card, "id" | "documentId">): Card {
 		excerptRef: null,
 		note: null,
 		color: null,
+		lineStyle: null,
 		title: null,
+		deck: null,
 		occlusions: [],
 		tags: [],
 		createdAt: 1700000001000,
@@ -410,6 +413,26 @@ describe("MarinMindStore 外部修改回灌", () => {
 		store.close();
 	});
 
+	it("脏窗口：lineStyle 取磁盘（77——手编机器层 line 键的线型即时生效）", async () => {
+		const adapter = new MemoryAdapter();
+		const { store, d, c } = await seedBookWithCard(adapter);
+		const rel = "书籍A.md";
+
+		// 插件侧待写（脏窗口开启）：内存卡是默认下划线（lineStyle null）
+		store.markDirty(d.id);
+
+		// 用户手编磁盘：机器注释补 line 键
+		const edited = textOf(adapter, rel).replace(
+			`"id":"${c.id}"`,
+			`"id":"${c.id}","line":"squiggle"`,
+		);
+		writeText(adapter, rel, edited);
+		const r = await store.handleExternalChange(rel, edited);
+		expect(r.warnings.join()).toContain("合并");
+		expect(store.books.get(d.id)!.cards.get(c.id)!.lineStyle).toBe("squiggle"); // 线型取磁盘
+		store.close();
+	});
+
 	it("脏窗口：文档级合并取磁盘 title 与 category（㉟——手编分类不被内存回退）", async () => {
 		const adapter = new MemoryAdapter();
 		const { store, d } = await seedBookWithCard(adapter);
@@ -472,6 +495,116 @@ describe("MarinMindStore 外部修改回灌", () => {
 		const r = await store.handleExternalChange("书籍A.md", "用户把文件搞坏了");
 		expect(r.warnings.join()).toContain("忽略");
 		expect(store.books.get(d.id)!.cards.get(c.id)).toBeDefined(); // 内存保住
+		store.close();
+	});
+});
+
+describe("MarinMindStore 分类/卡组清单（76）", () => {
+	it("addFolder/addDeck → flush 落盘 → 重开恢复", async () => {
+		const adapter = new MemoryAdapter();
+		const store = await MarinMindStore.open(adapter);
+		store.addFolder("学习");
+		store.addFolder("学习/英语");
+		store.addDeck("英语");
+		await store.flush();
+		expect(adapter.files.has("分类.md")).toBe(true);
+		expect(adapter.files.has("卡组.md")).toBe(true);
+		expect(textOf(adapter, "分类.md")).toContain("marinmind: folders");
+		expect(textOf(adapter, "卡组.md")).toContain("marinmind: decks");
+
+		const reopened = await MarinMindStore.open(adapter);
+		expect([...reopened.getFolders()]).toEqual(["学习", "学习/英语"]);
+		expect([...reopened.getDecks()]).toEqual(["英语"]);
+		reopened.close();
+	});
+
+	it("重复 add 同值零写入（flush 无新写）", async () => {
+		const adapter = new MemoryAdapter();
+		const store = await MarinMindStore.open(adapter);
+		store.addFolder("学习");
+		await store.flush();
+		const writes = adapter.writeCounts.get("分类.md") ?? 0;
+		store.addFolder("学习"); // 已存在：不标脏
+		await store.flush();
+		expect(adapter.writeCounts.get("分类.md") ?? 0).toBe(writes);
+		store.close();
+	});
+
+	it("清单清空 → flush 删文件（清空即删）；从未写过零动作", async () => {
+		const adapter = new MemoryAdapter();
+		const store = await MarinMindStore.open(adapter);
+		store.addFolder("学习");
+		await store.flush();
+		expect(adapter.files.has("分类.md")).toBe(true);
+		store.removeFoldersUnder("学习");
+		await store.flush();
+		expect(adapter.files.has("分类.md")).toBe(false);
+		// 卡组从未写过：flush 零动作
+		await store.flush();
+		expect(adapter.files.has("卡组.md")).toBe(false);
+		store.close();
+	});
+
+	it("remove/rename 前缀级联（含子路径；无命中原引用零写入）", async () => {
+		const adapter = new MemoryAdapter();
+		const store = await MarinMindStore.open(adapter);
+		store.addFolder("学习");
+		store.addFolder("学习/英语");
+		store.renameFoldersPrefix("学习", "study");
+		expect([...store.getFolders()]).toEqual(["study", "study/英语"]);
+		store.removeFoldersUnder("study");
+		expect([...store.getFolders()]).toEqual([]);
+		// 无命中不再标脏（remove 已清空 + add 无变化组合后 flush 幂等）
+		await store.flush();
+		store.close();
+	});
+
+	it("groupListHasChildren：严格子孙判定（主页空组免确认用）", async () => {
+		const adapter = new MemoryAdapter();
+		const store = await MarinMindStore.open(adapter);
+		store.addDeck("学习");
+		store.addDeck("学习/英语");
+		expect(store.groupListHasChildren("decks", "学习")).toBe(true);
+		expect(store.groupListHasChildren("decks", "学习/英语")).toBe(false);
+		store.close();
+	});
+
+	it("外部手编清单：modify 覆盖内存 / 损坏保内存 / delete 清空撤脏", async () => {
+		const adapter = new MemoryAdapter();
+		const store = await MarinMindStore.open(adapter);
+		store.addFolder("学习");
+		await store.flush();
+
+		// 手编加行 → 磁盘即权威（parse 产出拼音序：工作 g < 学习 x）
+		const edited = serializeGroupListMd("folders", ["学习", "工作"]);
+		await store.handleExternalChange("分类.md", edited);
+		expect([...store.getFolders()]).toEqual(["工作", "学习"]);
+
+		// 损坏（frontmatter 没了）→ 保内存，下次 flush 覆盖回
+		await store.handleExternalChange("分类.md", "用户改坏了");
+		expect([...store.getFolders()]).toEqual(["工作", "学习"]);
+
+		// 删除 → 清内存；再 add 时按新清单重建不复活旧值
+		await store.handleExternalChange("分类.md", null);
+		expect([...store.getFolders()]).toEqual([]);
+		store.addFolder("新分类");
+		await store.flush();
+		// 头部提示文案含示例「学习/英语」，只断言列表行无旧值
+		expect(textOf(adapter, "分类.md")).not.toContain("- 学习");
+		store.close();
+	});
+
+	it("书名恰为「分类」/「卡组」：让路加 id 后缀防覆盖清单文件", async () => {
+		const adapter = new MemoryAdapter();
+		const store = await MarinMindStore.open(adapter);
+		store.addFolder("学习");
+		await store.flush();
+		const d = doc({ id: "abcd1234-0000-4000-8000-000000000000", title: "分类" });
+		const s = store.upsertBook(d);
+		expect(s.relPath.startsWith("分类 (")).toBe(true);
+		await store.flush();
+		// 清单文件内容未被书文件覆盖
+		expect(textOf(adapter, "分类.md")).toContain("marinmind: folders");
 		store.close();
 	});
 });

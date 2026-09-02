@@ -13,6 +13,21 @@ export interface SessionStats {
 }
 
 /**
+ * 一次已落库评分的会话内记录（67 浏览态撤销）。
+ * index = 评分发生时的队列下标（撤销的落回目标）；requeued = 该次评分是
+ * again（队尾重现了一条该卡的实例，撤销时要一并出队）。
+ */
+export interface GradedStep {
+	cardId: string;
+	grade: ReviewGrade;
+	index: number;
+	requeued: boolean;
+}
+
+/** 撤销栈深度（浅栈防误按连环回退掏空整场会话；改评 = 撤销后重评自然组合） */
+const UNDO_STACK_MAX = 20;
+
+/**
  * 复习会话（纯逻辑，零 obsidian 依赖，vitest 可测）。
  *
  * 队列语义：
@@ -39,6 +54,8 @@ export class ReviewSession {
 	/** 已评分的队列下标 → 档位（again 重现的新下标单独记录，同一卡可有多条） */
 	private readonly graded = new Map<number, ReviewGrade>();
 	private readonly counts = { again: 0, hard: 0, good: 0, easy: 0 };
+	/** 67 已落库评分的撤销栈（栈顶 = 最近一次；grade 单调递增的 index 保栈序有效） */
+	private readonly undoStack: GradedStep[] = [];
 
 	constructor(
 		cards: Card[],
@@ -152,12 +169,143 @@ export class ReviewSession {
 		this.counts[grade]++;
 		this.onGrade(card.id, grade);
 		this.graded.set(this.index, grade);
-		if (grade === "again") {
+		const requeued = grade === "again";
+		if (requeued) {
 			this.queue.push(card); // 本地队尾重现（同会话再考）
+		}
+		// 67 撤销栈：评分只发生在 index 且 index 单调递增 → 栈顶 index 恒为
+		// graded 的最大键（again 重现实例下标恒大于当时的 index），撤销无需 remove 的重键算法
+		this.undoStack.push({ cardId: card.id, grade, index: this.index, requeued });
+		if (this.undoStack.length > UNDO_STACK_MAX) {
+			this.undoStack.shift();
 		}
 		this.index++;
 		this.position = this.index;
 		this.revealed = false;
+		return true;
+	}
+
+	/** 撤销栈深度（视图层按钮禁用态判定） */
+	get undoDepth(): number {
+		return this.undoStack.length;
+	}
+
+	/**
+	 * 撤销最近一次评分（67）：弹出栈顶并回退会话状态——计数递减、graded 清键、
+	 * again 重现实例出队、index/position 落回被撤销卡（未翻面态重新作答）。
+	 * 返回弹出的步骤（视图层据此回退 DB 与日志），空栈/防御失败返回 null。
+	 *
+	 * 不变量：grade() 只在 index 处发生且 index 单调递增 → 栈顶 index 恒为 graded
+	 * 最大键 → 弹栈即剥最近一层。防御一：requeued 步骤要求队尾恰为该卡——不符
+	 * （理论不可达，remove 清栈保住了这一点）则原样推回放弃撤销。
+	 */
+	undoLast(): GradedStep | null {
+		const step = this.undoStack.pop();
+		if (!step) {
+			return null;
+		}
+		if (step.requeued) {
+			const tail = this.queue[this.queue.length - 1];
+			if (!tail || tail.id !== step.cardId) {
+				this.undoStack.push(step); // 状态已不是我认识的样子——原样还栈宁拒不赌
+				return null;
+			}
+			this.queue.pop();
+		}
+		this.counts[step.grade] = Math.max(0, this.counts[step.grade] - 1);
+		this.graded.delete(step.index);
+		this.index = step.index;
+		this.position = step.index; // 落回被撤销卡，从头作答
+		this.revealed = false;
+		return step;
+	}
+
+	/** 浏览跳转到指定下标（70 卡片列表点击用）：越界钳制到 [0, total]，翻面态复位 */
+	goTo(target: number): void {
+		this.position = Math.min(Math.max(target, 0), this.queue.length);
+		this.revealed = false;
+	}
+
+	/** 队列中是否含有该卡（含 again 重现实例）——cardBus changed 订阅方的过滤条件 */
+	includes(cardId: string): boolean {
+		return this.queue.some((c) => c.id === cardId);
+	}
+
+	/**
+	 * 会话队列只读快照（70 卡片列表用）：列表行携带队列下标 goTo 跳转；
+	 * again 重现实例（同卡两条）在列表里同 id 双行——下标区分，点击各到各位。
+	 */
+	get cards(): readonly Card[] {
+		return this.queue;
+	}
+
+	/** 指定下标的已评档位（未评 undefined）——列表行状态徽标用（gradedAt 的任意下标版） */
+	gradeOf(i: number): ReviewGrade | undefined {
+		return this.graded.get(i);
+	}
+
+	/** 评分推进位置（列表行区分已考 < pendingIndex ≤ 待考）——isDone 的数值形态 */
+	get pendingIndex(): number {
+		return this.index;
+	}
+
+	/**
+	 * 从会话中删除一张卡（复习内 ⋯ 菜单 / cardBus 外部删除共用）：按 id 全量匹配——
+	 * 原始实例与 again 重现实例一并移除（留下任一即幽灵卡）。不在队列返回 false 且零变化。
+	 *
+	 * counts 刻意保留不回退：评分计数是已落库的事件计数（SM-2 已写库、onGrade 已回调，
+	 * Anki 事件语义），Done 屏"共评分 N 次"统计的是按键次数而非卡片数。
+	 *
+	 * 下标迁移：删除后存活条目整体前移——graded（按队列下标键）重键、index/position
+	 * 各减去"严格小于自身的被删下标数"（index 恰指被删卡时迁移后落在下一张待考卡；
+	 * position 恰指被删卡时停原位显示移入该槽的下一张；position 在完成屏时恰迁到新 total）。
+	 * revealed 仅在显示的卡变了时复位（删别处的卡不打断当前翻面态）。
+	 */
+	remove(cardId: string): boolean {
+		// 0. 67 清撤销栈：删除的 graded 重键破坏栈内 index 有效性——撤销栈浅
+		// （≤20）而删除是罕见中断，放弃栈保正确性（取舍见类注释）
+		this.undoStack.length = 0;
+		// 1. 捕获被删下标（升序）；doomed 只在此处读队列，之后才变异
+		const doomed: number[] = [];
+		this.queue.forEach((c, i) => {
+			if (c.id === cardId) doomed.push(i);
+		});
+		if (doomed.length === 0) {
+			return false;
+		}
+		// 2. 偏移函数：原下标 i 迁移到 i - before(i)（doomed 升序可提前 break）
+		const before = (i: number): number => {
+			let n = 0;
+			for (const d of doomed) {
+				if (d < i) n++;
+				else break;
+			}
+			return n;
+		};
+		// 3. splice 前记录当前显示的卡（判定翻面态是否需要复位）
+		const prevShownId = this.queue[this.position]?.id;
+		// 4. graded 整体重键（被删实例的条目丢弃，存活条目下标前移；一次性重建防边读边写）
+		const migrated = new Map<number, ReviewGrade>();
+		for (const [i, g] of this.graded) {
+			if (!doomed.includes(i)) {
+				migrated.set(i - before(i), g);
+			}
+		}
+		this.graded.clear();
+		for (const [i, g] of migrated) {
+			this.graded.set(i, g);
+		}
+		// 5. 队列按 doomed 降序 splice（先删高下标，低下标不受影响）
+		for (let k = doomed.length - 1; k >= 0; k--) {
+			this.queue.splice(doomed[k], 1);
+		}
+		// 6. index/position 迁移（before 只依赖 doomed，splice 后计算仍正确）+ position 钳制
+		this.index -= before(this.index);
+		this.position = Math.min(this.position - before(this.position), this.queue.length);
+		// 7. 显示的卡变了才复位翻面态
+		if (this.queue[this.position]?.id !== prevShownId) {
+			this.revealed = false;
+		}
 		return true;
 	}
 }

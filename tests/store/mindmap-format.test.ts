@@ -37,6 +37,7 @@ function node(partial: Partial<MindmapNode> & Pick<MindmapNode, "id" | "cardId">
 		y: 0,
 		collapsed: false,
 		branchStyle: null,
+		childMapId: null, // 61 子脑图（可被 partial 覆盖为 portal）
 		order: 0, // ㉜ 兄弟序（可被 partial 覆盖；undefined 显式传入 = 旧数据形态）
 		createdAt: 1700000001000,
 		...partial,
@@ -226,6 +227,53 @@ describe("mindmap-format 序列化与解析", () => {
 		const byId = new Map(parsed.nodes.map((n) => [n.id, n]));
 		expect(byId.get("n3")?.order).toBe(0); // 文件首 = 下标 0
 		expect(byId.get("n2")?.order).toBe(1);
+	});
+
+	// ---------- 61 子脑图 sub 键 ----------
+
+	it("sub 键往返：childMapId 序列化落键、解析还原；二次序列化字节相同", () => {
+		const nodes = [
+			node({ id: "n1", cardId: "c1", childMapId: "mm222222-0000-4000-8000-000000000009" }),
+			node({ id: "n2", cardId: "c2", parentId: "n1" }),
+		];
+		const ctx = resolver({ c1: "portal", c2: "子" });
+		const text = serializeMindmapMd(map(), nodes, ctx);
+		expect(text).toContain('"sub":"mm222222-0000-4000-8000-000000000009"');
+
+		const parsed = parseMindmapMd(text);
+		const byId = new Map(parsed.nodes.map((n) => [n.id, n]));
+		expect(byId.get("n1")?.childMapId).toBe("mm222222-0000-4000-8000-000000000009");
+		expect(byId.get("n2")?.childMapId).toBeNull();
+
+		expect(serializeMindmapMd(parsed.map, parsed.nodes, ctx)).toBe(text); // 字节相同
+	});
+
+	it("零写入契约：childMapId 全 null 的图不含 sub 键（存量文件字节不变）", () => {
+		const plain = [
+			node({ id: "n1", cardId: "c1" }),
+			node({ id: "n2", cardId: "c2", parentId: "n1" }),
+		];
+		const withNull = [
+			node({ id: "n1", cardId: "c1", childMapId: null }),
+			node({ id: "n2", cardId: "c2", parentId: "n1", childMapId: null }),
+		];
+		const ctx = resolver({ c1: "根", c2: "子" });
+		const a = serializeMindmapMd(map(), plain, ctx);
+		const b = serializeMindmapMd(map(), withNull, ctx);
+		expect(b).not.toContain('"sub"');
+		expect(a).toBe(b); // null 与缺省字节一致
+	});
+
+	it("悬空 sub 引用原样保留（读取侧 get 守卫自愈，序列化不丢引用）", () => {
+		const nodes = [
+			node({ id: "n1", cardId: "c1", childMapId: "mm333333-0000-4000-8000-000000000001" }),
+		];
+		const ctx = resolver({ c1: "portal" });
+		const text = serializeMindmapMd(map(), nodes, ctx);
+		const parsed = parseMindmapMd(text);
+		expect(parsed.nodes[0].childMapId).toBe("mm333333-0000-4000-8000-000000000001");
+		// 指向不存在的图：解析层不清洗（delete 清扫负责正常路径），再次序列化保持
+		expect(serializeMindmapMd(parsed.map, parsed.nodes, ctx)).toBe(text);
 	});
 });
 

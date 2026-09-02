@@ -2,6 +2,7 @@ import type { Plugin } from "obsidian";
 import { DEFAULT_BACKUP_DIR, DEFAULT_DATA_DIR } from "../constants";
 import { DEFAULT_TRANSLATE_TARGET } from "../translate/translate-engine";
 import { isHighlightColor, type HighlightColorValue } from "../reader/highlight-colors";
+import { isLineStyle, type LineStyle } from "../types";
 import { isAbsoluteFsPath, normalizeFsDir, normalizeVaultDir } from "../storage/paths";
 
 /** 四类摘录工具的当前色系键（㊹ MN3 式：点击已激活的工具按钮循环切色） */
@@ -37,11 +38,34 @@ export interface MarinMindSettings {
 	 */
 	homeFoldersHidden: boolean;
 	/**
+	 * 主页卡片页左列卡组树栏收起态（73，默认展开）——镜像 homeFoldersHidden：
+	 * 卡组树与文档页文件夹栏同为左列结构，收起态各自独立记忆。
+	 */
+	homeCardsFoldersHidden: boolean;
+	/**
 	 * 四类摘录工具的当前色系（㊹ MN3 式）：点击已激活的工具按钮循环切换
 	 * 黄→绿→蓝→红，每工具独立记忆；后续该形态的建卡默认落此色
 	 * （AI 正文/翻译留白分别跟随文字/留白工具色）。
 	 */
 	excerptColors: Record<ExcerptColorTool, HighlightColorValue>;
+	/**
+	 * 每日新卡上限（68 新卡混排）：0 = 不限（默认），>0 = 每天最多引入这么多
+	 * phase="new" 的新闪卡（到期复习卡不占名额，配额按当日复习日志已考新卡数扣减）。
+	 */
+	reviewNewPerDay: number;
+	/** 每批复习张数（68 due 分批）：到期复习卡的每次拉取上限（新卡不占此限） */
+	reviewBatchSize: number;
+	/**
+	 * 划选工具栏（75，默认开）：text 工具下划选文字弹出浮动工具栏
+	 * （四色点摘录/翻译/复制/书签/搜索）；关闭后恢复 75 之前的
+	 * 「划选松开即直接建卡」旧路径。
+	 */
+	selectionToolbar: boolean;
+	/**
+	 * 文字摘录线型（77，默认下划线）：text 形态高亮的形态——下划线/波浪线/删除线；
+	 * 划选工具栏线型钮与设置页下拉双入口写回，仅影响新建卡（存量卡走高亮菜单单改）
+	 */
+	excerptLineStyle: LineStyle;
 }
 
 export const DEFAULT_SETTINGS: MarinMindSettings = {
@@ -52,8 +76,25 @@ export const DEFAULT_SETTINGS: MarinMindSettings = {
 	homeTheme: "dark",
 	homeDocsView: "list",
 	homeFoldersHidden: false,
+	homeCardsFoldersHidden: false,
 	excerptColors: { text: "yellow", area: "yellow", lasso: "yellow", blank: "yellow" },
+	reviewNewPerDay: 0,
+	reviewBatchSize: 20,
+	selectionToolbar: true,
+	excerptLineStyle: "underline",
 };
+
+/**
+ * 数值字段钳制（65）：非有限数/越界回默认——手编 data.json 或旧版本缺字段的
+ * 防御，返回整数。min/max 与字段语义绑定（新卡上限 0-999，批次 5-200）。
+ */
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+	const n = typeof value === "number" ? value : Number(value);
+	if (!Number.isFinite(n)) {
+		return fallback;
+	}
+	return Math.min(max, Math.max(min, Math.round(n)));
+}
 
 /**
  * 读取 data.json 并与默认值合并（null/损坏文件回退全默认）。
@@ -78,6 +119,15 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 		}
 	}
 	merged.excerptColors = colors;
+	// 65 复习设置两个标量：浅合并天然兼容，钳制防手编 data.json 越界值
+	merged.reviewNewPerDay = clampInt(merged.reviewNewPerDay, DEFAULT_SETTINGS.reviewNewPerDay, 0, 999);
+	merged.reviewBatchSize = clampInt(merged.reviewBatchSize, DEFAULT_SETTINGS.reviewBatchSize, 5, 200);
+	// 77 线型标量：手编 data.json 非法值回默认下划线（防脏值流进 dataset/CSS）
+	merged.excerptLineStyle = isLineStyle(
+		(raw as { excerptLineStyle?: unknown } | null)?.excerptLineStyle,
+	)
+		? merged.excerptLineStyle
+		: "underline";
 	return merged;
 }
 

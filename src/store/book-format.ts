@@ -9,6 +9,7 @@ import type {
 	ReviewState,
 	SrsPhase,
 } from "../types";
+import { isLineStyle } from "../types";
 import { newId } from "../utils";
 
 /**
@@ -413,10 +414,20 @@ function parseCardComment(
 		// ㊹ 起 blue = 浅蓝真义——存量 blue 卡归一为 yellow（存量文件字节不动，
 		// 随该书下次实质变更顺带重写），参照 normalizeAssetRef 旧前缀归一先例
 		color: typeof json.color === "string" ? (json.color === "blue" ? "yellow" : json.color) : null,
+		// 文字摘录线型（77）：损坏/缺失/手写 underline 均归一 null（与序列化省键首尾一致）
+		lineStyle:
+			typeof json.line === "string" && isLineStyle(json.line) && json.line !== "underline"
+				? json.line
+				: null,
 		// 卡片标题（㊺）：脑图节点标题栏；损坏/缺失按无标题处理
 		title: typeof json.title === "string" ? json.title : null,
+		// 卡组名：损坏/缺失按未分组处理，不拖垮整卡
+		deck: typeof json.deck === "string" ? json.deck : null,
 		// 闪卡遮挡区域（㊷）：损坏/缺失按无遮挡处理，不拖垮整卡
 		occlusions: Array.isArray(json.occ) ? (json.occ as DocRect[]) : [],
+		// 目录章节骨架卡（55）：严格 true 判定；缺省/损坏不落键（与序列化
+		// 同构——普通卡 Card 上无 outline 字段，零写入契约首尾一致）
+		...(json.outline === true ? { outline: true } : {}),
 		tags,
 		createdAt,
 		updatedAt,
@@ -614,8 +625,15 @@ function serializeCard(
 	if (card.color) machine.color = card.color;
 	// 卡片标题（㊺）：null 省略键，存量卡字节不变（零写入契约）
 	if (card.title) machine.title = card.title;
+	// 卡组名：null 省略键，存量卡字节不变（零写入契约；键序在 title 之后）
+	if (card.deck) machine.deck = card.deck;
+	// 文字摘录线型（77）：squiggle/strikethrough 才落键（null/underline 省略），
+	// 存量卡与下划线卡字节不变（零写入契约；键序 deck 后 occ 前）
+	if (card.lineStyle && card.lineStyle !== "underline") machine.line = card.lineStyle;
 	// 闪卡遮挡（㊷）：空数组省略键，存量卡字节不变
 	if (card.occlusions.length > 0) machine.occ = card.occlusions;
+	// 目录章节骨架卡（55）：仅 true 写键，存量卡字节不变（零写入契约）
+	if (card.outline) machine.outline = true;
 	machine.created = card.createdAt;
 	machine.updated = card.updatedAt;
 	const review = reviews.get(card.id) ?? defaultReviewState(card.id, card.createdAt);

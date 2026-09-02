@@ -477,6 +477,51 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	background: var(--mm-hl-tint);
 }
 
+/* 形态：文字摘录线型（77）——波浪线/删除线走 ::before 伪元素画线稿：
+   mask 会裁宿主整体绘制输出（含 box-shadow），故线稿隔离在伪元素，宿主
+   background 留给 hover tint（上方 hover 规则零改动三线型共用）。
+   下划线 = 基类 border-bottom（缺 data-line-style 或值 underline 均命中基类） */
+.marinmind-excerpt-highlight.marinmind-hl-text[data-line-style="squiggle"] {
+	border-bottom: none;
+}
+
+.marinmind-excerpt-highlight.marinmind-hl-text[data-line-style="squiggle"]::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: 4px;
+	/* 颜色走 --mm-hl-line（background-color），形状走 mask——SVG data-URI 无法
+	   引用 CSS 变量，mask 裁形 + 背景着色是变量化重复图形的唯一组合；
+	   viewBox 不可省（缺省 SVG 退化 300×150，mask-size 缩放会模糊） */
+	background-color: var(--mm-hl-line);
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 4'%3E%3Cpath d='M0 2 Q2 0.4 4 2 T8 2' fill='none' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 4'%3E%3Cpath d='M0 2 Q2 0.4 4 2 T8 2' fill='none' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E");
+	-webkit-mask-repeat: repeat-x;
+	mask-repeat: repeat-x;
+	-webkit-mask-position: left bottom;
+	mask-position: left bottom;
+	-webkit-mask-size: 8px 4px;
+	mask-size: 8px 4px;
+}
+
+/* 删除线：行中线横带（top:50% 与 canvas 中线 fillRect 同位） */
+.marinmind-excerpt-highlight.marinmind-hl-text[data-line-style="strikethrough"] {
+	border-bottom: none;
+}
+
+.marinmind-excerpt-highlight.marinmind-hl-text[data-line-style="strikethrough"]::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 50%;
+	height: 2.5px;
+	margin-top: -1.25px;
+	background: var(--mm-hl-line);
+}
+
 /* 形态：区域摘录（含 polygon 缺失的存量套索旧卡）=彩色边框，无背景填充 */
 .marinmind-excerpt-highlight.marinmind-hl-area {
 	background: none;
@@ -635,6 +680,14 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	pointer-events: none;
 }
 
+/* 文字遮罩模式（74）：高亮与遮挡块一并不拦指针——被目标卡高亮（整行盒
+   盖在文本上方）覆盖的文字才能起笔原生划选；overlay 本体保持穿透
+   （不挂 excerpt-on，无 user-select:none，原生选区全页可用） */
+.marinmind-occlusion-text-on .marinmind-excerpt-highlight,
+.marinmind-occlusion-text-on .marinmind-occlusion {
+	pointer-events: none;
+}
+
 /* 留白模式光标（已在 overlay 上通过 JS 设置 cursor: crosshair） */
 
 /* PDF 选择弹窗的目录次行 */
@@ -647,12 +700,23 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	text-overflow: ellipsis;
 }
 
-/* PDF 选择弹窗库外条目主行（㉞-A）：标题 + 「库外」徽标同行 */
+/* 选择器主行（㉞-A 库外条目起家；R2-E2-07 扩为三选择器共用）：标题 + 徽标同行 */
 .marinmind-picker-name {
 	display: flex;
 	align-items: center;
 	gap: 0.5em;
 	min-width: 0;
+}
+
+/* R2（E2-07）：主行标题——此前库外行是匿名 flex 文本节点（CSS 无法施加
+   min-width:0）、库内/脑图/卡片行是裸 div，长名折行爆高；次行 picker-dir
+   三件套齐全而主行裸奔，补齐统一截断 */
+.marinmind-picker-title {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .marinmind-picker-ext-badge {
@@ -695,11 +759,29 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	gap: 1em;
 }
 
-/* 出处/进度行 */
+/* 出处/进度行（卡组批书名下沉）：[范围 chip] [出处段] [剩余 N 张]——flex 三段，
+   各段独立省略，整体不折行（R2（E2-18）长书名兜底语义保留） */
 .marinmind-review-meta {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4em;
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
-	text-align: center;
+	white-space: nowrap;
+	overflow: hidden;
+}
+
+/* 出处段省略三件套：flex 子项默认不缩到内容以下，min-width:0 是收缩前提 */
+.marinmind-review-meta-item {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* 剩余计数恒显（末段不参与收缩，前面的出处段优先省略） */
+.marinmind-review-meta-item:last-child {
+	flex: none;
 }
 
 /* 顶部导航条（㉑）：◀ 第 i/N 张 ▶ …… ↗ 原文 —— 复习界面内切换卡片 */
@@ -707,6 +789,9 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	display: flex;
 	align-items: center;
 	gap: 0.4em;
+	/* R2（E2-04）：pos 固定 6.5em + 徽标 + 导航钮合计 min 约 400px，更窄窗格
+	   会连带根容器出横向滚动条——wrap 兜底 */
+	flex-wrap: wrap;
 }
 
 .marinmind-review-nav-btn {
@@ -733,6 +818,110 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	opacity: 0.35;
 	cursor: default;
 }
+
+/* 70 列表开关激活态（panel-left 钮） */
+.marinmind-review-nav-btn.is-active {
+	background: var(--background-modifier-active-hover);
+	border-color: var(--interactive-accent);
+}
+
+/* ---------------------------------------------------------------------------
+   70 复习卡片组列表：左侧可收起面板。外层 .marinmind-review 纵向滚动 + 居中列，
+   面板 sticky 跟随视口（长列表自带内部滚动，不把整页撑高）
+--------------------------------------------------------------------------- */
+.marinmind-review-split {
+	display: flex;
+	width: 100%;
+	max-width: 960px; /* 250px 面板 + 640px 舞台 + 间距 */
+	gap: 1.25em;
+	align-items: flex-start;
+}
+
+.marinmind-review-split .marinmind-review-stage {
+	flex: 1;
+	min-width: 0;
+}
+
+.marinmind-review-list {
+	position: sticky;
+	top: 0;
+	flex: none;
+	width: 250px;
+	max-height: calc(100vh - 5em);
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	background: var(--background-secondary);
+	overflow: hidden;
+}
+
+.marinmind-review-list-head {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.marinmind-review-list-body {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 4px;
+}
+
+.marinmind-review-list-empty {
+	padding: 12px 8px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	text-align: center;
+}
+
+.marinmind-review-list-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 8px;
+	border-radius: var(--radius-s, 4px);
+	cursor: pointer;
+}
+
+.marinmind-review-list-row:hover {
+	background: var(--background-modifier-hover);
+}
+
+/* 当前行（浏览位置）——与视图 ◀ ▶ 位置同步 */
+.marinmind-review-list-row.is-current {
+	background: var(--background-modifier-active-hover);
+}
+
+.marinmind-review-list-badge {
+	flex: none;
+	min-width: 2.4em;
+	text-align: center;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+/* 已考「重来」用错误色提醒；↻ 重现实例用强调色与 ○ 未考区分 */
+.marinmind-review-list-badge[data-grade="again"] {
+	color: var(--text-error);
+}
+
+.marinmind-review-list-badge.is-requeue {
+	color: var(--text-accent);
+}
+
+.marinmind-review-list-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--font-ui-smaller);
+}
+
 
 .marinmind-review-pos {
 	color: var(--text-muted);
@@ -778,6 +967,15 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	flex-direction: column;
 	align-items: center;
 	gap: 0.5em;
+}
+
+/* 71 点击跳原文：缩略图可点（is-clickable 由渲染成功路径挂上） */
+.marinmind-review-context.is-clickable {
+	cursor: pointer;
+}
+
+.marinmind-review-context.is-clickable:hover canvas {
+	border-color: var(--interactive-accent);
 }
 
 .marinmind-review-context canvas {
@@ -836,6 +1034,30 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
 	margin-bottom: 0.35em;
+	/* R2（E2-20）：长图名单行省略（ctx-sub 为有界计数文案不截断） */
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* 71 脑图位置缩略图：纯函数 SVG 路标（h 估值仅示意），点击跳真实视图定位 */
+.marinmind-review-ctx-thumb {
+	cursor: pointer;
+	margin: 0.35em 0;
+	border-radius: var(--radius-s, 4px);
+	transition: opacity 0.15s ease;
+}
+
+.marinmind-review-ctx-thumb:hover {
+	opacity: 0.85;
+}
+
+.marinmind-review-ctx-thumb svg,
+.marinmind-map-thumb-svg {
+	display: block;
+	width: 100%;
+	max-width: 320px;
+	height: auto;
 }
 
 .marinmind-review-ctx-path {
@@ -917,6 +1139,12 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	font-size: 1.15em;
 	line-height: 1.7;
 	white-space: pre-wrap;
+	/* R2（E2-13）：长 URL/连续英数串不折行会横向溢出卡盒（translate-modal 同款配方） */
+	overflow-wrap: break-word;
+	/* R2（E2-09）：长摘录限高卡内滚动——此前无界增长把评分按钮推出视口，
+	   每张长卡都要先滚回顶找按钮；vh 档保证任何窗格高度下操作区留屏 */
+	max-height: min(46vh, 30em);
+	overflow-y: auto;
 }
 
 /* 占位/次要文字 */
@@ -932,7 +1160,7 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	border-top: 1px dashed var(--background-modifier-border);
 }
 
-/* ㊷ 按书范围徽标（顶部导航条）：书名单行省略，点击 × 切全部书籍 */
+/* ㊷ 范围徽标（卡组批起在出处 meta 行内，书名下沉）：书名/卡组名单行省略，点击 × 切全部书籍 */
 .marinmind-review-scope {
 	display: inline-flex;
 	align-items: center;
@@ -1023,6 +1251,9 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 
 .marinmind-review-note {
 	line-height: 1.7;
+	/* R2（E2-09）：同 review-excerpt——正面问题块（批注）限高卡内滚动 */
+	max-height: min(46vh, 30em);
+	overflow-y: auto;
 }
 
 .marinmind-review-source {
@@ -1166,7 +1397,9 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	height: 2.4em;
 	resize: none;
 	white-space: nowrap;
-	overflow: hidden;
+	/* R2（E2-17）：hidden 下 textarea 不产生横向滚动，长预填尾部不可见不可达
+	   ——改 auto 走原生横向滚动（光标随动） */
+	overflow-x: auto;
 }
 
 /* ===== 思维导图视图 ===== */
@@ -1187,6 +1420,10 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	padding: 0.4em 0.8em;
 	border-bottom: 1px solid var(--background-modifier-border);
 	flex: none;
+	/* R2（E2-03）：三枚 nowrap 胶囊钮 + 下拉 + 模式条最小内容宽约 600px+，split
+	   半宽窗格下右侧控件被 overflow:hidden 裁到不可达——wrap 落次行（镜像阅读器
+	   工具行先例），宽窗格一行放下零变化 */
+	flex-wrap: wrap;
 }
 
 .marinmind-mm-title {
@@ -1294,6 +1531,22 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	vector-effect: non-scaling-stroke;
 }
 
+/* 57 line 族连线端点圆点（MN4 直线 1/2 细节）：实心圆点与连线同色，
+   r=3 为世界坐标半径（随缩放同连线几何一起缩放），端点在节点盒缘上不扩包围盒 */
+.marinmind-mm-edge-dot {
+	fill: var(--text-muted);
+	stroke: none;
+}
+
+/* 53 卡片互链虚线边：区别于父子实线（虚线 + 强调色），两端节点本图内可见才绘制 */
+.marinmind-mm-link {
+	fill: none;
+	stroke: var(--interactive-accent);
+	stroke-width: 1.5;
+	stroke-dasharray: 6 4;
+	vector-effect: non-scaling-stroke;
+}
+
 /* 框架样式收纳框（⑱）：子节点包围盒的圆角矩形，层级由包含关系表达 */
 .marinmind-mm-frame {
 	fill: rgba(128, 128, 128, 0.07);
@@ -1363,6 +1616,20 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	text-align: left; /* 默认标题 "…" 呈现在标题栏左侧 */
 }
 
+/* 71 遮挡徽标：已设遮挡的卡在标题栏右侧（flex 子项排在省略标题后不挤占） */
+.marinmind-mm-node-occ {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	margin-left: 4px;
+	color: var(--text-muted);
+}
+
+.marinmind-mm-node-occ svg.svg-icon {
+	width: 12px;
+	height: 12px;
+}
+
 /* P1-a 令牌单源：节点头 tint 改消费 --mm-hl-tint（色值定义在文件头令牌块，
    原 8 条字面 tint 规则删除；alpha 统一 0.2 的观感微移见评估报告 5.1 风险表）。
    data-color=""（null 色卡）与未知旧色相 → 变量未定义走 var fallback 中性灰，
@@ -1401,6 +1668,17 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	position: absolute;
 	top: -9px;
 	right: -9px;
+	font-size: 12px;
+	line-height: 1;
+	filter: drop-shadow(var(--mm-drop-shadow)); /* P0-4 令牌化 */
+	pointer-events: none;
+}
+
+/* 子脑图 portal 徽标（61）：镜像 pin 观感，放左上角防与 pin 叠放 */
+.marinmind-mm-portal {
+	position: absolute;
+	top: -9px;
+	left: -9px;
 	font-size: 12px;
 	line-height: 1;
 	filter: drop-shadow(var(--mm-drop-shadow)); /* P0-4 令牌化 */
@@ -1496,7 +1774,11 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	color: var(--text-faint);
 	font-size: var(--font-ui-small);
 	pointer-events: none;
-	white-space: nowrap;
+	/* R2（E2-19）：去 nowrap——26 字提示在 <360px 窗格两端被 overflow:hidden
+	   裁切；限宽居中折行可读（选图按钮随行内排布不受影响） */
+	max-width: 80%;
+	text-align: center;
+	white-space: normal;
 }
 
 /* 未开图空态的选图按钮（㊿-A：容器整体不挡指针，按钮单独可点——
@@ -1585,6 +1867,22 @@ body.marinmind-card-dragging {
 .marinmind-mm-node.marinmind-mm-node-droptarget {
 	border-color: var(--interactive-accent);
 	box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+/* 52 键盘选中态（MarginNote 风格键盘操作锚点）：镜像拖放目标高亮观感，
+   单击/右键节点即选中（跳原文照旧） */
+.marinmind-mm-node.marinmind-mm-selected {
+	border-color: var(--interactive-accent);
+	box-shadow: 0 0 0 2px var(--interactive-accent);
+}
+
+/* ===== 51 批量折叠 / 撤销布局（视图头部动作钮） ===== */
+
+/* Obsidian 无内置 view-action 禁用样式，本插件头部钮专用（半透明 + 不吃指针）；
+   点击回调另有守卫兜底，此处只管观感 */
+.view-action.is-disabled {
+	opacity: 0.45;
+	pointer-events: none;
 }
 
 /* ===== ㊺ 节点编辑器（浮动面板：点击节点编辑标题/批注） ===== */
@@ -1695,6 +1993,61 @@ body.marinmind-card-dragging {
 	cursor: crosshair;
 }
 
+/* 划选工具栏（75）：text 工具划选松开浮出于选区上方（上方优先/下方回退，
+   定位纯函数 planSelectionToolbarPosition）。visibility 隐藏而非 display:none——
+   定位需实测 offsetWidth/Height + 免费淡入过渡；user-select 防点击按钮清掉选区 */
+.marinmind-selection-toolbar {
+	position: absolute;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 4px 6px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	box-shadow: var(--mm-shadow-lg); /* P0-4 令牌化 */
+	user-select: none;
+	visibility: hidden;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.12s ease;
+}
+
+.marinmind-selection-toolbar.is-visible {
+	visibility: visible;
+	opacity: 1;
+	pointer-events: auto;
+}
+
+/* 覆写工具行 7px 小色点为可点 16px 圆钮（data-color 变量规则复用，零新色源） */
+.marinmind-selection-toolbar .marinmind-tool-color-dot {
+	width: 16px;
+	height: 16px;
+	padding: 0;
+	border: none;
+	cursor: var(--cursor);
+}
+
+.marinmind-selection-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	border: none;
+	border-radius: var(--radius-s, 4px);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: var(--cursor);
+}
+
+.marinmind-selection-btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
 /* 录音状态条：悬浮在滚动区上方居中 */
 .marinmind-rec-bar {
 	position: absolute;
@@ -1777,7 +2130,8 @@ audio.marinmind-review-media {
 
 /* 媒体预览弹窗 */
 .marinmind-media-preview {
-	min-width: 22em;
+	/* R2（E2-16）：22em@16px=352px，手机 360px 屏加 modal 边距溢出——小屏收敛 */
+	min-width: min(22em, calc(100vw - 4em));
 	max-width: 34em;
 }
 
@@ -1791,6 +2145,9 @@ audio.marinmind-review-media {
 	margin: 0.75em 0;
 	white-space: pre-wrap;
 	word-break: break-word;
+	/* R2（E2-10）：长批注限高卡内滚动（对齐卡片预览弹窗摘录 10em 档） */
+	max-height: 10em;
+	overflow-y: auto;
 }
 
 .marinmind-media-preview-note.is-empty {
@@ -1807,7 +2164,8 @@ audio.marinmind-review-media {
 
 /* 卡片摘录预览弹窗（㶈）——只引用主题变量（主页分区铁律同源） */
 .marinmind-card-preview {
-	min-width: 22em;
+	/* R2（E2-16）：同媒体预览弹窗——小屏 min-width 收敛防溢出 */
+	min-width: min(22em, calc(100vw - 4em));
 	max-width: 38em;
 }
 
@@ -1835,6 +2193,10 @@ audio.marinmind-review-media {
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
 	margin-bottom: 0.75em;
+	/* R2（E2-14）：长书名单行省略——块级三件套，此前折行数行推高弹窗头部 */
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .marinmind-card-preview-body {
@@ -1864,6 +2226,36 @@ audio.marinmind-card-preview-media {
 	font-style: italic;
 	padding: 1.5em 0;
 	text-align: center;
+}
+
+/* 71 photo 快照遮挡编辑器：inline-block 收紧到图片边缘（百分比定位=图内 0-1 坐标） */
+.marinmind-photo-occ-editor {
+	position: relative;
+	display: inline-block;
+	max-width: 100%;
+	line-height: 0; /* 消除 img 行内基线空隙，包裹贴合 */
+	cursor: crosshair;
+	touch-action: none; /* 拖框接管触摸，防页面滚动 */
+}
+
+.marinmind-photo-occ-block,
+.marinmind-photo-occ-drag {
+	position: absolute;
+	border: 2px dashed var(--interactive-accent);
+	background: var(--background-modifier-hover);
+	border-radius: 2px;
+	pointer-events: none; /* 拖框预览不吃事件 */
+}
+
+.marinmind-photo-occ-block {
+	pointer-events: auto; /* 已有块可点删除 */
+	cursor: pointer;
+}
+
+.marinmind-photo-occ-hint {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin-top: 0.5em;
 }
 
 /* 有批注卡片的原文块（标题=批注，摘录文字在此完整展示） */
@@ -1937,6 +2329,11 @@ audio.marinmind-card-preview-media {
 
 .marinmind-doc-title {
 	font-weight: var(--font-medium, 600);
+	/* R2（E2-15）：长标题单行省略——此前折行致管理面板行高随标题长度抖动
+	   （次行 doc-path 已省略，双标归一） */
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .marinmind-doc-path {
@@ -2424,6 +2821,15 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	display: none;
 }
 
+/* 58 拖拽对齐吸附参考线（world 内 1px 通长线；网格吸附无参考线） */
+.marinmind-mm-guide {
+	position: absolute;
+	background: var(--interactive-accent);
+	pointer-events: none;
+	opacity: 0.6;
+	z-index: 9;
+}
+
 /* 被拖子树的半透明提示 */
 .marinmind-mm-subtree-dim {
 	opacity: 0.75;
@@ -2825,8 +3231,19 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	white-space: nowrap;
 }
 
-/* ---- 文档页：文件夹树 + 列表两列 ---- */
-.marinmind-home-docs {
+/* R2：行内徽标截断——📖 书名徽标/分类徽标都是行右侧 flex 子项，基类 flex-shrink:0
+   且无截断时长文本会挤压 main 区图名/标题趋近于零；上限行宽 45% + 省略号。
+   （瓷片徽标为绝对定位叠放，不在此作用域，由 R2 评审另行处理） */
+.marinmind-home-row .marinmind-doc-badge {
+	max-width: 45%;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* ---- 文档页：文件夹树 + 列表两列（73 卡片页卡组树同构复用 cards-body） ---- */
+.marinmind-home-docs,
+.marinmind-home-cards-body {
 	display: flex;
 	gap: 24px;
 	align-items: flex-start;
@@ -2843,8 +3260,10 @@ body.theme-light .marinmind-autoex-badge.is-body {
 }
 
 /* ㊸ 整栏收起：左列隐藏，右侧列表/书架占满（特异性 (0,3,0) 稳压 640px
-   媒体查询里对 folders 的横向滚动改写；右列 flex 自适应自动拉满） */
-.marinmind-home-docs.is-folders-hidden .marinmind-home-folders {
+   媒体查询里对 folders 的横向滚动改写；右列 flex 自适应自动拉满；
+   73 卡片页卡组栏并列同规则） */
+.marinmind-home-docs.is-folders-hidden .marinmind-home-folders,
+.marinmind-home-cards-body.is-folders-hidden .marinmind-home-folders {
 	display: none;
 }
 
@@ -2879,7 +3298,8 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	color: var(--text-normal);
 }
 
-.marinmind-home-doc-row.is-dragging {
+.marinmind-home-doc-row.is-dragging,
+.marinmind-home-card-row.is-dragging {
 	opacity: 0.4;
 }
 
@@ -2961,6 +3381,7 @@ body.theme-light .marinmind-autoex-badge.is-body {
 /* 卡片页筛选行 + 分页条（㊲）：下拉走 obsidian .dropdown 全局类，变量覆盖自动深色 */
 .marinmind-home-cards-filter {
 	display: flex;
+	flex-wrap: wrap; /* R2：窄窗格兜底换行，防子项被推出可视区 */
 	align-items: center;
 	gap: 8px;
 	margin: 4px 0 12px;
@@ -2969,6 +3390,11 @@ body.theme-light .marinmind-autoex-badge.is-body {
 .marinmind-home-cards-filter .dropdown {
 	height: 30px;
 	font-size: 0.75rem;
+	/* R2：文档下拉的固有宽度=最长书名宽（option 全文列出），无上限会撑破筛选行
+	   ——min-width:0 允许 flex 压缩、max-width 封顶，超长书名在闭合控件上截断；
+	   option 弹层宽度不受控件宽度影响，全文仍可在弹层中看到 */
+	min-width: 0;
+	max-width: min(340px, 48%);
 }
 
 .marinmind-home-cards-count {
@@ -2976,6 +3402,46 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	font-size: 0.75rem;
 	color: var(--text-muted); /* P0-3：结果计数是真实信息（与 row-meta 同类） */
 	flex-shrink: 0;
+}
+
+/* 卡组批：「复习本组」直达入口（卡组筛选激活时）——视觉配方同 pager-btn（变量引用） */
+.marinmind-home-cards-review {
+	flex: none;
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	cursor: pointer;
+	padding: 2px 8px;
+	border-radius: var(--radius-s);
+}
+
+.marinmind-home-cards-review:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+/* 74 批量删除：批选操作钮禁用态（已选 0 张时删除不可点） */
+.marinmind-home-cards-review.is-disabled {
+	opacity: 0.5;
+	cursor: default;
+	pointer-events: none; /* 阻 hover 提亮与点击，键盘亦不可达（原生 button 保留 disabled 语义由 aria 表达） */
+}
+
+/* 74 批量删除：删除钮文字错误色（hover 底色沿用 cards-review 配方） */
+.marinmind-home-batch-delete {
+	color: var(--text-error);
+}
+
+/* 74 批量删除：行首纯视觉勾选框（pointer-events:none——行 click 单一交互源） */
+.marinmind-home-batch-check {
+	flex: none;
+	align-self: center;
+	accent-color: var(--interactive-accent);
+	pointer-events: none;
+}
+
+/* 74 批量删除：勾选行底色高亮（反馈即时；与 hover 规则同变量） */
+.marinmind-home-row.is-batch-selected {
+	background: var(--background-modifier-hover);
 }
 
 .marinmind-home-pager {
@@ -3042,6 +3508,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	flex: 1;
 	width: auto;
 	margin-bottom: 0;
+	/* R2（E2-11）：极窄窗格兜底——flex 子项 min-width:auto 下搜索框把行内
+	   其余钮推出可视区 */
+	min-width: 0;
 }
 
 /* 列表/窗格切换双图标钮（㊵）。P2-2 互指：刻意**不**消费 .marinmind-segmented
@@ -3090,6 +3559,12 @@ body.theme-light .marinmind-autoex-badge.is-body {
 /* 书架加宽（列表模式维持默认基调不动）——㊸ 1100 → 1280：6 列瓷片 ~166px
    + 左列 224px 的合理上限（此前 4 列 1fr 拉伸到 ~210px 显得过大） */
 .marinmind-home-page.is-grid {
+	max-width: 1280px;
+}
+
+/* 73 卡片页两列（卡组树 + 列表）恒加宽——左列 224px 后 880px 基调挤压
+   列表区，与书架模式同上限保持视觉密度一致 */
+.marinmind-home-page-cards {
 	max-width: 1280px;
 }
 
@@ -3200,6 +3675,12 @@ body.theme-light .marinmind-autoex-badge.is-body {
 
 .marinmind-home-tile-badges .marinmind-doc-badge {
 	background: var(--background-primary);
+	/* R2（E2-08）：徽标基类不截断，长书名会溢出瓷片被封面 overflow:hidden 裁成
+	   不可读——封顶约瓷片宽 60% 单行省略 */
+	max-width: 9em;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .marinmind-home-tile-title {
@@ -3242,8 +3723,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 		padding: 16px 16px 40px;
 	}
 
-	/* 文档页两列在窄屏退化为上下堆叠（文件夹横向滚动） */
-	.marinmind-home-docs {
+	/* 文档页两列在窄屏退化为上下堆叠（文件夹横向滚动；73 卡片页卡组树同构） */
+	.marinmind-home-docs,
+	.marinmind-home-cards-body {
 		flex-direction: column;
 	}
 
@@ -3264,4 +3746,144 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	.marinmind-home-doc-grid {
 		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 	}
+}
+
+/* ============================================================
+   69 复习统计面板（Modal；消费 Obsidian 全局变量自动跟随主题）
+   ============================================================ */
+.marinmind-stats {
+	padding: 4px 4px 8px;
+}
+
+.marinmind-stats-bricks {
+	display: flex;
+	gap: 10px;
+	flex-wrap: wrap;
+	margin-bottom: 6px;
+}
+
+.marinmind-stats-brick {
+	flex: 1 1 100px;
+	min-width: 100px;
+	padding: 10px 12px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	text-align: center;
+}
+
+.marinmind-stats-brick-value {
+	font-size: 1.5em;
+	font-weight: 700;
+	color: var(--text-normal);
+}
+
+.marinmind-stats-brick-label {
+	margin-top: 2px;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.marinmind-stats-libline {
+	margin: 2px 0 14px;
+	font-size: 12.5px;
+	color: var(--text-muted);
+}
+
+.marinmind-stats-h {
+	margin: 14px 0 8px;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+/* 热力图：列 = 周（grid-flow: column，行 7 格周一到周日），格子 13px + 3px 间隙 */
+.marinmind-stats-heatmap {
+	display: grid;
+	grid-auto-flow: column;
+	grid-template-rows: repeat(7, 13px);
+	grid-auto-columns: 13px;
+	gap: 3px;
+	overflow-x: auto;
+	padding-bottom: 4px;
+}
+
+.marinmind-stats-cell {
+	border-radius: 3px;
+	background: var(--background-modifier-border);
+}
+
+/* 五档色：仅透明度阶梯（不引入字面色，主题变量铁律——与主页分区注释约定同源） */
+.marinmind-stats-cell.lv1 { background: color-mix(in srgb, var(--interactive-accent) 25%, var(--background-modifier-border)); }
+.marinmind-stats-cell.lv2 { background: color-mix(in srgb, var(--interactive-accent) 50%, var(--background-modifier-border)); }
+.marinmind-stats-cell.lv3 { background: color-mix(in srgb, var(--interactive-accent) 75%, var(--background-modifier-border)); }
+.marinmind-stats-cell.lv4 { background: var(--interactive-accent); }
+
+.marinmind-stats-cell.is-future {
+	background: transparent;
+	border: 1px dashed var(--background-modifier-border);
+}
+
+/* 到期分布：横向条形（底部对齐，高度 = 占当期最大值比例） */
+.marinmind-stats-bars {
+	display: flex;
+	gap: 8px;
+	align-items: stretch;
+}
+
+.marinmind-stats-bar-col {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	min-width: 0;
+}
+
+.marinmind-stats-bar-track {
+	width: 60%;
+	max-width: 34px;
+	height: 72px;
+	display: flex;
+	align-items: flex-end;
+	border-radius: 4px;
+	background: var(--background-secondary);
+}
+
+.marinmind-stats-bar {
+	width: 100%;
+	min-height: 2px;
+	border-radius: 4px 4px 0 0;
+	background: var(--interactive-accent);
+}
+
+.marinmind-stats-bar-count {
+	font-size: 12px;
+	color: var(--text-normal);
+}
+
+.marinmind-stats-bar-label {
+	font-size: 11.5px;
+	color: var(--text-muted);
+}
+
+.marinmind-stats-footnote {
+	margin-top: 14px;
+	font-size: 12px;
+	color: var(--text-faint);
+}
+
+/* 主页卡片页「统计」弱链接（69）：跟随统计砖行尾，弱化为文字按钮 */
+.marinmind-home-stats-link {
+	background: none;
+	border: none;
+	box-shadow: none;
+	padding: 4px 6px;
+	font-size: 13px;
+	color: var(--text-muted);
+	cursor: pointer;
+	align-self: center;
+}
+
+.marinmind-home-stats-link:hover {
+	color: var(--text-normal);
 }

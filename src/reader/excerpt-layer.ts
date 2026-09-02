@@ -6,7 +6,7 @@ import {
 import type { MarinMindMindmapView } from "../mindmap/mindmap-view";
 import type { PageView } from "./page-view";
 import { isTinyNormRect, normRectToPercent, pointsToNormRect } from "./rect-utils";
-import { highlightFallbackColor } from "./highlight-colors";
+import { highlightFallbackColor, highlightLineStyle } from "./highlight-colors";
 import { LassoTracker } from "./lasso-tracker";
 
 /** 通用闪烁反馈：加 marinmind-flash 类 1.5s 后移除（跳转定位视觉锚点） */
@@ -113,6 +113,8 @@ export class ExcerptLayer {
 	private readonly occlusionEls = new Map<string, HTMLElement[]>();
 	/** 遮挡编辑目标（㊷）：非空时本页 overlay 接管指针画遮挡框（复用 area 拖框） */
 	private occlusionTarget: Card | null = null;
+	/** 文字遮罩目标（74）：非空时本页高亮/遮挡块关闭指针事件（overlay 保持穿透放行原生划选） */
+	private occlusionTextTarget: Card | null = null;
 	/** 遮挡预览（㊷）：true 时遮挡块显示为实心覆盖（模拟复习正面观感） */
 	private occlusionPreview = false;
 	/** excerptRef → blob URL（手写 <img> 回显；同 ref 复用，删除/销毁时 revoke） */
@@ -196,6 +198,11 @@ export class ExcerptLayer {
 			el.dataset.cardId = card.id;
 			// 颜色变体挂 data-color：每色定义 --mm-hl-line/--mm-hl-tint 两变量供形态规则消费
 			el.dataset.color = highlightFallbackColor(card);
+			// 线型第三轨（77）：仅 text 形态挂 data-line-style（area/poly/胶囊不消费；
+			// underline 值也照挂——CSS 只写 squiggle/strikethrough 两个 override，underline 命中基类）
+			if (card.excerptType === "text") {
+				el.dataset.lineStyle = highlightLineStyle(card);
+			}
 			const pos = normRectToPercent(rect);
 			el.style.left = pos.left;
 			el.style.top = pos.top;
@@ -342,8 +349,11 @@ export class ExcerptLayer {
 		if (this.cardsById.has(card.id)) {
 			this.updateCardSnapshot(card);
 			const color = highlightFallbackColor(card);
+			// 线型补刷（77）：与颜色并列的第三轨（高亮菜单改线型 → cardBus changed 回环）
+			const lineStyle = card.excerptType === "text" ? highlightLineStyle(card) : null;
 			for (const el of this.highlightEls.get(card.id) ?? []) {
 				el.dataset.color = color;
+				if (lineStyle) el.dataset.lineStyle = lineStyle;
 			}
 			if (card.occlusions.length > 0 || this.occlusionEls.has(card.id)) {
 				this.syncOcclusionEls(card);
@@ -394,6 +404,13 @@ export class ExcerptLayer {
 		this.occlusionTarget =
 			card && card.page === this.pageView.pageNumber ? card : null;
 		this.cancelDrag();
+		this.applyOverlayCapture();
+	}
+
+	/** 文字遮罩模式开关（74）：只在目标卡所在页生效；overlay 不接管指针（放行原生划选） */
+	setOcclusionTextTarget(card: Card | null): void {
+		this.occlusionTextTarget =
+			card && card.page === this.pageView.pageNumber ? card : null;
 		this.applyOverlayCapture();
 	}
 
@@ -453,8 +470,10 @@ export class ExcerptLayer {
 	setTool(tool: ReaderTool): void {
 		this.tool = tool;
 		this.excerptMode = tool === "area";
-		// 显式切换工具结束遮挡编辑（㊷；遮挡编辑是来自卡片菜单的瞬态模式）
+		// 显式切换工具结束遮挡编辑（㊷；遮挡编辑是来自卡片菜单的瞬态模式）；
+		// 文字遮罩同为瞬态模式（74），层侧随工具切换一并退出
 		this.occlusionTarget = null;
+		this.occlusionTextTarget = null;
 		this.cancelDrag();
 		this.cancelCardDrag();
 		// 套索：按需创建/销毁（单页同时最多一个活跃套索）
@@ -511,6 +530,14 @@ export class ExcerptLayer {
 		// 摘录内部也能正常拖画（此前命中高亮元素被 onPointerDown 早退，只能从
 		// 摘录外起笔）。area 工具不受影响（高亮保持可点击）
 		overlay.classList.toggle("marinmind-occlusion-on", this.occlusionTarget != null);
+		// 文字遮罩模式单独挂类（74）：CSS 关掉高亮与遮挡块指针事件——被目标卡
+		// 高亮（整行盒盖在文本上方）覆盖的文字才能起笔原生选区。overlay 本体
+		// 不参与 capture 计算（保持 pointer-events:none 穿透，且无 excerpt-on 的
+		// user-select:none——两者都会阻断原生划选）
+		overlay.classList.toggle(
+			"marinmind-occlusion-text-on",
+			this.occlusionTextTarget != null,
+		);
 	}
 	/** 留白点击监听器（挂/摘时用同一引用，防泄漏） */
 	private pendingBlankClick: ((evt: MouseEvent) => void) | null = null;
@@ -572,6 +599,7 @@ export class ExcerptLayer {
 		}
 		this.occlusionEls.clear();
 		this.occlusionTarget = null;
+		this.occlusionTextTarget = null;
 	}
 
 	/** 事件坐标 → 相对 overlay 的本地像素坐标 */

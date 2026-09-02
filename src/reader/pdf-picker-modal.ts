@@ -108,15 +108,22 @@ export class PdfPickerModal extends FuzzySuggestModal<PdfPickResult> {
 	renderSuggestion(match: FuzzyMatch<PdfPickResult>, el: HTMLElement): void {
 		if (match.item.kind === "external") {
 			const head = el.createDiv({ cls: "marinmind-picker-name" });
-			head.textContent = this.titleOf(match.item.absPath);
+			// R2（E2-07）：标题入具名 span——匿名 flex 文本节点无法施加截断三件套
+			const title = head.createSpan({ cls: "marinmind-picker-title" });
+			title.textContent = this.titleOf(match.item.absPath);
 			head.createSpan({ cls: "marinmind-picker-ext-badge", text: "库外" });
 			const dir = el.createDiv({ cls: "marinmind-picker-dir" });
 			dir.textContent = match.item.absPath; // 绝对路径整行次级展示（CSS 省略）
 			return;
 		}
 		const file = match.item.file;
+		// R2（E2-07）：主行与库外行同构（picker-name + picker-title），长名单行省略
 		const name = document.createElement("div");
-		name.textContent = file.basename;
+		name.className = "marinmind-picker-name";
+		const title = document.createElement("span");
+		title.className = "marinmind-picker-title";
+		title.textContent = file.basename;
+		name.appendChild(title);
 		el.appendChild(name);
 
 		// 库根目录的 path 是 "/"，直接显示会读成 "文件名/"——根下文件省略次行

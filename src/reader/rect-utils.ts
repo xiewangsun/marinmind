@@ -177,3 +177,43 @@ export function occlusionBounds(card: {
 	}
 	return excerptCropRect(card.rects);
 }
+
+/** 划选工具栏定位输入（75）：全部视口坐标（getBoundingClientRect 产物） */
+export interface ToolbarPlanInput {
+	/** 选区锚：range.getClientRects() 非零矩形的并集包围盒 */
+	anchor: { left: number; top: number; right: number; bottom: number };
+	/** 定位容器：宿主元素（contentEl）的 gBCR */
+	container: { left: number; top: number; width: number; height: number };
+	/** 工具栏实测尺寸（宿主内 absolute，visibility 隐藏不影响 offsetWidth） */
+	toolbarWidth: number;
+	toolbarHeight: number;
+	/** 工具栏与选区的间距（默认 8px） */
+	margin?: number;
+}
+
+/**
+ * 划选工具栏定位规划（75，纯函数）：选区上方优先、上缘不足回退下方，
+ * 水平以选区中心对齐、两侧钳制在容器内，纵向整体钳入容器。
+ * 输入视口坐标，输出已减容器原点的**本地坐标**（供 absolute left/top 直接使用）。
+ */
+export function planSelectionToolbarPosition(input: ToolbarPlanInput): {
+	left: number;
+	top: number;
+} {
+	const margin = input.margin ?? 8;
+	const c = input.container;
+	// 水平：选区中心 − 工具栏半宽，钳制在容器内（4px 内边距）
+	const centerX = (input.anchor.left + input.anchor.right) / 2;
+	const minLeft = c.left + 4;
+	const maxLeft = c.left + c.width - input.toolbarWidth - 4;
+	// 容器比工具栏还窄（极端窗格）：钳制次序反转时取 minLeft 保左对齐不溢出右缘
+	const left = Math.min(Math.max(centerX - input.toolbarWidth / 2, minLeft), Math.max(minLeft, maxLeft));
+	// 垂直：上方优先（选区顶 − 工具栏高 − 间距），容器顶放不下回退选区下方
+	const aboveTop = input.anchor.top - input.toolbarHeight - margin;
+	const belowTop = input.anchor.bottom + margin;
+	const top = aboveTop >= c.top + 4 ? aboveTop : belowTop;
+	// 纵向整体钳入容器（选区贴近容器底时下方方案可能溢出）
+	const maxTop = c.top + c.height - input.toolbarHeight - 4;
+	const clampedTop = Math.min(Math.max(top, c.top + 4), Math.max(c.top + 4, maxTop));
+	return { left: left - c.left, top: clampedTop - c.top };
+}

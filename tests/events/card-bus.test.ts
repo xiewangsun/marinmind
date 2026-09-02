@@ -14,6 +14,7 @@ function makeCard(id = "c1"): Card {
 		note: null,
 		color: "yellow",
 		title: null,
+		deck: null,
 		occlusions: [],
 		tags: [],
 		createdAt: 0,

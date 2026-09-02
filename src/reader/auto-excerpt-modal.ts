@@ -326,6 +326,11 @@ export class AutoExcerptModal extends Modal {
 				excerptText: row.block.text,
 				// ㊹ 四色化：标题浅红（MN4"同一类元素同一种颜色"），正文跟随文字工具当前色系
 				color: row.block.kind === "heading" ? "red" : this.plugin.settings.excerptColors.text,
+				// 77 线型：AI 批量 text 卡跟随全局线型设置（标题/正文同值，镜像建卡色先例）
+				lineStyle:
+					this.plugin.settings.excerptLineStyle !== "underline"
+						? this.plugin.settings.excerptLineStyle
+						: null,
 			});
 			n++;
 		}

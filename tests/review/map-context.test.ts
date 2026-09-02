@@ -15,6 +15,7 @@ function makeCard(id: string, over: Partial<Card> = {}): Card {
 		note: null,
 		color: null,
 		title: null,
+		deck: null,
 		occlusions: [],
 		tags: [],
 		createdAt: 0,

@@ -6,6 +6,7 @@ import { validateDirInput, type MarinMindSettings } from "./settings";
 import { migrateDataDir } from "./migrate-data-dir";
 import { DocumentManagerModal } from "../documents/document-manager-modal";
 import { resolveBackupLocation } from "../storage/data-location";
+import { isLineStyle, LINE_STYLES, LINE_STYLE_LABELS } from "../types";
 import {
 	DEFAULT_TRANSLATE_TARGET,
 	TRANSLATE_LANGUAGES,
@@ -34,7 +35,9 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		this.renderAppearanceSection(containerEl);
 		this.renderDataSection(containerEl);
 		this.renderBackupSection(containerEl);
+		this.renderReaderSection(containerEl);
 		this.renderTranslateSection(containerEl);
+		this.renderReviewSection(containerEl);
 	}
 
 	/** 外观（㊲ 起，㊸ 三态）：主页主题——Linear 深色（默认）/ Linear 浅色 / 跟随 Obsidian 主题 */
@@ -109,6 +112,41 @@ export class MarinMindSettingTab extends PluginSettingTab {
 			);
 	}
 
+	/** 阅读（75 划选工具栏 / 77 线型）：text 工具划选的交互与文字摘录形态 */
+	private renderReaderSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "阅读" });
+
+		new Setting(containerEl)
+			.setName("划选工具栏")
+			.setDesc("选中文字后弹出浮动工具栏（色点摘录 / 线型 / 翻译 / 复制 / 书签 / 搜索）；关闭后恢复划选松开即直接建卡。")
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.selectionToolbar)
+					.onChange(async (value) => {
+						this.plugin.settings.selectionToolbar = value;
+						await this.plugin.saveData({ ...this.plugin.settings });
+					});
+			});
+
+		new Setting(containerEl)
+			.setName("文字摘录线型")
+			.setDesc("新建文字摘录的高亮形态（下划线 / 波浪线 / 删除线）；已有卡片点击高亮块菜单「线型…」单独修改。")
+			.addDropdown((dropdown) => {
+				for (const style of LINE_STYLES) {
+					dropdown.addOption(style, LINE_STYLE_LABELS[style]);
+				}
+				dropdown
+					.setValue(this.plugin.settings.excerptLineStyle)
+					.onChange((value) => {
+						if (!isLineStyle(value)) {
+							return;
+						}
+						this.plugin.settings.excerptLineStyle = value;
+						void this.plugin.saveData({ ...this.plugin.settings });
+					});
+			});
+	}
+
 	/** 翻译（㉔）：目标语言默认值；引擎为 Google 免费接口（免密钥）故无配置项 */
 	private renderTranslateSection(containerEl: HTMLElement): void {
 		containerEl.createEl("h2", { text: "翻译" });
@@ -137,6 +175,41 @@ export class MarinMindSettingTab extends PluginSettingTab {
 			.setDesc(
 				"Google 免费翻译接口（免密钥，自动检测源语言）。需网络可达 translate.googleapis.com（国内通常需代理）；移动端同样可用。",
 			);
+	}
+
+	/** 复习（65）：批次张数与每日新卡上限（68 起消费——due 分批与新卡混排） */
+	private renderReviewSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "复习" });
+
+		new Setting(containerEl)
+			.setName("每批复习张数")
+			.setDesc("每次拉取的到期复习卡上限（5-200，默认 20）。新卡（首次考的卡）不占此名额，在复习卡之后追加。")
+			.addText((text) => {
+				text.setValue(String(this.plugin.settings.reviewBatchSize)).onChange((value) => {
+					const n = Math.round(Number(value));
+					if (!Number.isFinite(n) || n < 5 || n > 200) {
+						new Notice("每批复习张数需为 5-200 的整数");
+						return;
+					}
+					this.plugin.settings.reviewBatchSize = n;
+					void this.plugin.saveData({ ...this.plugin.settings });
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("每日新卡上限")
+			.setDesc("每天最多引入多少张新闪卡（0-999，0 = 不限，默认 0）。开启后新卡排在到期复习卡之后，当日已考新卡计入配额；适合控制新知识引入速度。")
+			.addText((text) => {
+				text.setValue(String(this.plugin.settings.reviewNewPerDay)).onChange((value) => {
+					const n = Math.round(Number(value));
+					if (!Number.isFinite(n) || n < 0 || n > 999) {
+						new Notice("每日新卡上限需为 0-999 的整数（0 表示不限）");
+						return;
+					}
+					this.plugin.settings.reviewNewPerDay = n;
+					void this.plugin.saveData({ ...this.plugin.settings });
+				});
+			});
 	}
 
 	private dataDirDesc(): string {

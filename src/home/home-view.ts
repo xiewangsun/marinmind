@@ -2,7 +2,7 @@ import { ItemView, setIcon } from "obsidian";
 import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { CardsPageState, CategorySelection } from "./home-data";
-import { renderCardsPage, renderDocumentsPage, enableKeyboardActivation, renderMapsPage, renderOverviewPage, type HomePage } from "./home-pages";
+import { renderCardsPage, renderDocumentsPage, enableKeyboardActivation, renderMapsPage, renderOverviewPage, clearBatchSelection, type HomePage } from "./home-pages";
 
 /** 主页视图类型标识（main.ts registerView / openHome 共用） */
 export const HOME_VIEW_TYPE = "marinmind-home";
@@ -34,7 +34,14 @@ export class MarinMindHomeView extends ItemView {
 	/** 文档页搜索关键词（会话内状态，不持久化；输入时只局部刷新列表，整页重渲染回填） */
 	private docQuery = "";
 	/** 卡片页筛选与分页（会话内状态，不持久化；筛选条件变化自动回第 1 页） */
-	private cardsFilter: CardsPageState = { documentId: null, excerptType: null, page: 1 };
+	private cardsFilter: CardsPageState = {
+		documentId: null,
+		excerptType: null,
+		deck: null,
+		tag: null,
+		color: null,
+		page: 1,
+	};
 	private cardBusOffs: Array<() => void> = [];
 	/** cardBus 高频事件（AI 批量建卡）合并刷新的防抖句柄 */
 	private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -106,6 +113,8 @@ export class MarinMindHomeView extends ItemView {
 		this.cardBusOffs = [];
 		if (this.refreshTimer) clearTimeout(this.refreshTimer);
 		this.refreshTimer = null;
+		// 74 批选：模块态随视图关闭清空（防下次打开主页时残留勾选模式）
+		clearBatchSelection();
 	}
 
 	/** 建立侧栏 + 内容区骨架（onOpen 一次；refresh 只重填内容） */
@@ -172,6 +181,8 @@ export class MarinMindHomeView extends ItemView {
 		if (page === this.currentPage && this.contentEl.querySelector(".marinmind-home-content")) {
 			return; // 重复点击当前页：不重渲染（防抖动）
 		}
+		// 74 批选：离开卡片页清模式与选择（防回页时行 click 突然变勾选的陈旧态惊喜）
+		if (page !== "cards") clearBatchSelection();
 		this.currentPage = page;
 		for (const [p, el] of this.navCountEls) {
 			// navCountEls 的 key 是导航项，找其父节点切 is-active
@@ -214,9 +225,16 @@ export class MarinMindHomeView extends ItemView {
 			setCardsFilter: (patch: Partial<CardsPageState>) => {
 				// 筛选条件变化重置回第 1 页（翻页 patch 带页码不影响）
 				const { page: _page, ...filters } = patch;
+				let changed = false;
 				for (const [key, value] of Object.entries(filters)) {
-					if (this.cardsFilter[key as keyof CardsPageState] !== value) this.cardsFilter.page = 1;
+					if (this.cardsFilter[key as keyof CardsPageState] !== value) {
+						this.cardsFilter.page = 1;
+						changed = true;
+					}
 				}
+				// 74 批选：筛选条件变化清选择与模式（选择只对当前筛选集有意义，防跨筛选误删；
+				// 翻页 patch 只有 page 键不清——跨页保留选择）
+				if (changed) clearBatchSelection();
 				Object.assign(this.cardsFilter, patch);
 				this.renderCurrentPage();
 			},

@@ -38,13 +38,19 @@ export class CardPickerModal extends FuzzySuggestModal<Card> {
 
 	renderSuggestion(match: FuzzyMatch<Card>, el: HTMLElement): void {
 		const card = match.item;
+		// R2（E2-07）：主行 picker-name + picker-title 统一截断（摘录全文单行省略）
 		const name = document.createElement("div");
-		name.textContent = card.note ?? card.excerptText ?? `（${card.excerptType} 摘录）`;
+		name.className = "marinmind-picker-name";
+		const title = document.createElement("span");
+		title.className = "marinmind-picker-title";
+		title.textContent =
+			card.note ?? card.excerptText ?? `（${card.excerptType} 摘录）`;
 
 		const dir = document.createElement("div");
 		dir.className = "marinmind-picker-dir";
 		dir.textContent = this.describeSource(card);
 
+		name.appendChild(title);
 		el.appendChild(name);
 		el.appendChild(dir);
 	}

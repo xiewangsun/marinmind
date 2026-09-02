@@ -1,6 +1,7 @@
 import type { MarinMindStore, MapState } from "../../store/marinmind-store";
 import type { BranchStyle, Mindmap, MindmapNode, MindmapNodeWithCard } from "../../types";
 import { isBranchStyle } from "../../types";
+import { subtreeIds } from "../../mindmap/mindmap-graph";
 import { newId, now } from "../../utils";
 
 /**
@@ -111,9 +112,23 @@ export class MindmapRepository {
 		return this.store.maps.get(id)?.map;
 	}
 
-	/** 删除脑图（图内节点由 store 级联删除） */
+	/** 删除脑图（图内节点由 store 级联删除）+ portal 清扫（61）：其他图指向本图的
+	 *  子脑图引用置 null（低频删图毫秒级全库扫描），防悬空引用永驻文件 */
 	delete(id: string): boolean {
-		return this.store.deleteMap(id);
+		const ok = this.store.deleteMap(id);
+		if (ok) {
+			for (const ms of this.store.maps.values()) {
+				let touched = false;
+				for (const node of ms.nodes.values()) {
+					if (node.childMapId === id) {
+						node.childMapId = null;
+						touched = true;
+					}
+				}
+				if (touched) this.store.markDirty(ms.map.id);
+			}
+		}
+		return ok;
 	}
 
 	/** 节点数（省略 mapId = 全库节点数） */
@@ -174,6 +189,7 @@ export class MindmapRepository {
 			y: Math.round(y),
 			collapsed: false, // 新节点一律展开
 			branchStyle: null, // 新节点继承图默认
+			childMapId: null, // 61 新节点非 portal（坍缩时显式 setChildMap）
 			// ㉜ 兄弟序追加末位（新节点按加入顺序堆叠；before/after 手动插入走 setParent 的 order 参数）
 			order: this.countSiblings(mapId, parentId),
 			createdAt: now(),
@@ -268,9 +284,100 @@ export class MindmapRepository {
 		return this.nodesByFilter((node) => node.mapId === mapId);
 	}
 
+	/**
+	 * 节点改挂另一张卡（60 卡片合并的节点迁移）：一图一卡预检——目标卡在同图
+	 * 已有节点则拒绝返回 undefined（调用方应走"子挂目标 + 删源节点"路径）；
+	 * 目标卡必须存在（对齐 addNode 外键语义）。
+	 */
+	repointNode(nodeId: string, cardId: string): MindmapNode | undefined {
+		for (const ms of this.store.maps.values()) {
+			const node = ms.nodes.get(nodeId);
+			if (!node) continue;
+			if (!this.store.bookOfCard(cardId)?.cards.has(cardId)) {
+				return undefined;
+			}
+			if (this.hasCard(node.mapId, cardId)) {
+				return undefined; // 一图一卡：同图已有目标卡节点
+			}
+			node.cardId = cardId;
+			this.store.markDirty(node.mapId);
+			return node;
+		}
+		return undefined;
+	}
+
 	/** 按卡片反查节点引用（复习「脑图上下文」入口；一卡可在多图各挂一个节点） */
 	nodesByCard(cardId: string): MindmapNodeWithCard[] {
 		return this.nodesByFilter((node) => node.cardId === cardId);
+	}
+
+	/**
+	 * 设置/清除节点的子脑图引用（61 portal 身份的唯一写入口）。
+	 * 图存在性由调用方守卫（坍缩方刚 create 必存在；解除方先判 get）。
+	 */
+	setChildMap(nodeId: string, childMapId: string | null): void {
+		for (const ms of this.store.maps.values()) {
+			const node = ms.nodes.get(nodeId);
+			if (!node) continue;
+			node.childMapId = childMapId;
+			this.store.markDirty(ms.map.id);
+			return;
+		}
+	}
+
+	/**
+	 * 整子树迁移到另一张图（61 子脑图坍缩/解除的原子操作）：
+	 * BFS 收集源图 parentId 链整子树（含折叠隐藏后代），前置校验任一失败返回
+	 * false 且零改动——节点存在 / 目标图存在 / 源≠目标 / targetParentId 属目标图 /
+	 * **一图一卡整批预检**（子树任一卡已在目标图 → 整批拒绝，不留半迁移）。
+	 * targetParentId 缺省 null：被迁根成目标图根，order 保留（坍缩后目标图内
+	 * 根序 = 原兄弟序）；非 null：追加末位（解除时排在坍缩期间新加子之后）。
+	 * 迁移逐节点换新对象 {...node, mapId}（防双图共享引用互染）；源图 fixedRoot
+	 * 在子树内则解钉（对齐 removeNode）；markDirty 双图。
+	 * 环防护：当前入口集（坍缩永远 create 新图）环不可能形成；「绑定已存在图
+	 * 为子图」入口不暴露，写侧可达性校验挂账（手编 md 恶意环仅双击来回切图无递归）。
+	 */
+	moveSubtreeToMap(
+		nodeId: string,
+		targetMapId: string,
+		targetParentId: string | null = null,
+	): boolean {
+		const root = this.getNode(nodeId);
+		if (!root) return false;
+		const sourceMapId = root.mapId;
+		if (sourceMapId === targetMapId) return false;
+		const source = this.store.maps.get(sourceMapId);
+		const target = this.store.maps.get(targetMapId);
+		if (!source || !target) return false;
+		if (targetParentId != null && !target.nodes.has(targetParentId)) return false;
+		const ids = subtreeIds([...source.nodes.values()], nodeId);
+		for (const id of ids) {
+			const n = source.nodes.get(id);
+			if (n && this.hasCard(targetMapId, n.cardId)) return false;
+		}
+		for (const id of ids) {
+			const n = source.nodes.get(id);
+			if (!n) continue;
+			source.nodes.delete(id);
+			target.nodes.set(id, { ...n, mapId: targetMapId });
+		}
+		const moved = target.nodes.get(nodeId);
+		if (moved) {
+			// 追加序号须在改 parentId 前计算（否则把被迁节点自身也计入）
+			if (targetParentId != null) {
+				moved.order = this.countSiblings(targetMapId, targetParentId);
+			}
+			moved.parentId = targetParentId;
+		}
+		if (source.map.fixedRootNodeId != null && ids.includes(source.map.fixedRootNodeId)) {
+			source.map = { ...source.map, fixedRootNodeId: null };
+		}
+		const ts = now();
+		source.map = { ...source.map, updatedAt: ts };
+		target.map = { ...target.map, updatedAt: ts };
+		this.store.markDirty(sourceMapId);
+		this.store.markDirty(targetMapId);
+		return true;
 	}
 
 	/** 过滤 + JOIN 卡片本体 + 排序（节点挂的卡片已不存在时跳过，对齐 INNER JOIN） */

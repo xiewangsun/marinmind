@@ -1,5 +1,5 @@
 import type { Card, DocRect, NormPoint } from "../types";
-import { highlightFallbackColor, highlightLineColor } from "./highlight-colors";
+import { highlightFallbackColor, highlightLineColor, highlightLineStyle } from "./highlight-colors";
 
 /**
  * 区域/套索摘录的内容快照（⑳）：从已渲染的页面 canvas 裁剪摘录区域为图片，
@@ -156,14 +156,43 @@ export function paintCardHighlights(canvas: HTMLCanvasElement, card: Card): void
 		ctx.stroke();
 		return;
 	}
-	// 文字卡：每行矩形底部画下划线粗条（与阅读器下划线形态同观感）
+	// 文字卡：按线型画行底/行中记号（77 三态——与阅读器 CSS 形态同观感）
 	if (card.excerptType === "text") {
+		const style = highlightLineStyle(card);
 		for (const r of card.rects) {
 			const x = r.x * w;
 			const y = r.y * h;
 			const rw = r.w * w;
 			const rh = r.h * h;
 			const lw = Math.max(2.5, rh * 0.06, w / 500);
+			if (style === "strikethrough") {
+				// 删除线：行中线粗条（与 CSS ::before top:50% 同位）
+				ctx.fillStyle = line;
+				ctx.fillRect(x, y + (rh - lw) / 2, rw, lw);
+				continue;
+			}
+			if (style === "squiggle") {
+				// 波浪线：行底正弦串（quadraticCurveTo 交替上下控制点；周期/振幅
+				// 与 lw 同源等比——高倍离屏渲染后经 CSS 缩小仍同观感）
+				const period = lw * 3.2; // 波浪周期 ≈ 线宽 3.2 倍（CSS 8px tile/2.5px 同比）
+				const amp = lw * 0.8; // 控制点偏移（曲线峰值约 amp/2）
+				const yb = y + rh - lw; // 基线略高于行底（与下划线条同位）
+				ctx.strokeStyle = line;
+				ctx.lineWidth = Math.max(1.5, lw * 0.6); // 波形笔画细于下划线粗条
+				ctx.lineCap = "round";
+				ctx.beginPath();
+				let cx = x;
+				let up = true;
+				ctx.moveTo(cx, yb);
+				while (cx < x + rw) {
+					const next = Math.min(cx + period / 2, x + rw);
+					ctx.quadraticCurveTo((cx + next) / 2, yb + (up ? -2 * amp : 2 * amp), next, yb);
+					cx = next;
+					up = !up;
+				}
+				ctx.stroke();
+				continue;
+			}
 			ctx.fillStyle = line;
 			ctx.fillRect(x, y + rh - lw, rw, lw);
 		}

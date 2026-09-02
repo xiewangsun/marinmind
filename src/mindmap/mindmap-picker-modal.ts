@@ -40,21 +40,28 @@ export class MindmapPickerModal extends FuzzySuggestModal<Entry> {
 	}
 
 	renderSuggestion(match: FuzzyMatch<Entry>, el: HTMLElement): void {
+		// R2（E2-07）：主行 picker-name + picker-title 统一截断（长图名单行省略）
 		const name = document.createElement("div");
+		name.className = "marinmind-picker-name";
+		const title = document.createElement("span");
+		title.className = "marinmind-picker-title";
 		const dir = document.createElement("div");
 		dir.className = "marinmind-picker-dir";
 		if (isNewMap(match.item)) {
-			name.textContent = "➕ 新建脑图";
+			title.textContent = "➕ 新建脑图";
 			dir.textContent = "创建一张新的思维导图";
 		} else {
 			// 书籍默认脑图（㉗ 自动入图目标）带 📖 徽标——用户摘录后据此找图
 			const isBookMap = match.item.documentId != null;
 			const nodeCount = this.plugin.mindmaps.countNodes(match.item.id);
-			name.textContent = isBookMap ? `📖 ${match.item.name}` : match.item.name;
+			title.textContent = isBookMap
+				? `📖 ${match.item.name}`
+				: match.item.name;
 			dir.textContent = isBookMap
 				? `${nodeCount} 个节点 · 书籍脑图（该书摘录自动入图）`
 				: `${nodeCount} 个节点`;
 		}
+		name.appendChild(title);
 		el.appendChild(name);
 		el.appendChild(dir);
 	}

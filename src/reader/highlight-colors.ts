@@ -1,4 +1,4 @@
-import type { Card } from "../types";
+import type { Card, LineStyle } from "../types";
 
 /**
  * 高亮颜色体系（㊹ MarginNote 3 化：四色 + 线稿式标注）：
@@ -9,6 +9,9 @@ import type { Card } from "../types";
  *   描边 / 留白胶囊边框）只消费变量——syncCard 刷 data-color 即全员变色
  * - 建卡色 = settings.excerptColors（每工具独立记忆，工具按钮循环切换）；
  *   AI 摘录标题浅红/正文跟随文字工具色，翻译留白跟随留白工具色，照片/语音浅红
+ * - 线型（77）：文字摘录的第三轨 data-line-style（下划线/波浪线/删除线，
+ *   名单源 types.ts 的 LINE_STYLES，回退函数 highlightLineStyle）——
+ *   建卡线型 = settings.excerptLineStyle 全局单值（只属 text 形态，无 per-tool）
  * - 旧 7 色中 teal/orange/purple/pink 为存量卡色相（CSS 保留旧变量定义继续渲染，
  *   新建卡不再产生）；blue 是四色化前文字摘录/AI 正文的历史值（视觉一直是黄），
  *   读取层归一为 yellow（book-format/legacy-import），㊹ 起 blue = 浅蓝真义
@@ -58,6 +61,22 @@ export function highlightFallbackColor(card: Card): string {
 			return "yellow";
 	}
 }
+
+/**
+ * card.lineStyle 读取回退（77）：null → underline。
+ * 形态轨消费方（excerpt-layer 的 data-line-style / region-snapshot 的 canvas
+ * 分支 / 高亮菜单当前态）共用同一处定义——名单源在 types.ts（LINE_STYLES）
+ */
+export function highlightLineStyle(card: Card): LineStyle {
+	return card.lineStyle ?? "underline";
+}
+
+/** 线型 → 图标名（77 工具栏钮与菜单条目共用；三名均经 obsidian.asar 注册表双格式验证） */
+export const LINE_STYLE_ICONS: Record<LineStyle, string> = {
+	underline: "underline",
+	squiggle: "waves",
+	strikethrough: "strikethrough",
+};
 
 /** 存量 7 色卡（teal/orange/purple/pink）的描边线色——缩略图/预览保持原色相 */
 const LEGACY_LINE_COLORS: Record<string, string> = {

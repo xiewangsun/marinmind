@@ -1,6 +1,6 @@
 import type { MarinMindStore } from "../../store/marinmind-store";
 import { defaultReviewState } from "../../store/book-format";
-import type { Card, DocRect, ExcerptType, NormPoint } from "../../types";
+import type { Card, DocRect, ExcerptType, LineStyle, NormPoint } from "../../types";
 import { newId, now } from "../../utils";
 import type { CardEventBus } from "../../events/card-bus";
 
@@ -16,10 +16,16 @@ export interface CreateCardInput {
 	excerptRef?: string | null;
 	note?: string | null;
 	color?: string | null;
+	/** 文字摘录线型（77，仅 text 形态消费）：缺省为 null = 下划线 */
+	lineStyle?: LineStyle | null;
 	/** 卡片标题（㊺，脑图节点标题栏）：缺省为空 */
 	title?: string | null;
+	/** 卡组名（复习卡分组）：缺省为空 */
+	deck?: string | null;
 	/** 闪卡遮挡区域（㊷）：缺省为空 */
 	occlusions?: DocRect[];
+	/** 目录章节骨架卡（55，PDF 目录转框架）：缺省非骨架卡 */
+	outline?: boolean;
 	tags?: string[];
 }
 
@@ -30,7 +36,11 @@ export interface CardPatch {
 	excerptRef?: string | null;
 	note?: string | null;
 	color?: string | null;
+	/** 文字摘录线型（77）：null = 改回下划线，undefined 不动 */
+	lineStyle?: LineStyle | null;
 	title?: string | null;
+	/** 卡组名：null = 移出卡组，undefined 不动 */
+	deck?: string | null;
 	/** 闪卡遮挡区域（㊷）：传数组整体替换，undefined 不动 */
 	occlusions?: DocRect[];
 	tags?: string[];
@@ -77,8 +87,13 @@ export class CardRepository {
 			excerptRef: input.excerptRef ?? null,
 			note: input.note ?? null,
 			color: input.color ?? null,
+			// 线型（77）：入口收口 null=下划线（与 color 的 null=回退默认同构）
+			lineStyle: input.lineStyle ?? null,
 			title: input.title ?? null,
+			deck: input.deck ?? null,
 			occlusions: input.occlusions ?? [],
+			// 目录章节骨架卡（55）：显式落布尔（false 同缺省，序列化省键零写入契约）
+			outline: input.outline ?? false,
 			tags: input.tags ?? [],
 			createdAt: ts,
 			updatedAt: ts,
@@ -113,7 +128,9 @@ export class CardRepository {
 			...(patch.excerptRef !== undefined ? { excerptRef: patch.excerptRef } : {}),
 			...(patch.note !== undefined ? { note: patch.note } : {}),
 			...(patch.color !== undefined ? { color: patch.color } : {}),
+			...(patch.lineStyle !== undefined ? { lineStyle: patch.lineStyle } : {}),
 			...(patch.title !== undefined ? { title: patch.title } : {}),
+			...(patch.deck !== undefined ? { deck: patch.deck } : {}),
 			...(patch.occlusions !== undefined ? { occlusions: patch.occlusions } : {}),
 			...(patch.tags !== undefined ? { tags: patch.tags } : {}),
 			updatedAt: now(),

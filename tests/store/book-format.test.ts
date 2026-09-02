@@ -35,7 +35,9 @@ function card(partial: Partial<Card> & Pick<Card, "id" | "excerptType">): Card {
 		excerptRef: null,
 		note: null,
 		color: null,
+		lineStyle: null,
 		title: null,
+		deck: null,
 		occlusions: [],
 		tags: [],
 		createdAt: 1700000001000,
@@ -464,6 +466,134 @@ describe("book-format 序列化与解析", () => {
 		// 损坏值（非字符串）按无标题处理不拖垮整卡
 		const broken = text.replace('"title":"我的标题"', '"title":123');
 		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === titled.id)!.title).toBeNull();
+
+		// 二次序列化字节相同（确定性）
+		const again = serializeBookMd({
+			doc: parsed.doc,
+			cards: parsed.cards,
+			reviews: new Map(parsed.reviews.map((r) => [r.cardId, r])),
+			bookmarks: parsed.bookmarks,
+			links: parsed.links,
+			extraFrontmatter: parsed.extraFrontmatter,
+		});
+		expect(again).toBe(text);
+	});
+
+	it("卡组 deck 机器层往返：deck 键还原（title 之后），未分组卡不输出该键（零写入）", () => {
+		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000005", excerptType: "text", excerptText: "未分组" });
+		const decked = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000006",
+			excerptType: "text",
+			excerptText: "摘录原文",
+			title: "我的标题",
+			deck: "考研单词",
+		});
+		const text = serializeBookMd(bookInput({ cards: [plain, decked] }));
+		// 零写入：未分组卡的机器注释不含 deck 键（存量卡字节不变）
+		const commentOf = (id: string) =>
+			text.split("\n").find((l) => l.startsWith("<!--mm ") && l.includes(`"id":"${id}"`))!;
+		expect(commentOf(plain.id)).not.toContain('"deck"');
+		// 键序：deck 在 title 之后（确定性）
+		expect(commentOf(decked.id)).toContain('"title":"我的标题","deck":"考研单词"');
+
+		const parsed = parseBookMd(text, { fileName: "书籍A.md" });
+		expect(parsed.warnings).toEqual([]);
+		expect(parsed.cards.find((c) => c.id === decked.id)!.deck).toBe("考研单词");
+		expect(parsed.cards.find((c) => c.id === plain.id)!.deck).toBeNull(); // 缺键回填 null
+		// 损坏值（非字符串）按未分组处理不拖垮整卡
+		const broken = text.replace('"deck":"考研单词"', '"deck":123');
+		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === decked.id)!.deck).toBeNull();
+
+		// 二次序列化字节相同（确定性）
+		const again = serializeBookMd({
+			doc: parsed.doc,
+			cards: parsed.cards,
+			reviews: new Map(parsed.reviews.map((r) => [r.cardId, r])),
+			bookmarks: parsed.bookmarks,
+			links: parsed.links,
+			extraFrontmatter: parsed.extraFrontmatter,
+		});
+		expect(again).toBe(text);
+	});
+
+	it("文字摘录线型 line 机器层往返（77）：squiggle/strikethrough 才落键（deck 之后），缺省/underline 省键（零写入）", () => {
+		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000015", excerptType: "text", excerptText: "默认下划线" });
+		const squiggled = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000016",
+			excerptType: "text",
+			excerptText: "波浪线摘录",
+			title: "我的标题",
+			deck: "考研单词",
+			lineStyle: "squiggle",
+		});
+		const text = serializeBookMd(bookInput({ cards: [plain, squiggled] }));
+		const commentOf = (id: string) =>
+			text.split("\n").find((l) => l.startsWith("<!--mm ") && l.includes(`"id":"${id}"`))!;
+		// 零写入：默认（null=下划线）卡的机器注释不含 line 键（存量卡字节不变）
+		expect(commentOf(plain.id)).not.toContain('"line"');
+		// 键序：line 在 deck 之后（确定性）
+		expect(commentOf(squiggled.id)).toContain('"deck":"考研单词","line":"squiggle"');
+
+		const parsed = parseBookMd(text, { fileName: "书籍A.md" });
+		expect(parsed.warnings).toEqual([]);
+		expect(parsed.cards.find((c) => c.id === squiggled.id)!.lineStyle).toBe("squiggle");
+		expect(parsed.cards.find((c) => c.id === plain.id)!.lineStyle).toBeNull(); // 缺键回填 null
+		// 损坏值（非字符串）与非法值（不在名单）均按 null 处理不拖垮整卡
+		const broken = text.replace('"line":"squiggle"', '"line":123');
+		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === squiggled.id)!.lineStyle).toBeNull();
+		const bogus = text.replace('"line":"squiggle"', '"line":"wavy"');
+		expect(parseBookMd(bogus, { fileName: "书籍A.md" }).cards.find((c) => c.id === squiggled.id)!.lineStyle).toBeNull();
+		// 手编 underline 归一 null（与序列化省键首尾一致——内存规范形无 underline 值）
+		const handWritten = text.replace('"line":"squiggle"', '"line":"underline"');
+		const normalized = parseBookMd(handWritten, { fileName: "书籍A.md" });
+		expect(normalized.cards.find((c) => c.id === squiggled.id)!.lineStyle).toBeNull();
+		// 归一后再序列化 line 键消失（字节收敛）
+		const renormalized = serializeBookMd({
+			doc: normalized.doc,
+			cards: normalized.cards,
+			reviews: new Map(normalized.reviews.map((r) => [r.cardId, r])),
+			bookmarks: normalized.bookmarks,
+			links: normalized.links,
+			extraFrontmatter: normalized.extraFrontmatter,
+		});
+		expect(renormalized).not.toContain('"line"');
+
+		// 二次序列化字节相同（确定性）
+		const again = serializeBookMd({
+			doc: parsed.doc,
+			cards: parsed.cards,
+			reviews: new Map(parsed.reviews.map((r) => [r.cardId, r])),
+			bookmarks: parsed.bookmarks,
+			links: parsed.links,
+			extraFrontmatter: parsed.extraFrontmatter,
+		});
+		expect(again).toBe(text);
+	});
+
+	it("目录章节骨架 outline 机器层往返（55）：occ 后 outline:true 键还原，普通卡不输出该键（零写入）", () => {
+		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000007", excerptType: "text", excerptText: "普通摘录" });
+		const chapter = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000008",
+			excerptType: "text",
+			excerptText: "第一章",
+			title: "第一章",
+			page: 1,
+			outline: true,
+		});
+		const text = serializeBookMd(bookInput({ cards: [plain, chapter] }));
+		// 零写入：普通卡（含 outline: false）的机器注释不含 outline 键
+		const commentOf = (id: string) =>
+			text.split("\n").find((l) => l.startsWith("<!--mm ") && l.includes(`"id":"${id}"`))!;
+		expect(commentOf(plain.id)).not.toContain('"outline"');
+		expect(commentOf(chapter.id)).toContain('"outline":true');
+
+		const parsed = parseBookMd(text, { fileName: "书籍A.md" });
+		expect(parsed.warnings).toEqual([]);
+		expect(parsed.cards.find((c) => c.id === chapter.id)!.outline).toBe(true);
+		expect(parsed.cards.find((c) => c.id === plain.id)!.outline).toBeFalsy(); // 缺键 = 普通卡
+		// 损坏值（非 true）按普通卡处理不拖垮整卡
+		const broken = text.replace('"outline":true', '"outline":"yes"');
+		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === chapter.id)!.outline).toBeFalsy();
 
 		// 二次序列化字节相同（确定性）
 		const again = serializeBookMd({

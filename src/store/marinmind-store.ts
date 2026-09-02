@@ -22,6 +22,28 @@ import {
 	type ParsedBookFile,
 } from "./book-format";
 import { parseMindmapMd, serializeMindmapMd } from "./mindmap-format";
+import {
+	REVIEW_LOG_FILENAME,
+	REVIEW_LOG_SCOPE,
+	parseReviewLogMd,
+	serializeReviewLogMd,
+	type ReviewLogData,
+} from "./review-log";
+import {
+	DECKS_FILENAME,
+	DECKS_SCOPE,
+	FOLDERS_FILENAME,
+	FOLDERS_SCOPE,
+	addToGroupList,
+	groupListFilename,
+	groupListHasChildren,
+	groupListScope,
+	parseGroupListMd,
+	removeSubtreeFromGroupList,
+	renamePrefixInGroupList,
+	serializeGroupListMd,
+	type GroupKind,
+} from "./group-list";
 
 /**
  * MarinMind Markdown 存储引擎（㉚）：内存权威 + 脏粒度分文件防抖落盘。
@@ -32,13 +54,14 @@ import { parseMindmapMd, serializeMindmapMd } from "./mindmap-format";
  * 的 *Cascade 方法承担——SQLite 外键删除后必须以应用逻辑复刻。
  *
  * 落盘契约：
- * - markDirty(scope)：scope = docId | mapId | "orphan"（孤儿文件）；2s 防抖后 flush。
+ * - markDirty(scope)：scope = docId | mapId | "orphan"（孤儿文件）| "reviewlog"
+ *   （66 复习日志）；2s 防抖后 flush。
  * - flush 只重写脏 scope 对应文件，**内容 === lastWritten 才写**（零写入契约，可断言）。
  * - 文件删除走 pendingDeletes 队列（书/图删除、文件改名）。
  *
  * 外部修改回灌（vault 事件，见 main.ts 装配）：用户手编磁盘即权威——非脏窗口整文件
- * 覆盖内存；脏窗口（插件有未写变更）对书文件做三字段合并（磁盘的 文本/批注/标签
- * 覆盖内存，几何与复习状态保内存）+ warning，脑图以内存为准 + warning。
+ * 覆盖内存；脏窗口（插件有未写变更）对书文件做五字段合并（磁盘的 文本/批注/标签/颜色/
+ * 线型 覆盖内存，几何与复习状态保内存）+ warning，脑图以内存为准 + warning。
  * fs 数据根（桌面绝对路径）无 vault 事件，不支持回灌。
  */
 
@@ -103,6 +126,10 @@ export class MarinMindStore {
 	private readonly orphan: BookState;
 	private readonly reviewsById = new Map<string, ReviewState>();
 	private readonly linksById = new Map<string, CardLink>();
+	/** 66 复习日志：按日聚合计数（派生统计，权威在每卡 ReviewState） */
+	private reviewLog: ReviewLogData = {};
+	/** 76 分类/卡组清单：用户显式创建的分组路径（空分组持久存在的载体） */
+	private readonly groupLists: Record<GroupKind, string[]> = { folders: [], decks: [] };
 	private readonly dirtyScopes = new Set<string>();
 	private readonly pendingDeletes = new Set<string>();
 	/** relPath → 上次写入内容（自写回声过滤 + 零写入契约基准） */
@@ -152,6 +179,23 @@ export class MarinMindStore {
 		let i = 0;
 		for (const file of bookFiles) {
 			const text = decodeUtf8(buffers[i++]);
+			// 66 复习日志：机器层为锚灌入；损坏（null）保内存空态且 lastWritten 记磁盘原文
+			// ——此后一旦有新评分标脏，flush 即用完整内存覆盖回规范格式
+			if (file === REVIEW_LOG_FILENAME) {
+				const log = parseReviewLogMd(text);
+				if (log) this.reviewLog = log;
+				this.lastWritten.set(file, text);
+				continue;
+			}
+			// 76 分类/卡组清单：行权威灌入；损坏（null）保内存空态且 lastWritten 记磁盘
+			// 原文——此后一旦有新建分组标脏，flush 即用完整内存覆盖回规范格式
+			if (file === FOLDERS_FILENAME || file === DECKS_FILENAME) {
+				const kind: GroupKind = file === FOLDERS_FILENAME ? "folders" : "decks";
+				const list = parseGroupListMd(text, kind);
+				if (list) this.groupLists[kind] = list;
+				this.lastWritten.set(file, text);
+				continue;
+			}
 			const parsed = parseBookMd(text, { fileName: file });
 			if (file === ORPHAN_BOOK_FILENAME) {
 				this.absorbOrphan(parsed);
@@ -236,6 +280,90 @@ export class MarinMindStore {
 	putReview(review: ReviewState): void {
 		this.reviewsById.set(review.cardId, review);
 		this.markDirty(this.scopeOfCard(review.cardId));
+	}
+
+	/** 复习日志快照（66；统计面板/新卡配额/撤销回退经纯函数消费，不改内存） */
+	getReviewLog(): ReviewLogData {
+		return this.reviewLog;
+	}
+
+	/**
+	 * 变更复习日志（评分 +1 / 撤销回退 -1）：fn 原地改动后统一标脏独立 scope——
+	 * store 不理解复习语义，记什么由仓储层决定（镜像 markDirty 粒度设计）。
+	 */
+	mutateReviewLog(fn: (log: ReviewLogData) => void): void {
+		fn(this.reviewLog);
+		this.markDirty(REVIEW_LOG_SCOPE);
+	}
+
+	// -----------------------------------------------------------------------
+	// 分类/卡组清单（76：空分组持久存在的载体；主页文件夹树/右键归入/设卡组选择器消费）
+	// -----------------------------------------------------------------------
+
+	/** 分类清单快照（树构建 union 用；调用方只读） */
+	getFolders(): readonly string[] {
+		return this.groupLists.folders;
+	}
+
+	/** 卡组清单快照 */
+	getDecks(): readonly string[] {
+		return this.groupLists.decks;
+	}
+
+	/** 追加分类（主页「新建分类」等显式创建入口；已存在时零写入） */
+	addFolder(path: string): void {
+		this.addToList("folders", path);
+	}
+
+	/** 追加卡组（同构） */
+	addDeck(path: string): void {
+		this.addToList("decks", path);
+	}
+
+	/** 移除分类子树清单项（删除分类时与文档置 null 配套） */
+	removeFoldersUnder(path: string): void {
+		this.removeFromList("folders", path);
+	}
+
+	/** 移除卡组子树清单项（同构） */
+	removeDecksUnder(path: string): void {
+		this.removeFromList("decks", path);
+	}
+
+	/** 清单内是否仍有子分组（主页"纯空组删除免确认"判定用） */
+	groupListHasChildren(kind: GroupKind, path: string): boolean {
+		return groupListHasChildren(this.groupLists[kind], path);
+	}
+
+	/** 分类前缀级联重命名（「学习」→「study」时清单内「学习/英语」跟随） */
+	renameFoldersPrefix(oldName: string, newName: string): void {
+		this.renameInList("folders", oldName, newName);
+	}
+
+	/** 卡组前缀级联重命名（同构） */
+	renameDecksPrefix(oldName: string, newName: string): void {
+		this.renameInList("decks", oldName, newName);
+	}
+
+	private addToList(kind: GroupKind, path: string): void {
+		const next = addToGroupList(this.groupLists[kind], path);
+		if (next === this.groupLists[kind]) return; // 已存在：零写入契约
+		this.groupLists[kind] = [...next];
+		this.markDirty(groupListScope(kind));
+	}
+
+	private removeFromList(kind: GroupKind, path: string): void {
+		const next = removeSubtreeFromGroupList(this.groupLists[kind], path);
+		if (next === this.groupLists[kind]) return; // 清单内无此子树：零写入
+		this.groupLists[kind] = [...next];
+		this.markDirty(groupListScope(kind));
+	}
+
+	private renameInList(kind: GroupKind, oldName: string, newName: string): void {
+		const next = renamePrefixInGroupList(this.groupLists[kind], oldName, newName);
+		if (next === this.groupLists[kind]) return; // 清单内无命中：零写入
+		this.groupLists[kind] = [...next];
+		this.markDirty(groupListScope(kind));
 	}
 
 	/** 新建链接（id 规范化派生；持有方文件标脏）。已存在（含反向）时覆盖同 id 条目 */
@@ -508,6 +636,15 @@ export class MarinMindStore {
 				await this.flushOrphan();
 				continue;
 			}
+			if (scope === REVIEW_LOG_SCOPE) {
+				await this.flushReviewLog();
+				continue;
+			}
+			// 76 分类/卡组清单：清空即删文件（空清单无阅读价值，区别于日志常驻）
+			if (scope === FOLDERS_SCOPE || scope === DECKS_SCOPE) {
+				await this.flushGroupList(scope === FOLDERS_SCOPE ? "folders" : "decks");
+				continue;
+			}
 			const book = this.booksById.get(scope);
 			if (book) await this.flushBook(book);
 			const map = this.mapsById.get(scope);
@@ -590,6 +727,33 @@ export class MarinMindStore {
 		await this.writeIfChanged(state.relPath, text);
 	}
 
+	/**
+	 * 66 复习日志落盘。与孤儿文件「清空即删」不同：日志文件常驻数据根供用户阅读，
+	 * 空日志也是合法文档（serializeReviewLogMd 产出占位文案）。外部删除后若不再有
+	 * 评分则不复活（handleExternalChange 删脏），有评分自然重建——「暂无记录」态。
+	 */
+	private async flushReviewLog(): Promise<void> {
+		await this.writeIfChanged(REVIEW_LOG_FILENAME, serializeReviewLogMd(this.reviewLog));
+	}
+
+	/**
+	 * 76 清单落盘。与复习日志「常驻」不同：空清单即删文件（镜像孤儿「清空即删」
+	 * ——从未建过分组的库数据根保持干净）；外部删除后若不再有新建分组则不复活
+	 * （handleExternalChange 删脏），有新建自然重建。
+	 */
+	private async flushGroupList(kind: GroupKind): Promise<void> {
+		const rel = groupListFilename(kind);
+		const list = this.groupLists[kind];
+		if (list.length === 0) {
+			if (this.lastWritten.has(rel)) {
+				await this.adapter.remove(rel);
+				this.lastWritten.delete(rel);
+			}
+			return;
+		}
+		await this.writeIfChanged(rel, serializeGroupListMd(kind, list));
+	}
+
 	/** 零写入契约：内容与上次写入相同则不碰磁盘 */
 	private async writeIfChanged(relPath: string, content: string): Promise<void> {
 		if (this.lastWritten.get(relPath) === content) return;
@@ -608,7 +772,12 @@ export class MarinMindStore {
 		if (rel === selfPath) {
 			return rel;
 		}
-		return this.booksByPath.has(rel) ? `${base} (${id.slice(0, 4)}).md` : rel;
+		// 66 复习日志 / 76 清单文件占用守卫：书名恰为「复习日志」「分类」「卡组」时
+		// 让路加后缀，防覆盖这些数据根专属文件
+		return this.booksByPath.has(rel) || rel === REVIEW_LOG_FILENAME ||
+				rel === FOLDERS_FILENAME || rel === DECKS_FILENAME
+			? `${base} (${id.slice(0, 4)}).md`
+			: rel;
 	}
 
 	private allocateMapPath(name: string, id: string, selfPath?: string): string {
@@ -671,6 +840,50 @@ export class MarinMindStore {
 		const warnings: string[] = [];
 		// 自写回声：磁盘内容 === 上次写入 → 插件自己的落盘事件
 		if (content !== null && this.lastWritten.get(relPath) === content) {
+			return { removedCards, warnings };
+		}
+
+		// 66 复习日志：聚合计数是派生统计（权威在每卡 ReviewState），无三字段合并
+		// 基线——合并必赌。采纳外部 / 损坏保内存写回 / 删除清空不复活，
+		// 损失面封顶 2s 防抖窗口的当日计数。
+		if (relPath === REVIEW_LOG_FILENAME) {
+			if (content === null) {
+				// 尊重删除意图：清内存并撤脏——不撤的话防抖 flush 会用内存重新写回复活
+				this.reviewLog = {};
+				this.lastWritten.delete(relPath);
+				this.dirtyScopes.delete(REVIEW_LOG_SCOPE);
+				return { removedCards, warnings };
+			}
+			const log = parseReviewLogMd(content);
+			if (log) {
+				// 用户手编数字即权威：整文件覆盖内存。不动 dirtyScopes——若日志恰在
+				// 脏集合，flush 用外部数据做规范化重写（自洽无害，零写入契约兜底）
+				this.reviewLog = log;
+				this.lastWritten.set(relPath, content);
+			}
+			// 损坏（半截写入）：内存不动、lastWritten 保旧——下次 flush 用更完整的
+			// 内存副本覆盖回，防幽灵计数
+			return { removedCards, warnings };
+		}
+
+		if (relPath === FOLDERS_FILENAME || relPath === DECKS_FILENAME) {
+			// 76 清单：行权威数据无合并基线——采纳外部 / 损坏保内存 / 删除清空撤脏
+			// （三态镜像复习日志决策表；若恰在脏集合，flush 用外部数据规范化重写自洽无害）
+			const kind: GroupKind = relPath === FOLDERS_FILENAME ? "folders" : "decks";
+			if (content === null) {
+				// 尊重删除意图：清内存并撤脏——不撤的话防抖 flush 会重新写回复活
+				this.groupLists[kind] = [];
+				this.lastWritten.delete(relPath);
+				this.dirtyScopes.delete(groupListScope(kind));
+				return { removedCards, warnings };
+			}
+			const list = parseGroupListMd(content, kind);
+			if (list) {
+				this.groupLists[kind] = list;
+				this.lastWritten.set(relPath, content);
+			}
+			// 损坏（frontmatter 缺失/半截写入）：内存不动、lastWritten 保旧——下次
+			// flush 用更完整的内存副本覆盖回，防清单幽灵回退
 			return { removedCards, warnings };
 		}
 
@@ -885,8 +1098,8 @@ export class MarinMindStore {
 	}
 
 	/**
-	 * 三字段合并（脏窗口内的书文件外部修改）：
-	 * 磁盘的 文本/批注/标签/颜色 覆盖内存；几何/页码/复习状态保内存（插件待写值）。
+	 * 五字段合并（脏窗口内的书文件外部修改）：
+	 * 磁盘的 文本/批注/标签/颜色/线型 覆盖内存；几何/页码/复习状态保内存（插件待写值）。
 	 * 磁盘新增的卡并入内存；内存独有的卡（插件刚建）保留。
 	 */
 	private mergeBookCards(state: BookState, parsed: ParsedBookFile, warnings: string[]): void {
@@ -920,6 +1133,8 @@ export class MarinMindStore {
 				note: disk.note,
 				tags: disk.tags,
 				color: disk.color,
+				// 线型（77）：与 color 同入磁盘胜名单——手编机器层 JSON 的线型即时生效
+				lineStyle: disk.lineStyle,
 			});
 		}
 	}

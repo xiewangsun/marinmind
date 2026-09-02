@@ -1,19 +1,35 @@
 import { ItemView, Menu, Notice, setIcon } from "obsidian";
-import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
+import type { TFile, ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { BranchStyle, Card, MindmapNodeWithCard } from "../types";
 import { BRANCH_STYLES, BRANCH_STYLE_LABELS, isBranchStyle } from "../types";
 import { READER_VIEW_TYPE } from "../reader/reader-view";
 import { TextPromptModal } from "../reader/note-edit-modal";
 import { CardPickerModal } from "./card-picker-modal";
+import { LinkPickerModal } from "./link-picker-modal";
 import { ConfirmModal } from "./confirm-modal";
+import { deleteCardCascade } from "../home/card-actions";
+import { buildCardCopyText } from "../links/card-links";
 import { createViewModeBar } from "../ui/view-mode-bar";
-import { pageWordOf } from "../storage/paths";
+import { isHiddenVaultDir, isAbsoluteFsPath, fsBasename, pageWordOf, docExtOf } from "../storage/paths";
+import { readExternalBinary } from "../storage/external-file";
+import { acquirePdf, pdfCacheKey } from "../reader/pdf-cache";
+import { parseEpub, epubOutline } from "../reader/epub-document";
+import { measureMdOutline } from "./md-outline-measure";
+import { PdfPickerModal, pickTarget } from "../reader/pdf-picker-modal";
+import { buildOutlineMarkdown, buildOutlineOpml } from "./outline-export";
+import { allocateExportPath, exportMindmapPng } from "./map-image-export";
+import { planOutlineChapters, type ChapterPlanItem } from "./pdf-outline";
+import type { OutlineEntry } from "../reader/pdf-document";
+import { collectTargetOf, ensureGroupCard } from "./auto-collect";
 import {
 	buildChildrenMap,
+	bulkCollapsePlan,
 	dropPlacement,
 	dropZoneFor,
+	edgeDots,
 	edgePath,
+	compareSiblings,
 	effectiveBranchStyle,
 	fitViewportTransform,
 	frameRectFor,
@@ -25,15 +41,30 @@ import {
 	layoutTree,
 	MAX_SCALE,
 	MIN_SCALE,
+	type NavigateDir,
+	navigateTree,
+	linkEdgePath,
 	NODE_HEIGHT_EST,
 	NODE_WIDTH,
 	restackRoots,
 	ROOT_GAP_Y,
-	suggestRootPosition,
+	snapDragPosition,
+	type SnapGuide,
 	subtreeIds,
+	suggestChildPosition,
+	suggestRootPosition,
 	visibleNodes,
 } from "./mindmap-graph";
 import { MindmapPickerModal } from "./mindmap-picker-modal";
+import { MergePickerModal } from "./merge-picker-modal";
+import { mergeCardsInto } from "./card-merge";
+import {
+	applyUndoEntry,
+	buildUndoEntry,
+	captureMapState,
+	MindmapUndoStack,
+	type MapSnapshot,
+} from "./undo-stack";
 
 /** 思维导图视图的 viewType */
 export const MINDMAP_VIEW_TYPE = "marinmind-mindmap";
@@ -174,10 +205,26 @@ export class MarinMindMindmapView extends ItemView {
 	private drag: DragState | null = null;
 	/** ㉜ 插入线元素（拖节点到同级前后时，在 worldEl 内绝对定位的横/竖线） */
 	private insertLineEl: HTMLElement | null = null;
+	/** 58 对齐吸附参考线元素（拖节点吸附时 worldEl 内的 1px 强调色线，最多一竖一横） */
+	private snapGuideEls: HTMLElement[] = [];
 	/** ㉜ 被拖子树 DOM 快照：nodeId → {el, startLeft, startTop, worldX, worldY}（含折叠隐藏后代） */
 	private subtreeSnapshot: Map<string, { el: HTMLElement; startLeft: number; startTop: number; worldX: number; worldY: number }> | null = null;
 	/** cardBus 退订器（onClose 统一退订防泄漏） */
 	private cardBusOffs: Array<() => void> = [];
+	/** 51 折叠全部/展开全部双态钮（标签页头部）：图标与禁用态随图数据同步 */
+	private collapseBtnEl: HTMLElement | null = null;
+	/** 59 撤销钮（标签页头部）：栈空时禁用 */
+	private undoBtnEl: HTMLElement | null = null;
+	/** 59 重做钮（标签页头部）：重做分支空时禁用 */
+	private redoBtnEl: HTMLElement | null = null;
+	/** 59 全局撤销/重做双栈（随视图生命周期；换图/清图整体作废） */
+	private readonly undoStack = new MindmapUndoStack();
+	/** 59 进行中的撤销捕获（begin→写路径→commit；同步区间无交错，防御换图丢弃） */
+	private undoCapture: { mapId: string; nodes: MapSnapshot; mapDefault: BranchStyle } | null =
+		null;
+	/** 52 键盘选中节点 id（node.id 键）：单击/右键节点即选中（跳原文照旧），
+	 * 方向键导航 / Tab 建子 / Enter 建兄弟 / Delete 移出以它为锚 */
+	private selectedNodeId: string | null = null;
 	/** 视图模式切换条退订器（onClose 退订防泄漏） */
 	private viewModeOff: (() => void) | null = null;
 	/** 媒体图片 blob URL 缓存（excerptRef → url；同 ref 复用，onClose/删卡时 revoke，⑳） */
@@ -199,6 +246,15 @@ export class MarinMindMindmapView extends ItemView {
 		this.addAction("list-plus", "添加卡片", () => this.openCardPicker());
 		this.addAction("plus", "新建文字卡片", () => this.createTextCard());
 		this.addAction("layout-template", "自动布局", () => this.autoLayout());
+		this.addAction("list-tree", "从文档目录建框架", () => this.pickOutlineSource());
+		this.addAction("download", "导出（大纲 / OPML / 图片）", (evt) => this.openExportMenu(evt));
+		this.collapseBtnEl = this.addAction(
+			"chevrons-down-up",
+			"折叠全部",
+			() => this.bulkCollapse(true),
+		);
+		this.undoBtnEl = this.addAction("undo-2", "撤销 (Ctrl+Z)", () => this.undoHistory());
+		this.redoBtnEl = this.addAction("redo-2", "重做 (Ctrl+Shift+Z)", () => this.redoHistory());
 		this.addAction("rotate-cw", "刷新", () => this.refresh());
 	}
 
@@ -279,6 +335,7 @@ export class MarinMindMindmapView extends ItemView {
 		this.clearDropHint();
 		this.drag = null;
 		this.nodeEls.clear();
+		this.undoStack.clear(); // 59 视图销毁，撤销/重做栈随废
 		// 媒体 blob URL 全量回收（视图销毁后不再有消费者）
 		for (const url of this.mediaUrls.values()) {
 			URL.revokeObjectURL(url);
@@ -411,6 +468,10 @@ export class MarinMindMindmapView extends ItemView {
 			this.showPicker();
 			return;
 		}
+		if (mapId !== this.mapId) {
+			// 换图：栈内条目全部指向旧图节点，整体作废（同图刷新/重拉不走此分支保留栈）
+			this.undoStack.clear();
+		}
 		this.mapId = mapId;
 		this.mapDefault = map.defaultBranchStyle;
 		// 固定根节点（㉗）：全局唯一，可能是本图节点也可能在别的图——
@@ -419,6 +480,8 @@ export class MarinMindMindmapView extends ItemView {
 		this.nodes = this.plugin.mindmaps.listNodes(mapId);
 		this.rebuildWorld();
 		this.updateHeader();
+		this.syncCollapseButton();
+		this.syncUndoButtons();
 	}
 
 	/** 手动刷新：重新拉取当前图（跨视图改卡/删卡后的兜底同步） */
@@ -435,8 +498,11 @@ export class MarinMindMindmapView extends ItemView {
 		this.mapId = null;
 		this.mapDefault = "tree";
 		this.nodes = [];
+		this.undoStack.clear(); // 59 图已卸载，栈作废
 		this.rebuildWorld();
 		this.updateHeader();
+		this.syncCollapseButton();
+		this.syncUndoButtons();
 	}
 
 	/** 弹出选图器（命令入口 / 空态 / 删除图后） */
@@ -468,12 +534,144 @@ export class MarinMindMindmapView extends ItemView {
 				if (!this.mapId) {
 					return;
 				}
+				// 59 布局前后快照进全局撤销栈（51 单槽快照被取代——连续撤销可穿过多命令）
+				this.beginUndoCapture();
 				// 布局输入注入 DOM 实测高（媒体图节点远高于估值，不注入则间距按 72 排导致视觉重叠）
 				this.plugin.mindmaps.applyLayout(this.mapId, layoutTree(this.measuredNodes(), this.mapDefault));
 				this.loadMap(this.mapId);
 				this.fitToContent();
+				this.commitUndo("自动布局");
 			},
 		).open();
+	}
+
+	/**
+	 * 批量折叠/展开全部（51）：bulkCollapsePlan 只取真正需要变化的节点；
+	 * 逐节点 setCollapsed（markDirty 同 scope 经 2s 防抖合并为一次落盘，无写放大），
+	 * 单次 loadMap 重拉画布（平移缩放保持）。
+	 */
+	private bulkCollapse(collapseAll: boolean): void {
+		if (!this.mapId) {
+			new Notice("请先打开或创建一张脑图");
+			return;
+		}
+		const plan = bulkCollapsePlan(this.nodes, collapseAll);
+		if (plan.length === 0) {
+			new Notice(collapseAll ? "没有可折叠的节点" : "没有已折叠的节点");
+			return;
+		}
+		this.beginUndoCapture(); // 59 整批一个条目
+		for (const item of plan) {
+			this.plugin.mindmaps.setCollapsed(item.id, item.collapsed);
+		}
+		this.loadMap(this.mapId);
+		this.commitUndo(collapseAll ? "折叠全部" : "展开全部");
+	}
+
+	/** 51 折叠双态钮刷新：有"有子未折叠"→ 折叠全部；否则有折叠 → 展开全部；都无禁用。
+	 * setIcon 只替换按钮内部 svg，addAction 挂在按钮上的点击回调不受影响 */
+	private syncCollapseButton(): void {
+		const btn = this.collapseBtnEl;
+		if (!btn) {
+			return;
+		}
+		const planCollapse = bulkCollapsePlan(this.nodes, true).length > 0;
+		const planExpand = bulkCollapsePlan(this.nodes, false).length > 0;
+		if (planCollapse) {
+			btn.removeClass("is-disabled");
+			const label = "折叠全部";
+			btn.setAttribute("aria-label", label);
+			btn.setAttribute("title", label);
+			setIcon(btn, "chevrons-down-up");
+		} else if (planExpand) {
+			btn.removeClass("is-disabled");
+			const label = "展开全部";
+			btn.setAttribute("aria-label", label);
+			btn.setAttribute("title", label);
+			setIcon(btn, "chevrons-up-down");
+		} else {
+			btn.addClass("is-disabled");
+			const label = "没有可折叠/展开的节点";
+			btn.setAttribute("aria-label", label);
+			btn.setAttribute("title", label);
+		}
+	}
+
+	/** 59 撤销/重做双钮刷新：栈空挂 is-disabled（51 自备禁用样式沿用） */
+	private syncUndoButtons(): void {
+		this.undoBtnEl?.classList.toggle("is-disabled", !this.undoStack.canUndo());
+		this.redoBtnEl?.classList.toggle("is-disabled", !this.undoStack.canRedo());
+	}
+
+	// ---------- 全局撤销/重做（59；51 布局单槽被取代） ----------
+
+	/**
+	 * 开始一次撤销捕获：从 repo 读操作前快照（**绝不读 this.nodes**——拖拽
+	 * pointermove 已就地改写视图内存，repo 才是真正的操作前状态）。
+	 * begin → 既有写路径原样执行 → commitUndo 差分进栈；同步区间无交错。
+	 */
+	private beginUndoCapture(): void {
+		if (!this.mapId) {
+			return;
+		}
+		this.undoCapture = {
+			mapId: this.mapId,
+			nodes: captureMapState(this.plugin.mindmaps, this.mapId),
+			mapDefault: this.mapDefault,
+		};
+	}
+
+	/**
+	 * 结束捕获并差分进栈：after 快照同样从 repo 读；图默认样式变化自动入补丁
+	 * （setDefaultStyle 无需额外参数）；无 diff 不进栈（等价操作不占深度）。
+	 * 换图/清图丢弃（条目混图不可重放）。
+	 */
+	private commitUndo(label: string): void {
+		const cap = this.undoCapture;
+		this.undoCapture = null;
+		if (!cap || !this.mapId || cap.mapId !== this.mapId) {
+			return;
+		}
+		const after = captureMapState(this.plugin.mindmaps, cap.mapId);
+		const defaultPatch =
+			cap.mapDefault !== this.mapDefault
+				? { before: cap.mapDefault, after: this.mapDefault }
+				: null;
+		const entry = buildUndoEntry(cap.mapId, label, cap.nodes, after, defaultPatch);
+		if (entry) {
+			this.undoStack.push(entry);
+		}
+		this.syncUndoButtons();
+	}
+
+	/** 撤销最近一条命令：重放 before 侧（悬空节点 repo 静默跳过——契约见 undo-stack.ts） */
+	private undoHistory(): void {
+		const entry = this.undoStack.undo();
+		if (!entry) {
+			new Notice("没有可撤销的操作");
+			return;
+		}
+		applyUndoEntry(this.plugin.mindmaps, entry, "before");
+		if (this.mapId === entry.mapId) {
+			this.loadMap(entry.mapId);
+		}
+		this.syncUndoButtons();
+		new Notice(`已撤销：${entry.label}`);
+	}
+
+	/** 重做最近一条被撤销的命令：重放 after 侧 */
+	private redoHistory(): void {
+		const entry = this.undoStack.redo();
+		if (!entry) {
+			new Notice("没有可重做的操作");
+			return;
+		}
+		applyUndoEntry(this.plugin.mindmaps, entry, "after");
+		if (this.mapId === entry.mapId) {
+			this.loadMap(entry.mapId);
+		}
+		this.syncUndoButtons();
+		new Notice(`已重做：${entry.label}`);
 	}
 
 	/** 视口适配：可见节点包围盒缩放并居中（折叠隐藏的子树不参与适配） */
@@ -626,6 +824,8 @@ export class MarinMindMindmapView extends ItemView {
 				child.remove();
 			}
 		}
+		// 58 参考线元素随 worldEl 清空销毁，数组同步重置（防 clearSnapGuides 摸已死引用）
+		this.snapGuideEls = [];
 		const visible = visibleNodes(this.nodes);
 		for (const node of this.nodes) {
 			if (!visible.has(node.id)) {
@@ -634,6 +834,15 @@ export class MarinMindMindmapView extends ItemView {
 			this.createNodeEl(node);
 		}
 		this.drawEdges();
+		// 52 选中态重挂：节点 el 全新（类名随 DOM 销毁）——命中且可见才恢复，
+		// 否则清空（换图 / 节点消失 / 折叠隐藏三态统一收口）
+		const sel = this.selectedNodeId;
+		if (sel) {
+			this.selectedNodeId = null;
+			if (this.nodeEls.has(sel) && visible.has(sel)) {
+				this.setSelected(sel);
+			}
+		}
 	}
 
 	private createNodeEl(node: MindmapNodeWithCard): void {
@@ -660,6 +869,17 @@ export class MarinMindMindmapView extends ItemView {
 			setIcon(pin, "pin");
 			pin.title = "固定根节点：新摘录自动挂到该节点下（右键可取消）";
 			el.appendChild(pin);
+		}
+
+		// 子脑图 portal 徽标（61）：子树已坍缩进独立图，双击进入。
+		// 读侧防御收口：引用悬空（子图被外部删除而清扫未落盘前）不显示，
+		// openChildMap 的 get 守卫负责自愈
+		if (node.childMapId && this.plugin.mindmaps.get(node.childMapId)) {
+			const portal = document.createElement("span");
+			portal.className = "marinmind-mm-portal";
+			setIcon(portal, "folder-tree");
+			portal.title = "子脑图：双击打开";
+			el.appendChild(portal);
 		}
 
 		// 折叠开关（仅有子节点的节点显示）：chevron + 折叠时的后代计数。
@@ -724,6 +944,15 @@ export class MarinMindMindmapView extends ItemView {
 		titleEl.className = "marinmind-mm-node-title";
 		titleEl.textContent = card.title ?? "…";
 		head.appendChild(titleEl);
+		// 71 遮挡徽标：已设遮挡的卡在标题栏右侧给 eye-off 小标（复习正面会遮住
+		// 对应区域——脑图上一眼可见该卡是"挖空卡"；cardBus changed 重渲染天然同步）
+		if (card.occlusions.length > 0) {
+			const occ = document.createElement("span");
+			occ.className = "marinmind-mm-node-occ";
+			occ.title = "已设遮挡（复习时遮住对应区域）";
+			setIcon(occ, "eye-off");
+			head.appendChild(occ);
+		}
 		el.insertBefore(head, body ?? anchor);
 
 		// ② 中栏：摘录内容。媒体 body 同 ref 复用现有 img（㊺ 防闪烁——
@@ -809,8 +1038,10 @@ export class MarinMindMindmapView extends ItemView {
 		if (!node) {
 			return;
 		}
+		this.beginUndoCapture(); // 59
 		this.plugin.mindmaps.setCollapsed(nodeId, !node.collapsed);
 		this.loadMap(this.mapId);
+		this.commitUndo(node.collapsed ? "展开子树" : "折叠子树");
 	}
 
 	/** 中栏显示文本：摘录文字 > 形态占位（批注独立成下栏，㊺ 不再参与中栏） */
@@ -933,7 +1164,14 @@ export class MarinMindMindmapView extends ItemView {
 				continue;
 			}
 			const kids = (childrenMap.get(n.id) ?? []).filter((c) => visible.has(c.id));
+			// 57 标题栏式：框围住 父+子 并集（父嵌框内顶部）
 			const rect = frameRectFor(
+				{
+					x: n.x,
+					y: n.y,
+					w: NODE_WIDTH,
+					h: this.nodeEls.get(n.id)?.offsetHeight ?? NODE_HEIGHT_EST,
+				},
 				kids.map((c) => ({
 					x: c.x,
 					y: c.y,
@@ -962,11 +1200,14 @@ export class MarinMindMindmapView extends ItemView {
 			if (!parent || !visible.has(parent.id)) {
 				continue;
 			}
-			const d = edgePath(
-				{ x: parent.x, y: parent.y, h: this.nodeEls.get(parent.id)?.offsetHeight },
-				{ x: n.x, y: n.y, h: this.nodeEls.get(n.id)?.offsetHeight },
-				this.styleOf(parent.id),
-			);
+			const parentBox = {
+				x: parent.x,
+				y: parent.y,
+				h: this.nodeEls.get(parent.id)?.offsetHeight,
+			};
+			const childBox = { x: n.x, y: n.y, h: this.nodeEls.get(n.id)?.offsetHeight };
+			const style = this.styleOf(parent.id);
+			const d = edgePath(parentBox, childBox, style);
 			if (d == null) {
 				continue; // frame：连线由收纳框替代
 			}
@@ -974,6 +1215,39 @@ export class MarinMindMindmapView extends ItemView {
 			path.setAttribute("class", "marinmind-mm-edge");
 			path.setAttribute("d", d);
 			svg.appendChild(path);
+			// 57 line 族端点圆点（MN4 直线细节）：两端实心圆点，端点在节点盒缘上不扩包围盒
+			const dots = edgeDots(parentBox, childBox, style);
+			if (dots) {
+				for (const p of dots) {
+					const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+					dot.setAttribute("class", "marinmind-mm-edge-dot");
+					dot.setAttribute("cx", String(p.x));
+					dot.setAttribute("cy", String(p.y));
+					dot.setAttribute("r", "3");
+					svg.appendChild(dot);
+				}
+			}
+		}
+		// 53 卡片互链虚线边：单遍遍历全库链接（勿用 neighbors()——O(节点×链接) 退化），
+		// 两端卡片都在本图且可见才画；端点取节点盒内相邻侧中点，不扩包围盒
+		const links = this.plugin.store?.links;
+		if (links && links.size > 0) {
+			const byCardId = new Map(this.nodes.map((n) => [n.cardId, n]));
+			for (const link of links.values()) {
+				const a = byCardId.get(link.sourceId);
+				const b = byCardId.get(link.targetId);
+				if (!a || !b || !visible.has(a.id) || !visible.has(b.id)) {
+					continue;
+				}
+				const d = linkEdgePath(
+					{ x: a.x, y: a.y, h: this.nodeEls.get(a.id)?.offsetHeight },
+					{ x: b.x, y: b.y, h: this.nodeEls.get(b.id)?.offsetHeight },
+				);
+				const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+				path.setAttribute("class", "marinmind-mm-link");
+				path.setAttribute("d", d);
+				svg.appendChild(path);
+			}
 		}
 	}
 
@@ -1129,6 +1403,169 @@ export class MarinMindMindmapView extends ItemView {
 			window.setTimeout(() => el.classList.remove("marinmind-mm-flash"), 1600);
 		}
 		return true;
+	}
+
+	// ---------- 52 键盘操作（选中态 + 方向键导航 + Tab/Enter/Delete） ----------
+
+	/** 选中节点（键盘锚点）：旧 el 摘类 → 新 el 挂类（el 不存在——折叠隐藏瞬间，容忍保留 id） */
+	private setSelected(nodeId: string | null): void {
+		if (this.selectedNodeId === nodeId) {
+			return;
+		}
+		const prev = this.selectedNodeId;
+		this.selectedNodeId = nodeId;
+		if (prev) {
+			this.nodeEls.get(prev)?.removeClass("marinmind-mm-selected");
+		}
+		if (nodeId) {
+			this.nodeEls.get(nodeId)?.addClass("marinmind-mm-selected");
+		}
+	}
+
+	/** 选中节点滚入视口：屏幕矩形出视口（40px 余量）才平移居中（复用 locateCard 数学，保持缩放） */
+	private ensureNodeVisible(nodeId: string): void {
+		const vp = this.viewportEl;
+		const el = this.nodeEls.get(nodeId);
+		if (!vp || !el) {
+			return;
+		}
+		const vr = vp.getBoundingClientRect();
+		const r = el.getBoundingClientRect();
+		const margin = 40;
+		if (
+			r.top >= vr.top + margin &&
+			r.bottom <= vr.bottom - margin &&
+			r.left >= vr.left + margin &&
+			r.right <= vr.right - margin
+		) {
+			return;
+		}
+		const node = this.nodes.find((n) => n.id === nodeId);
+		if (!node) {
+			return;
+		}
+		const h = el.offsetHeight || NODE_HEIGHT_EST;
+		this.tx = vr.width / 2 - (node.x + NODE_WIDTH / 2) * this.scale;
+		this.ty = vr.height / 2 - (node.y + h / 2) * this.scale;
+		this.applyTransform();
+	}
+
+	/** Tab 建子节点：选中节点折叠中先展开再挂接；弹窗取消不建（选中保持） */
+	private createChildCard(parentNodeId: string): void {
+		const mapId = this.mapId;
+		if (!mapId) {
+			return;
+		}
+		const parent = this.nodes.find((n) => n.id === parentNodeId);
+		if (!parent) {
+			return;
+		}
+		if (parent.collapsed) {
+			// 展开子树（loadMap 平移缩放保持；选中态经 rebuildWorld 尾部重挂）
+			this.plugin.mindmaps.setCollapsed(parent.id, false);
+			this.loadMap(mapId);
+		}
+		new TextPromptModal(
+			this.app,
+			{ title: "新建子卡片", placeholder: "输入卡片内容…" },
+			(text) => {
+				if (!text) {
+					return;
+				}
+				this.addKeyboardCard(text, parentNodeId);
+			},
+		).open();
+	}
+
+	/** Enter 建兄弟节点：选中节点为根时 = 建新根 */
+	private createSiblingCard(nodeId: string): void {
+		const node = this.nodes.find((n) => n.id === nodeId);
+		if (!node) {
+			return;
+		}
+		const parentId = node.parentId;
+		new TextPromptModal(
+			this.app,
+			{
+				title: parentId ? "新建兄弟卡片" : "新建根节点卡片",
+				placeholder: "输入卡片内容…",
+			},
+			(text) => {
+				if (!text) {
+					return;
+				}
+				this.addKeyboardCard(text, parentId);
+			},
+		).open();
+	}
+
+	/**
+	 * 键盘建卡落库（52）：有父 → suggestChildPosition（按父生效样式，兄弟顺延）；
+	 * 无父 → suggestRootPosition 新根。保存回调内重找节点——弹窗期间图可能被
+	 * 重拉/目标节点被移除（竞态防御，节点消失 Notice 中止）。
+	 */
+	private addKeyboardCard(text: string, parentId: string | null): void {
+		const mapId = this.mapId;
+		if (!mapId) {
+			return;
+		}
+		const parent = parentId ? this.nodes.find((n) => n.id === parentId) : undefined;
+		if (parentId && !parent) {
+			new Notice("目标节点已不存在");
+			return;
+		}
+		const pos = parent
+			? suggestChildPosition(
+					parent,
+					this.nodes.filter((n) => n.parentId === parentId),
+					this.styleOf(parent.id),
+				)
+			: suggestRootPosition(
+					// ㊺ 同款：传实测高防新根排进矮估的上一根身位
+					this.nodes
+						.filter((n) => n.parentId === null)
+						.map((n) => ({ x: n.x, y: n.y, h: this.nodeEls.get(n.id)?.offsetHeight })),
+				);
+		const card = this.plugin.cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: text,
+		});
+		const added = this.plugin.mindmaps.addNode(
+			mapId,
+			card.id,
+			parentId,
+			Math.round(pos.x),
+			Math.round(pos.y),
+		);
+		if (!added) {
+			new Notice("该卡片已在此图中");
+			return;
+		}
+		this.nodes.push(added);
+		this.createNodeEl(added);
+		this.drawEdges();
+		this.updateHeader();
+		this.setSelected(added.id); // 建卡后锚点转移到新节点（可连续 Enter/Tab 建链）
+	}
+
+	/** Delete 移出脑图（= 右键「移出脑图」语义，卡片保留可重加）：选中转移到父节点 */
+	private removeSelectedNode(node: MindmapNodeWithCard): void {
+		const nextSel = node.parentId; // removeNodeLocal 会清命中选中，先捕获父
+		this.plugin.mindmaps.removeNode(node.id);
+		this.removeNodeLocal(node.id);
+		// portal 被移出（61）：其子图保留为独立图不随之删除（无损），与菜单移出同提示
+		if (node.childMapId) {
+			const kept = this.plugin.mindmaps.get(node.childMapId);
+			if (kept) {
+				new Notice(`节点已移出；其子脑图《${kept.name}》已保留为独立脑图`);
+			}
+		}
+		if (nextSel) {
+			this.setSelected(nextSel);
+		}
 	}
 
 	// ---------- 坐标与变换 ----------
@@ -1317,14 +1754,26 @@ export class MarinMindMindmapView extends ItemView {
 		// passive:false 才能阻断默认缩放/滚动（registerDomEvent 已核实支持第三参）
 		this.registerDomEvent(vp, "wheel", (evt) => this.onWheel(evt), { passive: false });
 
-		// Esc 取消进行中的节点拖拽（㊳）：keydown 挂 document + activeLeaf 守卫
-		// （同 reader-view 的 Esc 先例）；弹窗/菜单/输入态让位（它们自己消费 Esc）。
-		// 守卫带 moved 与 contextmenu 取消路径对齐——未过 4px 阈值的预备拖拽不取消；
-		// 取消后指针仍按下，后续 pointerup 走 drag == null 早退，无需额外清理
+		// 52 键盘操作（MarginNote 风格）：Esc 取消（㊳ 拖拽取消扩展）+ 方向键树内导航 +
+		// Tab 建子 / Enter 建兄弟 / Delete 移出。keydown 挂 document + activeLeaf 守卫
+		// （同 reader-view 的 Esc 先例）；弹窗/菜单/输入态让位（它们自己消费按键）。
 		this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
-			if (evt.key !== "Escape" || evt.ctrlKey || evt.metaKey || evt.altKey || evt.shiftKey) {
-				return;
-			}
+			this.onKeydown(evt);
+		});
+	}
+
+	/** 键盘路由：59 撤销重做（Ctrl+Z 系）→ 白名单 → 修饰键/焦点让位 → Esc 既有链（编辑器 > 拖拽取消 > 清选中）→ 六键分发 */
+	private onKeydown(evt: KeyboardEvent): void {
+		const key = evt.key;
+		// 59 撤销/重做：Ctrl/Cmd+Z 撤销、Ctrl+Shift+Z 或 Ctrl+Y 重做。
+		// 必须在 navKeys 白名单早退**之前**（"z"/"y" 不在白名单会被吞掉）；
+		// 让位链：activeLeaf → 弹窗/输入态（输入框内 Ctrl+Z = 原生文本撤销）→
+		// 节点编辑器（undo 的 loadMap 首行会静默关面板丢未保存编辑），再 preventDefault。
+		if (
+			(evt.ctrlKey || evt.metaKey) &&
+			!evt.altKey &&
+			(key === "z" || key === "Z" || key === "y" || key === "Y")
+		) {
 			if (this.app.workspace.activeLeaf !== this.leaf) {
 				return;
 			}
@@ -1332,18 +1781,102 @@ export class MarinMindMindmapView extends ItemView {
 			if (target?.closest?.(".modal-container, .menu, input, textarea, [contenteditable]")) {
 				return;
 			}
+			if (this.nodeEditor) {
+				return;
+			}
+			evt.preventDefault();
+			if (key === "y" || key === "Y" || evt.shiftKey) {
+				this.redoHistory();
+			} else {
+				this.undoHistory();
+			}
+			return;
+		}
+		const navKeys = new Set([
+			"ArrowUp",
+			"ArrowDown",
+			"ArrowLeft",
+			"ArrowRight",
+			"Tab",
+			"Enter",
+			"Delete",
+		]);
+		if (key !== "Escape" && !navKeys.has(key)) {
+			return;
+		}
+		if (evt.ctrlKey || evt.metaKey || evt.altKey || evt.shiftKey) {
+			return; // 组合键（含 Shift+Tab 焦点回退）让位
+		}
+		if (this.app.workspace.activeLeaf !== this.leaf) {
+			return;
+		}
+		const target = evt.target as HTMLElement | null;
+		if (target?.closest?.(".modal-container, .menu, input, textarea, [contenteditable]")) {
+			return; // 弹窗/菜单/输入态让位（TextPromptModal 开着自然让位，选中保持）
+		}
+		// Esc：既有链顺序不变（㊳/㊺），链末追加清空键盘选中
+		if (key === "Escape") {
 			// ㊺ 编辑器开着 → Esc 关面板（取消）；焦点在面板输入内时已被面板级 keydown 截获
 			if (this.nodeEditor) {
 				evt.preventDefault();
 				this.closeNodeEditor(false);
 				return;
 			}
+			// ㊳ 进行中的节点拖拽 → 还原子树快照
 			const drag = this.drag;
 			if (drag?.kind === "node" && drag.moved) {
 				evt.preventDefault();
 				this.cancelDrag();
+				return;
 			}
-		});
+			if (this.selectedNodeId) {
+				this.setSelected(null);
+			}
+			return;
+		}
+		// 其余六键：节点编辑器开着让位（面板输入框已有上面的 input 让位，此处兜 DOM 焦点在面板按钮的场景）
+		if (this.nodeEditor) {
+			return;
+		}
+		const sel = this.selectedNodeId;
+		if (!this.mapId || !sel) {
+			return;
+		}
+		const node = this.nodes.find((n) => n.id === sel);
+		if (!node) {
+			this.setSelected(null);
+			return;
+		}
+		if (key.startsWith("Arrow")) {
+			const dir: NavigateDir =
+				key === "ArrowUp"
+					? "parent"
+					: key === "ArrowDown"
+						? "firstChild"
+						: key === "ArrowLeft"
+							? "prevSibling"
+							: "nextSibling";
+			const next = navigateTree(this.nodes, sel, dir);
+			if (next) {
+				evt.preventDefault(); // 阻断画布滚动
+				this.setSelected(next);
+				this.ensureNodeVisible(next);
+			}
+			return;
+		}
+		if (key === "Tab") {
+			evt.preventDefault(); // 阻断焦点移动
+			this.createChildCard(node.id);
+			return;
+		}
+		if (key === "Enter") {
+			evt.preventDefault();
+			this.createSiblingCard(node.id);
+			return;
+		}
+		// Delete：移出脑图（= 右键「移出脑图」语义——卡片保留可重加，不加确认）
+		evt.preventDefault();
+		this.removeSelectedNode(node);
 	}
 
 	private onPointerDown(evt: PointerEvent): void {
@@ -1418,13 +1951,28 @@ export class MarinMindMindmapView extends ItemView {
 		// ㉜ 指针距视口边缘 < EDGE_SCROLL_PX 时自动平移画布（先平移再算世界坐标跟随子树）
 		this.scrollCanvasNearEdge(evt.clientX, evt.clientY);
 		const w = this.toWorld(evt.clientX, evt.clientY);
-		// 先更新被拖节点的内存坐标（拖自己的节点）
+		// 58 先判落点（结构化目标 / 空白）再定位——命中提示只看指针下元素，不依赖被拖
+		// 节点位置；此前误用按下时坐标（drag.startClient）做 elementFromPoint，命中检测
+		// 停留在起拖点，结构化放置实时提示失效（3f3f247 引入的回归，此处一并修复）
+		this.updateInsertHint(drag, evt.clientX, evt.clientY);
 		const node = this.nodes.find((n) => n.id === drag.nodeId);
 		if (!node) {
 			return;
 		}
-		node.x = w.x - drag.grabOffset.x;
-		node.y = w.y - drag.grabOffset.y;
+		const rawX = w.x - drag.grabOffset.x;
+		const rawY = w.y - drag.grabOffset.y;
+		// 58 吸附：仅空白自由拖动时生效（悬停结构化目标时给精准分区提示，磁吸不干扰）；
+		// 吸附后坐标直接进内存 + DOM，pointerup 的 applySubtreePositions 原样落库 = 固化
+		if (drag.dropTargetId == null) {
+			const snapped = snapDragPosition(rawX, rawY, this.snapCandidates(drag.nodeId));
+			node.x = snapped.x;
+			node.y = snapped.y;
+			this.showSnapGuides(snapped.guides);
+		} else {
+			node.x = rawX;
+			node.y = rawY;
+			this.showSnapGuides([]);
+		}
 		drag.el.style.left = `${node.x}px`;
 		drag.el.style.top = `${node.y}px`;
 		// 子树其余节点跟随同一世界位移
@@ -1442,8 +1990,6 @@ export class MarinMindMindmapView extends ItemView {
 				snap.el.style.top = `${n?.y ?? snap.worldY}px`;
 			}
 		}
-		// ㉜ 落点实时提示：命中节点 → 分区高亮/插入线；命中自己或后代不提示
-		this.updateInsertHint(drag);
 		this.drawEdges();
 	}
 
@@ -1468,8 +2014,10 @@ export class MarinMindMindmapView extends ItemView {
 				if (this.nodeEditor) {
 					this.closeNodeEditor(false); // 点节点 = 离开编辑语境，面板取消
 				}
+				// 52 单击即选中（键盘操作锚点；跳原文逻辑不变）
+				this.setSelected(node?.id ?? null);
 				// 单脑图模式下无阅读标签不动作（避免点击意外改变布局）；
-				// 手工卡（无文档归属）也没有可跳的原文
+				// 手工卡（无文档归属）也没有可跳的原文——此时单击 = 仅选中
 				if (
 					node &&
 					node.card.documentId &&
@@ -1477,9 +2025,12 @@ export class MarinMindMindmapView extends ItemView {
 				) {
 					void this.plugin.revealCardInReader(node.card);
 				}
-			} else if (this.nodeEditor) {
-				// 点击画布空白：关闭面板（取消语义）
-				this.closeNodeEditor(false);
+			} else {
+				// 点击画布空白：关闭面板（取消语义）+ 清空键盘选中（52）
+				if (this.nodeEditor) {
+					this.closeNodeEditor(false);
+				}
+				this.setSelected(null);
 			}
 			return; // 平移结束 / 未升级的点击：无写库
 		}
@@ -1490,15 +2041,17 @@ export class MarinMindMindmapView extends ItemView {
 		if (!node) {
 			return;
 		}
-		const x = Math.round(node.x);
-		const y = Math.round(node.y);
 		const targetId = drag.dropTargetId;
 		const zone = drag.dropZone;
+		// 59 撤销捕获起点：此刻 repo 仍是操作前状态（pointermove 只改了视图内存），
+		// 三分支共用一次 begin，各自落库后 commit
+		this.beginUndoCapture();
 
 		// 未命中目标（空白）= 自由定位：位置落库，整棵子树一并写，不整理
 		if (targetId == null) {
 			this.applySubtreePositions();
 			this.drawEdges();
+			this.commitUndo("移动节点");
 			return;
 		}
 
@@ -1508,6 +2061,7 @@ export class MarinMindMindmapView extends ItemView {
 			new Notice("不能移动到自己的子节点上");
 			this.applySubtreePositions();
 			this.drawEdges();
+			this.commitUndo("移动节点");
 			return;
 		}
 
@@ -1525,6 +2079,9 @@ export class MarinMindMindmapView extends ItemView {
 			}
 			this.applySubtreePositions();
 			this.tidyAffected(prevParentId, targetId);
+			// 59 tidy 连带坐标全量入 diff（commit 在 tidy 后）——撤销 = 整体还原，
+			// 不做「只还原用户意图」的半还原态
+			this.commitUndo("挂接节点");
 			return;
 		}
 		// before/after：新父 = target 的父（根目标 = null）
@@ -1543,6 +2100,7 @@ export class MarinMindMindmapView extends ItemView {
 		}
 		this.applySubtreePositions();
 		this.tidyAffected(prevParentId, newParentId);
+		this.commitUndo("调整节点顺序");
 	}
 
 	/** 右键：拖动中=取消还原；节点=操作菜单；空白=放行 Obsidian 默认菜单 */
@@ -1559,6 +2117,7 @@ export class MarinMindMindmapView extends ItemView {
 			: undefined;
 		if (node) {
 			evt.preventDefault();
+			this.setSelected(node.id); // 52 右键节点 = 键盘选中（菜单照常弹出）
 			this.showNodeMenu(node, evt);
 		}
 	}
@@ -1652,15 +2211,21 @@ export class MarinMindMindmapView extends ItemView {
 	 * ㉜ 落点实时提示：命中节点 → 分区高亮/插入线；命中自己或后代不提示（会触发环检测）；
 	 * 空白 = 全清（不画虚线框）。
 	 * axis 由目标父的生效样式决定（tree-down → "h"，其余 → "v"）。
+	 * 58 起指针坐标由调用方传入（pointermove 的当前 evt 坐标）——不能用 drag.startClient
+	 * （按下时坐标），否则命中检测停留在起拖点。
 	 */
-	private updateInsertHint(drag: Extract<DragState, { kind: "node" }>): void {
+	private updateInsertHint(
+		drag: Extract<DragState, { kind: "node" }>,
+		clientX: number,
+		clientY: number,
+	): void {
 		const vp = this.viewportEl;
 		if (!vp) {
 			return;
 		}
 		this.clearInsertHint();
 		const hit = document
-			.elementFromPoint(drag.startClient.x, drag.startClient.y)
+			.elementFromPoint(clientX, clientY)
 			?.closest<HTMLElement>(".marinmind-mm-node");
 		const hitId = hit?.dataset.nodeId ?? null;
 		if (!hitId || !this.nodeEls.has(hitId)) {
@@ -1680,7 +2245,7 @@ export class MarinMindMindmapView extends ItemView {
 		}
 		const hitEl = this.nodeEls.get(hitId)!;
 		const rect = hitEl.getBoundingClientRect();
-		const pointerWorld = this.toWorld(drag.startClient.x, drag.startClient.y);
+		const pointerWorld = this.toWorld(clientX, clientY);
 		const targetStyle = target.branchStyle != null && isBranchStyle(target.branchStyle)
 			? target.branchStyle
 			: this.mapDefault;
@@ -1755,6 +2320,78 @@ export class MarinMindMindmapView extends ItemView {
 		for (const el of this.nodeEls.values()) {
 			el.classList.remove("marinmind-mm-node-droptarget");
 		}
+		this.clearSnapGuides();
+	}
+
+	/** 58 吸附候选：其余**可见**节点左上角世界坐标（排除被拖子树自身——吸到自己后代无意义） */
+	private snapCandidates(excludeRootId: string): Array<{ x: number; y: number }> {
+		const excluded = new Set(subtreeIds(this.nodes, excludeRootId));
+		const visible = visibleNodes(this.nodes);
+		const out: Array<{ x: number; y: number }> = [];
+		for (const n of this.nodes) {
+			if (excluded.has(n.id) || !visible.has(n.id)) {
+				continue;
+			}
+			out.push({ x: n.x, y: n.y });
+		}
+		return out;
+	}
+
+	/** 58 画对齐吸附参考线（最多一竖一横，跨当前可见包围盒通长）；guides 空 = 清线 */
+	private showSnapGuides(guides: SnapGuide[]): void {
+		const world = this.worldEl;
+		if (!world) {
+			return;
+		}
+		this.clearSnapGuides();
+		if (guides.length === 0) {
+			return;
+		}
+		// 通长跨当前可见节点包围盒，上下/左右各放出一段方便肉眼追踪
+		const visible = visibleNodes(this.nodes);
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+		for (const n of this.nodes) {
+			if (!visible.has(n.id)) {
+				continue;
+			}
+			const h = this.nodeEls.get(n.id)?.offsetHeight ?? NODE_HEIGHT_EST;
+			minX = Math.min(minX, n.x);
+			minY = Math.min(minY, n.y);
+			maxX = Math.max(maxX, n.x + NODE_WIDTH);
+			maxY = Math.max(maxY, n.y + h);
+		}
+		if (!Number.isFinite(minX)) {
+			return;
+		}
+		const EXT = 40;
+		for (const g of guides) {
+			const el = document.createElement("div");
+			el.className = "marinmind-mm-guide";
+			if (g.axis === "v") {
+				el.style.left = `${g.at}px`;
+				el.style.top = `${minY - EXT}px`;
+				el.style.width = "1px";
+				el.style.height = `${maxY - minY + EXT * 2}px`;
+			} else {
+				el.style.left = `${minX - EXT}px`;
+				el.style.top = `${g.at}px`;
+				el.style.width = `${maxX - minX + EXT * 2}px`;
+				el.style.height = "1px";
+			}
+			world.appendChild(el);
+			this.snapGuideEls.push(el);
+		}
+	}
+
+	/** 58 清除吸附参考线（元素已随 rebuildWorld 销毁时 remove 幂等，数组重置） */
+	private clearSnapGuides(): void {
+		for (const el of this.snapGuideEls) {
+			el.remove();
+		}
+		this.snapGuideEls = [];
 	}
 
 	/** ㉜ 把整棵被拖子树的新坐标一次性落库（自由定位 / 结构性放置都走） */
@@ -1838,8 +2475,8 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	/**
-	 * 双击：空白 = 就地新建文字卡片（手工卡，无文档归属）。
-	 * ㊺-A：节点双击无绑定（单击已直接跳原文，双击会重复触发）；编辑器面板内
+	 * 双击：portal 节点 = 进入子脑图（61）；空白 = 就地新建文字卡片（手工卡，无文档归属）。
+	 * ㊺-A：普通节点双击无绑定（单击已直接跳原文，双击会重复触发）；编辑器面板内
 	 * 双击（输入框选词）同样让位。
 	 */
 	private onDblClick(evt: MouseEvent): void {
@@ -1848,8 +2485,17 @@ export class MarinMindMindmapView extends ItemView {
 		if (target.closest(".marinmind-mm-editor")) {
 			return;
 		}
-		if (target.closest(".marinmind-mm-node") || !this.mapId) {
-			return; // 节点双击无绑定；无图时不新建
+		// 子脑图 portal（61）：双击进入子图；悬空引用由 openChildMap 内 get 守卫自愈
+		const hitEl = target.closest<HTMLElement>(".marinmind-mm-node");
+		if (hitEl) {
+			const hit = this.nodes.find((n) => n.id === hitEl.dataset.nodeId);
+			if (hit?.childMapId) {
+				this.openChildMap(hit);
+			}
+			return; // 普通节点双击无绑定（㊺-A）
+		}
+		if (!this.mapId) {
+			return; // 无图时不新建
 		}
 		const pos = this.toWorld(evt.clientX, evt.clientY);
 		new TextPromptModal(
@@ -1953,6 +2599,29 @@ export class MarinMindMindmapView extends ItemView {
 				.setIcon("copy")
 				.onClick(() => void this.plugin.copyCardLink(card, "embed")),
 		);
+		// 卡片互链（53）：建链入口 + 有邻居时的解链入口（数据层 CardLink 早已就绪）
+		menu.addItem((item) =>
+			item
+				.setTitle("链接到卡片…")
+				.setIcon("link-2")
+				.onClick(() => this.openLinkPicker(card)),
+		);
+		const neighborIds = this.plugin.links.neighbors(card.id);
+		if (neighborIds.length > 0) {
+			menu.addItem((item) =>
+				item
+					.setTitle("解除卡片链接…")
+					.setIcon("corner-up-left")
+					.onClick(() => this.unlinkCard(card, neighborIds, evt)),
+			);
+		}
+		// 卡片合并（60）：源卡并入目标（文本并入、节点/链接/复习态转移、源卡删除）
+		menu.addItem((item) =>
+			item
+				.setTitle("合并到卡片…")
+				.setIcon("git-merge")
+				.onClick(() => this.openMergePicker(card)),
+		);
 		// 闪卡开关：每次打开菜单即时查 DB（卡片可能在会话外被改变）
 		const isFlashcard = this.plugin.reviews.get(card.id)?.isFlashcard ?? false;
 		menu.addItem((item) =>
@@ -1967,6 +2636,24 @@ export class MarinMindMindmapView extends ItemView {
 					}
 				}),
 		);
+		// 复习此分支（70）：整子树卡片（含折叠隐藏后代）的 cards 范围复习——
+		// 复习视图 dueByIds 直查，未启用/未到期的子树卡自然缺席
+		menu.addItem((item) =>
+			item
+				.setTitle("复习此分支")
+				.setIcon("swords")
+				.onClick(() => {
+					const byId = new Map(this.nodes.map((n) => [n.id, n]));
+					const cardIds = subtreeIds(this.nodes, node.id)
+						.map((id) => byId.get(id)?.cardId)
+						.filter((id): id is string => !!id);
+					if (cardIds.length === 0) {
+						new Notice("该分支没有卡片");
+						return;
+					}
+					void this.plugin.openReviewCards(cardIds, info.slice(0, 12));
+				}),
+		);
 		// 分支样式（⑱）：作用于该节点的子树（其子节点如何挂出）
 		menu.addItem((item) =>
 			item
@@ -1974,6 +2661,28 @@ export class MarinMindMindmapView extends ItemView {
 				.setIcon("git-branch")
 				.onClick(() => this.showBranchStyleMenu(node, evt)),
 		);
+		// 子脑图（61）：portal 的打开/解除入口；非 portal 且有子的坍缩入口
+		if (node.childMapId) {
+			menu.addItem((item) =>
+				item
+					.setTitle("打开子脑图")
+					.setIcon("external-link")
+					.onClick(() => this.openChildMap(node)),
+			);
+			menu.addItem((item) =>
+				item
+					.setTitle("解除子脑图")
+					.setIcon("unfold-vertical")
+					.onClick(() => this.uncollapseChildMap(node)),
+			);
+		} else if (this.nodes.some((n) => n.parentId === node.id)) {
+			menu.addItem((item) =>
+				item
+					.setTitle("坍缩为子脑图")
+					.setIcon("fold-vertical")
+					.onClick(() => this.collapseToChildMap(node)),
+			);
+		}
 		// 固定根节点（㉗）：全局唯一——设定后所有新摘录直挂该节点之下
 		const pinned = this.plugin.mindmaps.fixedRoot();
 		if (pinned?.nodeId === node.id) {
@@ -1998,6 +2707,13 @@ export class MarinMindMindmapView extends ItemView {
 				.onClick(() => {
 					this.plugin.mindmaps.removeNode(node.id);
 					this.removeNodeLocal(node.id);
+					// portal 被移出（61）：其子图保留为独立图不随之删除（无损）
+					if (node.childMapId) {
+						const kept = this.plugin.mindmaps.get(node.childMapId);
+						if (kept) {
+							new Notice(`节点已移出；其子脑图《${kept.name}》已保留为独立脑图`);
+						}
+					}
 				}),
 		);
 		menu.addItem((item) =>
@@ -2005,11 +2721,586 @@ export class MarinMindMindmapView extends ItemView {
 				.setTitle("删除卡片")
 				.setIcon("trash-2")
 				.onClick(() => {
-					// 节点移除由 cardBus 删除事件回环完成（DB 级联删行 + applyCardRemoval）
-					this.plugin.cards.delete(card.id);
+					// 节点移除由 cardBus 删除事件回环完成（DB 级联删行 + applyCardRemoval）；
+					// 51 附件级联清理由 deleteCardCascade 承担（发起方职责，修复删卡不删附件孤儿 bug）
+					deleteCardCascade(this.plugin, card);
 				}),
 		);
 		menu.showAtMouseEvent(evt);
+	}
+
+	/** 53 建链入口：选择对端卡片（自身/已链不出现）；成功后重画虚线边 */
+	private openLinkPicker(card: Card): void {
+		new LinkPickerModal(this.app, this.plugin, card.id, (target) => {
+			try {
+				const created = this.plugin.links.link(card.id, target.id);
+				if (!created) {
+					new Notice("这两张卡片已经链接");
+					return;
+				}
+				// 无链接事件总线：本图手动重画（与节点结构变化手动刷新的既有取舍一致）
+				this.drawEdges();
+				new Notice("已建立卡片链接");
+			} catch (err) {
+				// 弹窗期间对端被删（竞态）：link 校验两端存在时 throw
+				console.error("[MarinMind] 建立卡片链接失败", err);
+				new Notice("建立卡片链接失败：对端卡片可能已被删除");
+			}
+		}).open();
+	}
+
+	/**
+	 * 53 解链入口：唯一邻居直接解；多个弹二级菜单列出邻居标题逐个解除。
+	 * 解除是全局语义——邻居不必在本图（虚线边只画两端同图的链接）。
+	 */
+	private unlinkCard(card: Card, neighborIds: string[], evt: MouseEvent): void {
+		const doUnlink = (otherId: string): void => {
+			this.plugin.links.unlink(card.id, otherId);
+			this.drawEdges();
+			new Notice("已解除卡片链接");
+		};
+		if (neighborIds.length === 1) {
+			doUnlink(neighborIds[0]);
+			return;
+		}
+		const menu = new Menu();
+		for (const otherId of neighborIds) {
+			const other = this.plugin.cards.get(otherId);
+			const info = other
+				? other.title ?? other.note ?? other.excerptText ?? "（区域摘录）"
+				: "（卡片已删除）";
+			menu.addItem((item) =>
+				item
+					.setTitle(info.length > 30 ? `${info.slice(0, 30)}…` : info)
+					.onClick(() => doUnlink(otherId)),
+			);
+		}
+		menu.showAtMouseEvent(evt);
+	}
+
+	/**
+	 * 60 合并入口：选目标卡 → 确认（写明源卡删除、文本并入、锚点与媒体保留目标）
+	 * → mergeCardsInto → 受影响脑图重拉 + 发起方清源附件（镜像 deleteCardCascade 职责）。
+	 */
+	private openMergePicker(card: Card): void {
+		new MergePickerModal(this.app, this.plugin, card.id, (target) => {
+			new ConfirmModal(
+				this.app,
+				"合并卡片",
+				`将源卡片并入「${(target.title ?? target.excerptText ?? target.excerptType).slice(0, 30)}」：\n\n源卡片将被删除；批注/文字等文本内容并入目标（目标已有内容不覆盖）；脑图节点、卡片链接与复习进度转移到目标；原文锚点与媒体附件以目标为准。`,
+				() => {
+					if (!this.plugin.store) {
+						return;
+					}
+					const result = mergeCardsInto(
+						{
+							cards: this.plugin.cards,
+							mindmaps: this.plugin.mindmaps,
+							links: this.plugin.links,
+							reviews: this.plugin.reviews,
+							store: this.plugin.store,
+						},
+						card.id,
+						target.id,
+					);
+					if (!result.ok) {
+						new Notice(`合并失败：${result.reason}`);
+						return;
+					}
+					// 发起方清源附件（≠目标 ref 才删；uid 一卡一附件）
+					if (card.excerptRef && card.excerptRef !== target.excerptRef) {
+						void this.plugin.attachments.remove(card.excerptRef).catch(() => undefined);
+					}
+					for (const mapId of result.affectedMapIds) {
+						refreshActiveMindmaps(mapId);
+					}
+					new Notice("已合并卡片");
+				},
+			).open();
+		}).open();
+	}
+
+	// ---------- 子脑图坍缩（61：portal 身份 + 三操作） ----------
+
+	/**
+	 * 坍缩为子脑图：X 的直接子（各带整棵子树）迁入新建图，X 变 portal（双击进入）。
+	 * 新图 documentId=null——永不是书籍默认图，摘录自动入图路径不命中。
+	 * 事务性：目标为全新空图，一图一卡整批预检不可能失败，全顺序安排无半态。
+	 */
+	private collapseToChildMap(node: MindmapNodeWithCard): void {
+		const children = this.nodes
+			.filter((n) => n.parentId === node.id)
+			.sort(compareSiblings);
+		if (children.length === 0) {
+			new Notice("该节点没有子节点，无需坍缩为子脑图");
+			return;
+		}
+		const raw = node.card.title ?? node.card.note ?? node.card.excerptText ?? "子脑图";
+		const name = raw.length > 20 ? `${raw.slice(0, 20)}…` : raw;
+		const child = this.plugin.mindmaps.create(name, null);
+		for (const c of children) {
+			// 直接子逐个迁移：targetParentId 缺省 null → B 内根序 = 原兄弟序（order 保留）
+			this.plugin.mindmaps.moveSubtreeToMap(c.id, child.id);
+		}
+		this.plugin.mindmaps.setChildMap(node.id, child.id);
+		this.loadMap(node.mapId);
+		new Notice(`已坍缩为子脑图《${name}》（双击节点进入）`);
+	}
+
+	/** 打开子脑图（portal 双击 / 右键入口）：悬空引用读取侧自愈为普通节点 */
+	private openChildMap(node: MindmapNodeWithCard): void {
+		if (!node.childMapId) {
+			return;
+		}
+		const child = this.plugin.mindmaps.get(node.childMapId);
+		if (!child) {
+			// 悬空自愈：子图已被删除（正常路径 delete 已清扫，此处防御手编/外部改文件）
+			this.plugin.mindmaps.setChildMap(node.id, null);
+			this.loadMap(node.mapId);
+			new Notice("子脑图已不存在，已还原为普通节点");
+			return;
+		}
+		void this.plugin.openMindmap(child.id);
+	}
+
+	/**
+	 * 解除子脑图：子图全部根（各带整棵子树）迁回 portal 之下（追加末位——
+	 * 排在坍缩期间新挂的子之后），portal 还原普通节点，子图删除（已空）。
+	 * 整批碰撞预检：子图任一卡已在本图（一图一卡）→ 整体拒绝，子图保留。
+	 */
+	private uncollapseChildMap(node: MindmapNodeWithCard): void {
+		if (!node.childMapId) {
+			return;
+		}
+		const child = this.plugin.mindmaps.get(node.childMapId);
+		if (!child) {
+			this.plugin.mindmaps.setChildMap(node.id, null);
+			this.loadMap(node.mapId);
+			new Notice("子脑图已不存在，已还原为普通节点");
+			return;
+		}
+		const childNodes = this.plugin.mindmaps.listNodes(child.id);
+		if (childNodes.some((n) => this.plugin.mindmaps.hasCard(node.mapId, n.cardId))) {
+			new Notice("子脑图内有卡片已在本图出现（一图一卡），无法解除——请先移出冲突卡片");
+			return;
+		}
+		// 子图根集合：parentId 为 null 或父缺失的孤儿（镜像 restackRoots 上浮规则）
+		const ids = new Set(childNodes.map((n) => n.id));
+		const roots = childNodes
+			.filter((n) => n.parentId === null || !ids.has(n.parentId))
+			.sort(compareSiblings);
+		const doUncollapse = (): void => {
+			for (const r of roots) {
+				this.plugin.mindmaps.moveSubtreeToMap(r.id, node.mapId, node.id);
+			}
+			this.plugin.mindmaps.setChildMap(node.id, null);
+			if (node.collapsed) {
+				// portal 期间无子不显折叠钮；解除后还原展开，防旧折叠态隐藏刚迁回的子
+				this.plugin.mindmaps.setCollapsed(node.id, false);
+			}
+			this.plugin.mindmaps.delete(child.id); // 节点已全部迁出，删除仅清图壳
+			this.loadMap(node.mapId);
+			new Notice(`已解除子脑图《${child.name}》，节点已并回本图`);
+		};
+		if (childNodes.length > 50) {
+			new ConfirmModal(
+				this.app,
+				"解除子脑图",
+				`子脑图《${child.name}》内有 ${childNodes.length} 个节点，解除后将全部并回本图（挂在原节点之下）。继续？`,
+				doUncollapse,
+			).open();
+		} else {
+			doUncollapse();
+		}
+	}
+
+	/**
+	 * 导出 Markdown 大纲（54）：脑图树 → vault 根 `${图名} 大纲.md`。
+	 * 正常路径每行 = 卡片 wikilink（点击跳书文件锚点）；fs 数据根 / 隐藏目录
+	 * 降级纯标题（镜像 copyCardLink 三态——指向不可解析的链接不如不给）。
+	 * 刻意不写数据根（store 会认领数据根内 MarinMind 格式 md）；重名 -2/-3 递增。
+	 */
+	private async exportOutline(): Promise<void> {
+		const store = this.plugin.store;
+		const mapId = this.mapId;
+		if (!store || !mapId) {
+			new Notice("请先打开或创建一张脑图");
+			return;
+		}
+		const map = this.plugin.mindmaps.get(mapId);
+		if (!map) {
+			return;
+		}
+		if (this.nodes.length === 0) {
+			new Notice("画布为空，无可导出内容");
+			return;
+		}
+		// 链接可用性判定 + 锚点保底（缺 ^card-<id> 行的书文件先补写，已最新零写）
+		const loc = this.plugin.dataLoc;
+		const linkable = loc.kind === "vault" && !isHiddenVaultDir(loc.rootDir);
+		if (linkable) {
+			const docIds = new Set<string>();
+			for (const n of this.nodes) {
+				if (n.card.documentId) {
+					docIds.add(n.card.documentId);
+				}
+			}
+			await Promise.all(Array.from(docIds, (id) => store.ensureBookWritten(id)));
+		}
+		const linkOf = (card: Card): string | null => {
+			if (!linkable) {
+				return null;
+			}
+			const book = store.bookOfCard(card.id);
+			if (!book) {
+				return null; // 无书归属（手工卡/orphan）：纯标题
+			}
+			return buildCardCopyText("link", loc.rootDir, book.relPath, card);
+		};
+		const md = buildOutlineMarkdown(this.nodes, linkOf);
+		// 写 vault 根（copy-into-vault 冲突 -2/-3 先例）
+		const vault = this.app.vault;
+		let target = `${map.name} 大纲.md`;
+		for (let i = 2; vault.getAbstractFileByPath(target) != null; i++) {
+			target = `${map.name} 大纲-${i}.md`;
+		}
+		try {
+			await vault.create(target, md);
+		} catch (err) {
+			console.error("[MarinMind] 大纲导出失败", err);
+			new Notice("大纲导出失败：无法写入笔记文件", 6000);
+			return;
+		}
+		if (linkable) {
+			new Notice(`已导出大纲：${target}`);
+		} else {
+			new Notice(
+				`已导出大纲（纯标题版）：${target}——数据目录在库外或隐藏目录，卡片链接不可用`,
+				6000,
+			);
+		}
+	}
+
+	/**
+	 * 导出菜单（63）：download 单按钮改弹三选——Markdown 大纲（54）/
+	 * OPML 大纲（63，可导入 XMind/Workflowy 等大纲工具）/ PNG 图片（63，
+	 * 所见即所得整图快照）。图标经 asar 注册表验证（file-text/code/image）。
+	 */
+	private openExportMenu(evt: MouseEvent): void {
+		const menu = new Menu();
+		menu.addItem((item) =>
+			item
+				.setTitle("导出 Markdown 大纲")
+				.setIcon("file-text")
+				.onClick(() => void this.exportOutline()),
+		);
+		menu.addItem((item) =>
+			item.setTitle("导出 OPML 大纲").setIcon("code").onClick(() => void this.exportOpml()),
+		);
+		menu.addItem((item) =>
+			item.setTitle("导出 PNG 图片").setIcon("image").onClick(() => void this.exportPng()),
+		);
+		menu.showAtMouseEvent(evt);
+	}
+
+	/**
+	 * 导出 OPML 2.0 大纲（63）：脑图树 → vault 根 `${图名}.opml`（-2/-3 递增）。
+	 * 纯文本大纲交换格式不承载 wikilink（外部工具不认识），节点文本与 Markdown
+	 * 大纲降级态同源（outlineLineText）；与 exportOutline 共用空图/数据层守卫。
+	 */
+	private async exportOpml(): Promise<void> {
+		const store = this.plugin.store;
+		const mapId = this.mapId;
+		if (!store || !mapId) {
+			new Notice("请先打开或创建一张脑图");
+			return;
+		}
+		const map = this.plugin.mindmaps.get(mapId);
+		if (!map) {
+			return;
+		}
+		if (this.nodes.length === 0) {
+			new Notice("画布为空，无可导出内容");
+			return;
+		}
+		const opml = buildOutlineOpml(this.nodes, map.name);
+		const vault = this.app.vault;
+		const target = allocateExportPath(map.name, "opml", (p) => vault.getAbstractFileByPath(p) != null);
+		try {
+			await vault.create(target, opml);
+		} catch (err) {
+			console.error("[MarinMind] OPML 导出失败", err);
+			new Notice("OPML 导出失败：无法写入笔记文件", 6000);
+			return;
+		}
+		new Notice(`已导出 OPML 大纲：${target}`);
+	}
+
+	/**
+	 * 导出 PNG 图片（63）：整图所见即所得快照（取景 = 连线 svg 的 viewBox）。
+	 * 编排细节在 map-image-export（媒体等待/瞬态类摘除/主题底色/倍率钳制）；
+	 * 此处只做画布元素与图名守卫。
+	 */
+	private async exportPng(): Promise<void> {
+		const store = this.plugin.store;
+		const mapId = this.mapId;
+		if (!store || !mapId) {
+			new Notice("请先打开或创建一张脑图");
+			return;
+		}
+		const map = this.plugin.mindmaps.get(mapId);
+		if (!map) {
+			return;
+		}
+		if (!this.worldEl || !this.edgesSvg) {
+			return;
+		}
+		await exportMindmapPng(this.plugin, this.worldEl, this.edgesSvg, map.name);
+	}
+
+	/**
+	 * 从文档目录建框架（55 PDF；62 起三态泛化 epub/md）入口：选择库内/库外文档
+	 * （picker 收 pdf+md+epub——库外按钮只收 pdf+epub，md 天然仅库内）。
+	 */
+	private pickOutlineSource(): void {
+		if (!this.mapId) {
+			new Notice("请先打开或创建一张脑图");
+			return;
+		}
+		new PdfPickerModal(
+			this.app,
+			(pick) => void this.buildOutlineFramework(pickTarget(pick)),
+			[],
+			{ extensions: ["pdf", "md", "epub"], plugin: this.plugin },
+		).open();
+	}
+
+	/**
+	 * 按所选文档的目录在当前图建章节骨架框架（55 PDF；62 三态）：
+	 * 解析目录（pdf=内嵌大纲共享解析 / epub=nav-ncx 结构 / md=隐藏渲染量测标题 y）
+	 * → 建档 → 防重 → 确认规模 → createOutlineCards 建树。
+	 * 新摘录归章由 autoAddCard 的 chapterParentFor 承接（摘录目标图为本图时生效）。
+	 */
+	private async buildOutlineFramework(target: TFile | string): Promise<void> {
+		if (!this.plugin.store || !this.mapId) {
+			return;
+		}
+		const mapId = this.mapId;
+		const filePath = typeof target === "string" ? target : target.path;
+		const title = typeof target === "string" ? fsBasename(target) : target.basename;
+		const ext = docExtOf(filePath);
+
+		// 1) 解析目录（62 按扩展三态分流）；建档在解析后——epub 的 dc:title
+		//    优先（对齐阅读器语义），解析失败时尚未建档零残留
+		let entries: Array<OutlineEntry & { anchorY?: number | null }>;
+		let bookTitle = title;
+		if (ext === "epub") {
+			// 读字节：库内 TFile 直读 / 库外绝对路径桌面直读（移动端弹中文错误）
+			let bytes: ArrayBuffer;
+			try {
+				bytes =
+					typeof target === "string"
+						? await readExternalBinary(target)
+						: await this.app.vault.readBinary(target);
+			} catch (err) {
+				new Notice(err instanceof Error ? err.message : "读取 EPUB 失败", 6000);
+				return;
+			}
+			try {
+				const book = parseEpub(new Uint8Array(bytes));
+				bookTitle = book.title || title; // dc:title 优先 basename 兜底
+				entries = epubOutline(book); // page = spine 序号 + 1，与摘录卡同基
+			} catch (err) {
+				console.error("[MarinMind] EPUB 目录解析失败", err);
+				new Notice(err instanceof Error ? err.message : "EPUB 解析失败，无法读取目录", 6000);
+				return;
+			}
+		} else if (ext === "md") {
+			// md 必须库内 TFile（库外 md 阅读器本就不支持，建框架同拒）
+			if (typeof target === "string") {
+				new Notice("库外 Markdown 不支持建目录框架，请先复制入库", 6000);
+				return;
+			}
+			let text: string;
+			try {
+				text = await this.app.vault.cachedRead(target);
+			} catch (err) {
+				new Notice(err instanceof Error ? err.message : "读取 Markdown 失败", 6000);
+				return;
+			}
+			new Notice("正在渲染文档以定位标题位置（大文件可能数秒）…", 4000);
+			entries = await measureMdOutline(this.app, this, text);
+		} else {
+			let bytes: ArrayBuffer;
+			try {
+				bytes =
+					typeof target === "string"
+						? await readExternalBinary(target)
+						: await this.app.vault.readBinary(target);
+			} catch (err) {
+				new Notice(err instanceof Error ? err.message : "读取 PDF 失败", 6000);
+				return;
+			}
+			// pdf 内嵌大纲（共享解析缓存：双开的 PDF 免重复解析；finally 必还引用）
+			try {
+				const handle = await acquirePdf(pdfCacheKey(filePath), bytes);
+				try {
+					entries = await handle.doc.outline();
+				} finally {
+					handle.release();
+				}
+			} catch (err) {
+				console.error("[MarinMind] PDF 目录解析失败", err);
+				new Notice("PDF 解析失败，无法读取目录", 6000);
+				return;
+			}
+		}
+		if (entries.length === 0) {
+			new Notice(`《${bookTitle}》没有可用的目录（${ext === "md" ? "无标题" : "书签大纲"}），无法建框架`, 6000);
+			return;
+		}
+
+		// 2) 建档：与阅读器打开同语义（已存在则只刷新 updatedAt 与标题）
+		const doc = this.plugin.documents.upsertByPath(filePath, bookTitle);
+
+		// 3) 防重：当前图已有该书框架即拒（同书可在另一图各建一份）
+		if (this.nodes.some((n) => n.card.outline && n.card.documentId === doc.id)) {
+			new Notice(`当前脑图已有《${bookTitle}》的目录框架`);
+			return;
+		}
+
+		// 4) 建卡计划：损坏条目（page null）由纯函数跳过并就近重挂子级
+		const plan = planOutlineChapters(entries);
+		if (plan.length === 0) {
+			new Notice(`《${bookTitle}》的目录条目均无法解析页码，无法建框架`, 6000);
+			return;
+		}
+		new ConfirmModal(
+			this.app,
+			"从文档目录建框架",
+			`将按《${bookTitle}》的目录创建 ${plan.length} 张章节骨架卡，挂到当前脑图的《${bookTitle}》分组下。${
+				plan.length > 300 ? "\n\n条目较多，创建与首次落盘可能需要数秒。" : ""
+			}`,
+			() => this.createOutlineCards(mapId, doc.id, doc.title, plan),
+		).open();
+	}
+
+	/**
+	 * 建章节骨架卡与树（55）：顶层挂《书名》组卡下，子级挂 parentIndex 指向的
+	 * 已建章节（plan 深度优先序保证父先建）。落位随父生效分支样式顺延，兄弟
+	 * 坐标本地缓存增量追加（不逐卡 listNodes——千章书 O(N²) 重拉不可接受）。
+	 * try/catch 包整段：残余异常呈现已建部分树，用户可整支移出清理。
+	 */
+	private createOutlineCards(
+		mapId: string,
+		documentId: string,
+		bookTitle: string,
+		plan: ChapterPlanItem[],
+	): void {
+		const map = this.plugin.mindmaps.get(mapId);
+		if (!map) {
+			return;
+		}
+		const host = {
+			documents: this.plugin.documents,
+			cards: this.plugin.cards,
+			mindmaps: this.plugin.mindmaps,
+		};
+		let created = 0;
+		try {
+			const groupNodeId = ensureGroupCard(host, map, { id: documentId, title: bookTitle });
+			if (!groupNodeId) {
+				new Notice("无法确保分组节点，已中止", 6000);
+				return;
+			}
+			const nodes0 = this.plugin.mindmaps.listNodes(mapId);
+			const groupNode = nodes0.find((n) => n.id === groupNodeId);
+			if (!groupNode) {
+				new Notice("分组节点缺失，已中止", 6000);
+				return;
+			}
+			// 兄弟坐标缓存：种子 = 既有节点（组卡可能已挂直挂摘录），建卡增量追加
+			const sibPts = new Map<string, { x: number; y: number }[]>();
+			for (const n of nodes0) {
+				if (n.parentId == null) {
+					continue;
+				}
+				const arr = sibPts.get(n.parentId);
+				if (arr) {
+					arr.push({ x: n.x, y: n.y });
+				} else {
+					sibPts.set(n.parentId, [{ x: n.x, y: n.y }]);
+				}
+			}
+			const groupStyle = effectiveBranchStyle(nodes0, groupNodeId, map.defaultBranchStyle);
+			// 已建章节：新节点无样式覆盖，生效样式 = 父的生效样式（传递继承）
+			const made: Array<{ id: string; x: number; y: number; style: BranchStyle }> = [];
+			for (const item of plan) {
+				const parent = item.parentIndex == null ? null : made[item.parentIndex];
+				if (item.parentIndex != null && !parent) {
+					continue; // 防御：父项建卡失败时子级跳过（正常流程不会发生）
+				}
+				const parentId = parent ? parent.id : groupNodeId;
+				const parentPos = parent
+					? { x: parent.x, y: parent.y }
+					: { x: groupNode.x, y: groupNode.y };
+				let sibs = sibPts.get(parentId);
+				if (!sibs) {
+					sibs = [];
+					sibPts.set(parentId, sibs);
+				}
+				const pos = suggestChildPosition(
+					parentPos,
+					sibs,
+					parent ? parent.style : groupStyle,
+				);
+				const card = this.plugin.cards.create({
+					documentId,
+					page: item.page,
+					// 62 md 框架：合成归一化锚 rect——跳原文 locateCard/jumpAnchorY 精确定位
+					// 与归章同页 y 比较全链路复用（h 极小不显形；pdf/epub anchorY null 仍空）
+					rects:
+						item.anchorY != null
+							? [{ x: 0, y: item.anchorY, w: 1, h: 0.001 }]
+							: [],
+					excerptType: "text",
+					excerptText: item.title,
+					title: item.title,
+					outline: true,
+				});
+				const node = this.plugin.mindmaps.addNode(
+					mapId,
+					card.id,
+					parentId,
+					Math.round(pos.x),
+					Math.round(pos.y),
+				);
+				if (!node) {
+					continue;
+				}
+				made.push({ id: node.id, x: node.x, y: node.y, style: parent ? parent.style : groupStyle });
+				sibs.push({ x: node.x, y: node.y });
+				created++;
+			}
+			this.loadMap(mapId);
+			new Notice(`已创建 ${created} 张章节骨架卡，本书新摘录将按页码归入对应章节`);
+		} catch (err) {
+			console.error("[MarinMind] 目录框架创建中断", err);
+			this.loadMap(mapId);
+			new Notice(`框架创建中断：已建 ${created} 张章节卡（可整支移出清理）`, 6000);
+			return;
+		}
+		// 归章衔接提示：该书摘录目标图不是本图时（覆盖他图 / 同名默认图未指向本图），
+		// 新摘录落别处不进本框架——提示引导在阅读器「脑图」按钮切换目标
+		const target = collectTargetOf(host, documentId);
+		if (target?.map.id !== mapId) {
+			new Notice(
+				`注意：《${bookTitle}》的摘录目标图${
+					target ? `是《${target.map.name}》` : "是同名默认脑图"
+				}，新摘录不会归入本框架——可在阅读器工具行「脑图」按钮切换目标到本图`,
+				8000,
+			);
+		}
 	}
 
 	/**
@@ -2042,8 +3333,10 @@ export class MarinMindMindmapView extends ItemView {
 		if (!this.mapId) {
 			return;
 		}
+		this.beginUndoCapture(); // 59
 		this.plugin.mindmaps.setBranchStyle(nodeId, style);
 		this.loadMap(this.mapId);
+		this.commitUndo("切换分支样式");
 	}
 
 	/** 图级默认分支样式切换：写库后重拉（未覆盖的节点全部跟随新样式） */
@@ -2051,8 +3344,10 @@ export class MarinMindMindmapView extends ItemView {
 		if (!this.mapId) {
 			return;
 		}
+		this.beginUndoCapture(); // 59（图默认样式变化经 commitUndo 自动入补丁）
 		this.plugin.mindmaps.setDefaultBranchStyle(this.mapId, style);
 		this.loadMap(this.mapId);
+		this.commitUndo("切换默认样式");
 	}
 
 	/** 本地移除节点（库已删）：子上浮为根原位保留，仅重画连线 */
@@ -2061,6 +3356,10 @@ export class MarinMindMindmapView extends ItemView {
 		// rebuildWorld 清不到）
 		if (this.nodeEditor?.nodeId === nodeId) {
 			this.closeNodeEditor(false);
+		}
+		// 52 选中节点被移除：锚点清空（removeSelectedNode 随后会显式转移到父）
+		if (this.selectedNodeId === nodeId) {
+			this.selectedNodeId = null;
 		}
 		for (const n of this.nodes) {
 			if (n.parentId === nodeId) {

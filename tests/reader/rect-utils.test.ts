@@ -7,6 +7,7 @@ import {
 	normRectToPercent,
 	occlusionBounds,
 	occlusionPercent,
+	planSelectionToolbarPosition,
 	pointsToNormRect,
 	rectsRelativeToPage,
 } from "../../src/reader/rect-utils";
@@ -172,5 +173,81 @@ describe("遮挡摆位 occlusionPercent / occlusionBounds（㊷）", () => {
 		const b = occlusionBounds({ excerptRef: null, rects });
 		expect(b.x).toBeCloseTo(excerptCropRect(rects).x, 10);
 		expect(b.w).toBeCloseTo(excerptCropRect(rects).w, 10);
+	});
+
+	it("71 钉住：photo 卡（excerptRef + rects 空）bounds 恒整图 {0,0,1,1}——预览弹窗编辑的遮挡在复习端天然对位", () => {
+		const b = occlusionBounds({ excerptRef: "assets/photo1.jpg", rects: [] });
+		expect(b).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+		// 图内 0-1 遮挡直通百分比（photo 遮挡的渲染数学基础）
+		const r = occlusionPercent({ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, b);
+		expect(pct(r.left)).toBeCloseTo(25, 6);
+		expect(pct(r.width)).toBeCloseTo(50, 6);
+	});
+});
+
+describe("划选工具栏定位 planSelectionToolbarPosition（75）", () => {
+	it("常规场景：选区上方优先 + 水平以选区中心对齐", () => {
+		const pos = planSelectionToolbarPosition({
+			anchor: { left: 300, top: 200, right: 500, bottom: 240 },
+			container: { left: 0, top: 0, width: 800, height: 600 },
+			toolbarWidth: 200,
+			toolbarHeight: 40,
+		});
+		// 水平：中心 400 − 半宽 100 = 300；垂直：200 − 40 − 8 = 152
+		expect(pos).toEqual({ left: 300, top: 152 });
+	});
+
+	it("输出为容器本地坐标（非零容器原点已减除）+ 左缘钳制", () => {
+		const pos = planSelectionToolbarPosition({
+			// 选区中心 125 距容器左缘（100）仅 25px，居中后越出左缘 → 钳到 left+4
+			anchor: { left: 90, top: 200, right: 160, bottom: 240 },
+			container: { left: 100, top: 50, width: 800, height: 600 },
+			toolbarWidth: 200,
+			toolbarHeight: 40,
+		});
+		expect(pos).toEqual({ left: 4, top: 102 }); // 152 − 50（垂直上方正常）
+	});
+
+	it("右缘钳制：选区靠容器右缘居中后不溢出", () => {
+		const pos = planSelectionToolbarPosition({
+			anchor: { left: 700, top: 100, right: 790, bottom: 140 },
+			container: { left: 0, top: 0, width: 800, height: 600 },
+			toolbarWidth: 200,
+			toolbarHeight: 40,
+		});
+		// 中心 745 − 100 = 645 > 800 − 200 − 4 = 596 → 钳到 596
+		expect(pos).toEqual({ left: 596, top: 52 });
+	});
+
+	it("上方空间不足（选区贴近容器顶）回退到选区下方", () => {
+		const pos = planSelectionToolbarPosition({
+			anchor: { left: 300, top: 20, right: 500, bottom: 60 },
+			container: { left: 0, top: 0, width: 800, height: 600 },
+			toolbarWidth: 200,
+			toolbarHeight: 40,
+		});
+		// 20 − 48 = −28 < 4 → 回退 60 + 8 = 68
+		expect(pos).toEqual({ left: 300, top: 68 });
+	});
+
+	it("下方方案溢出容器底时纵向整体钳入（贴底选区）", () => {
+		const pos = planSelectionToolbarPosition({
+			anchor: { left: 300, top: 20, right: 500, bottom: 280 },
+			container: { left: 0, top: 0, width: 800, height: 300 },
+			toolbarWidth: 200,
+			toolbarHeight: 40,
+		});
+		// 上方不足 → 下方 288，maxTop = 300 − 40 − 4 = 256 → 钳入
+		expect(pos).toEqual({ left: 300, top: 256 });
+	});
+
+	it("容器比工具栏还窄（极端窗格）：左对齐不溢出右缘", () => {
+		const pos = planSelectionToolbarPosition({
+			anchor: { left: 30, top: 200, right: 90, bottom: 240 },
+			container: { left: 0, top: 0, width: 120, height: 600 },
+			toolbarWidth: 200,
+			toolbarHeight: 40,
+		});
+		expect(pos).toEqual({ left: 4, top: 152 });
 	});
 });

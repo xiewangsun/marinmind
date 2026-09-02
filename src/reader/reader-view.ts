@@ -8,14 +8,20 @@ import { suggestRootPosition } from "../mindmap/mindmap-graph";
 import { ocrCanvasRegions } from "../ocr/ocr-service";
 import { docExtOf, fsBasename, isAbsoluteFsPath } from "../storage/paths";
 import { readExternalBinary } from "../storage/external-file";
-import type { Card, DocRect, NormPoint } from "../types";
+import type { Card, DocRect, LineStyle, NormPoint } from "../types";
+import { LINE_STYLES, LINE_STYLE_LABELS } from "../types";
 import { AudioRecorder } from "./audio-recorder";
 import { AutoExcerptModal } from "./auto-excerpt-modal";
 import { epubChapterTitleOf, epubOutline, parseEpub, type EpubBook } from "./epub-document";
 import { EpubSession, type EpubLinkTarget } from "./epub-session";
 import { ExcerptLayer, flashEl, type ExcerptTool, type ReaderTool } from "./excerpt-layer";
 import { HandwriteLayer } from "./handwrite-layer";
-import { HIGHLIGHT_COLORS } from "./highlight-colors";
+import {
+	HIGHLIGHT_COLORS,
+	highlightLineStyle,
+	LINE_STYLE_ICONS,
+	type HighlightColorValue,
+} from "./highlight-colors";
 import { HighlightColorModal } from "./highlight-color-modal";
 import { MediaPreviewModal } from "./media-preview-modal";
 import { MdDocument } from "./md-document";
@@ -24,7 +30,9 @@ import { TextPromptModal } from "./note-edit-modal";
 import { PageView, type PageSize } from "./page-view";
 import { PdfDocument, type OutlineEntry } from "./pdf-document";
 import { acquirePdf, pdfCacheKey, retainPdf, type PdfHandle } from "./pdf-cache";
+import { SelectionToolbar, type SelectionSnapshot } from "./selection-toolbar";
 import { jumpAnchorY, rectsRelativeToPage, type ViewportRect } from "./rect-utils";
+import { mergeTextOcclusions, snapOcclusionToLines } from "./occlusion-snap";
 import { translationAnchor } from "../translate/translate-engine";
 import { TranslateModal } from "../translate/translate-modal";
 import { createViewModeBar } from "../ui/view-mode-bar";
@@ -237,8 +245,15 @@ export class MarinMindReaderView extends ItemView {
 	private flashcardBtn: HTMLElement | null = null;
 	/** 遮挡编辑目标卡（㊷）：非空时进入画遮挡模式（Esc/切工具退出） */
 	private occlusionEditTarget: Card | null = null;
+	/** 文字遮罩目标卡（74）：非空时进入划选文字即遮罩模式（Esc/切工具退出；与拖框遮挡互斥） */
+	private occlusionTextTarget: Card | null = null;
 	/** 遮挡预览开关（㊷，会话态不持久化）：true 时遮挡块实心覆盖模拟复习观感 */
 	private occlusionPreview = false;
+	/** 71 遮挡行吸附开关（会话态不持久化，默认开）：text 卡拖遮挡时垂直吸附到整行 */
+	private occlusionSnapLines = true;
+	/** 划选工具栏（75）：text 工具划选松开弹出；惰性建（ensureSelectionToolbar），
+	 * cleanupContent 销毁（DOM 随 contentEl.empty 消亡，监听显式移除） */
+	private selectionToolbar: SelectionToolbar | null = null;
 	/** 当前文档的内嵌大纲（md/epub 加载即就绪；pdf 懒解析后填充，见 ensureOutline） */
 	private outlineEntries: OutlineEntry[] = [];
 	/** P2 目录懒解析：大纲是否已解析完成（含失败——失败视同无大纲，防反复重试） */
@@ -338,6 +353,16 @@ export class MarinMindReaderView extends ItemView {
 			}
 			const target = evt.target as HTMLElement | null;
 			if (target?.closest?.(".modal-container, .menu, input, textarea, [contenteditable]")) {
+				return;
+			}
+			// 划选工具栏最先退出（75）：Esc 只关工具栏不清选区（选区可继续用于复制等）
+			if (this.selectionToolbar?.visible) {
+				this.selectionToolbar.hide();
+				return;
+			}
+			// 文字遮罩模式优先退出（74）：瞬态模式，先于拖框遮挡处理
+			if (this.occlusionTextTarget) {
+				this.stopOcclusionTextEdit();
 				return;
 			}
 			// 遮挡编辑模式优先退出（㊷）：瞬态模式，Esc 先退出它再考虑工具切换
@@ -656,12 +681,16 @@ export class MarinMindReaderView extends ItemView {
 			if (this.handwriteMode) {
 				this.commitOffscreenSoon();
 			}
+			// 75 划选工具栏滚动跟随：活 range 现算新位置（空矩形自动隐藏）
+			this.selectionToolbar?.reposition();
 		});
 
 		// 回显已有卡片高亮（按页暂存；分块建页下由 buildPage 消费——晚建的页
-		// 建好时才拿到自己的卡）；photo/audio 卡进页角徽标数据源
+		// 建好时才拿到自己的卡）；photo/audio 卡进页角徽标数据源。
+		// 目录章节骨架卡不回显（62 md 框架带合成锚 rect——那是跳原文/归章数据，
+		// 不是用户摘录；渲染成标题位置的细线高亮只会造成困扰）
 		for (const card of this.plugin.cards.listByDocument(doc.id)) {
-			if (card.page == null) {
+			if (card.page == null || card.outline) {
 				continue;
 			}
 			const list = this.echoCardsByPage.get(card.page) ?? [];
@@ -1582,10 +1611,15 @@ export class MarinMindReaderView extends ItemView {
 		}
 		const target = collectTargetOf(this.collectHost(), doc.id);
 		const menu = new Menu();
+		// R2（E2-06）：图名 30 字截断（同高亮菜单 E2-05 基线），长图名菜单爆宽
+		const nameBrief =
+			target && target.map.name.length > 30
+				? `${target.map.name.slice(0, 30)}…`
+				: target?.map.name;
 		const current = target
 			? target.overridden
-				? `当前目标：《${target.map.name}》`
-				: `当前目标：📖 同名脑图《${target.map.name}》（默认）`
+				? `当前目标：《${nameBrief}》`
+				: `当前目标：📖 同名脑图《${nameBrief}》（默认）`
 			: "当前目标：同名脑图（默认）";
 		menu.addItem((mi) => mi.setTitle(current).setIcon("info").setDisabled(true));
 		if (this.plugin.mindmaps.fixedRoot()) {
@@ -1957,6 +1991,12 @@ export class MarinMindReaderView extends ItemView {
 		if (this.occlusionEditTarget) {
 			this.occlusionEditTarget = null;
 		}
+		// 文字遮罩同为瞬态模式（74）：切工具即失效（层内 setTool 同步清）
+		if (this.occlusionTextTarget) {
+			this.occlusionTextTarget = null;
+		}
+		// 75 划选工具栏随工具切换隐藏（选区保留，动作不再可用）
+		this.selectionToolbar?.hide();
 		for (const layer of this.excerptLayers.values()) {
 			layer.setTool(tool);
 			// ㊹ 每工具独立记忆色系：切换时把该工具当前色推给预览（拖框/套索着色）
@@ -2560,8 +2600,17 @@ export class MarinMindReaderView extends ItemView {
 	 * 治不了"中间各行"的行尾空白）。行盒按中心点归属页；跨页选区拦截提示分次选择。
 	 */
 	private handleSelectionEnd(): void {
+		// 文字遮罩模式（74）优先接管：划选即遮罩（不建卡），互斥于下方建卡路径
+		if (this.occlusionTextTarget) {
+			this.handleOcclusionTextSelection();
+			return;
+		}
 		if (this.activeTool !== "text" || this.handwriteMode || !this.currentDocId) {
 			return; // 仅文字摘录工具激活时划选成卡（捕获型工具接管 overlay，本无选区；防御性守卫）
+		}
+		// 工具栏按钮点击链的 mouseup（75）：抑制旗标短路，不重建快照不重弹
+		if (this.selectionToolbar?.takeSuppressSelectionEnd()) {
+			return;
 		}
 		const sel = window.getSelection();
 		if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
@@ -2570,6 +2619,15 @@ export class MarinMindReaderView extends ItemView {
 		const range = sel.getRangeAt(0);
 		// 选区可能来自应用其他区域（键盘残留），限定在本视图内才处理
 		if (!this.contentEl.contains(range.commonAncestorContainer)) {
+			return;
+		}
+		// 75 划选工具栏（默认开）：弹工具栏由按钮动作建卡；设置关闭恢复旧版直接建卡
+		if (this.plugin.settings.selectionToolbar) {
+			const snap = this.buildSelectionSnapshot(range);
+			if (snap) {
+				this.ensureSelectionToolbar();
+				this.selectionToolbar!.show(range, snap);
+			}
 			return;
 		}
 		const lines = this.collectSelectionLines(range);
@@ -2591,7 +2649,71 @@ export class MarinMindReaderView extends ItemView {
 			sel.removeAllRanges();
 			return;
 		}
-		// 行盒按中心点归属页（文本行的中心必落在渲染该文本的页面内）
+		// 行盒按中心点归属页（与文字遮罩共用同一归页单源，见 lineBoxesByPage）
+		this.finishTextCard(this.lineBoxesByPage(lines), text, sel);
+	}
+
+	/**
+	 * 文字遮罩划选闭环（74）：选中文字的逐行矩形（collectSelectionLines，精确到
+	 * 首末非空白字符）追加为文字遮罩目标的遮挡块——与建卡同源管线，复习正面
+	 * 遮挡块位置天然对齐。宁拒不赌：目标卡已删/超大选区/跨页/异页/重复段落
+	 * 均拒绝不改库；遮挡块回显走 cardBus changed → syncOcclusionEls（静默）。
+	 */
+	private handleOcclusionTextSelection(): void {
+		const target = this.occlusionTextTarget;
+		if (!target || !this.plugin.store) {
+			return;
+		}
+		const sel = window.getSelection();
+		if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+			return;
+		}
+		const range = sel.getRangeAt(0);
+		// 选区可能来自应用其他区域（键盘残留），限定在本视图内才处理
+		if (!this.contentEl.contains(range.commonAncestorContainer)) {
+			return;
+		}
+		// 目标卡可能已被外部删除（另一标签删卡/复习会话删卡）：即时校验退出
+		const latest = this.plugin.cards.get(target.id);
+		if (!latest) {
+			new Notice("目标卡片已被删除，文字遮罩已退出");
+			this.stopOcclusionTextEdit();
+			return;
+		}
+		const lines = this.collectSelectionLines(range);
+		if (lines === null) {
+			// 不走建卡的 3000 字回退路径——遮大段文字无意义，宁拒不赌
+			new Notice("选区过大，无法生成文字遮罩，请分段划选");
+			return;
+		}
+		const rectsByPage = this.lineBoxesByPage(lines);
+		if (rectsByPage.size === 0) {
+			return;
+		}
+		const [page, boxes] = [...rectsByPage.entries()][0];
+		if (rectsByPage.size > 1 || page !== latest.page) {
+			// 遮挡矩形相对 card.page 所在页归一化，异页写入即错位（选区保留可调整重试）
+			new Notice(`选区须与卡片同页（第 ${latest.page} ${this.pageWord}）`);
+			return;
+		}
+		const pageBox = this.pageViewByNumber.get(page)!.el.getBoundingClientRect();
+		const merged = mergeTextOcclusions(
+			latest.occlusions,
+			rectsRelativeToPage(boxes, pageBox),
+		);
+		if (merged.length === latest.occlusions.length) {
+			new Notice("该段文字已遮罩");
+			return;
+		}
+		const next = this.plugin.cards.update(latest.id, { occlusions: merged });
+		if (next) {
+			this.occlusionTextTarget = next; // 同步本地快照，连续划选正确叠加
+		}
+		sel.removeAllRanges();
+	}
+
+	/** 行盒按中心点归属页（文本行的中心必落在渲染该文本的页面内；划选建卡与文字遮罩共用） */
+	private lineBoxesByPage(lines: readonly SelectionLine[]): Map<number, ViewportRect[]> {
 		const rectsByPage = new Map<number, ViewportRect[]>();
 		for (const line of lines) {
 			const cx = line.box.left + line.box.width / 2;
@@ -2604,7 +2726,7 @@ export class MarinMindReaderView extends ItemView {
 			list.push(line.box);
 			rectsByPage.set(pv.pageNumber, list);
 		}
-		this.finishTextCard(rectsByPage, text, sel);
+		return rectsByPage;
 	}
 
 	/** 行矩形归页校验后建 text 卡（跨页拦截；pageBox 归一化入库；回显走 cardBus） */
@@ -2630,8 +2752,160 @@ export class MarinMindReaderView extends ItemView {
 			excerptType: "text",
 			excerptText: text,
 			color: this.plugin.settings.excerptColors.text, // ㊹ 跟随文字工具当前色系
+			// 77 线型跟随全局设置（underline 归一 null：序列化省键 + 内存规范形）
+			lineStyle: this.plugin.settings.excerptLineStyle !== "underline"
+				? this.plugin.settings.excerptLineStyle
+				: null,
 		});
 		sel.removeAllRanges();
+	}
+
+	/**
+	 * 构建划选快照（75 工具栏路径）：复刻旧直接建卡管线的行聚类/归页/跨页拦截，
+	 * 差异只在产出——show 时刻即归一化为**页相对坐标**（视口矩形随滚动失效，
+	 * 页相对坐标不会），按钮动作在任何滚动位置都正确；选区保持（Esc/点外关闭
+	 * 后仍可复用，动作收尾才统一清）。返回 null = 不弹工具栏（空文本/归页失败
+	 * 静默；跨页沿用旧 Notice 且选区保留可重选）。
+	 */
+	private buildSelectionSnapshot(range: Range): SelectionSnapshot | null {
+		const lines = this.collectSelectionLines(range);
+		let rectsByPage: Map<number, ViewportRect[]>;
+		let text: string;
+		if (lines === null) {
+			// 超大选区退回老路径：只修剪整体首尾空白再量矩形（与直接建卡一致）
+			if (!this.trimRangeToBounds(range)) {
+				return null;
+			}
+			text = range.toString().trim();
+			if (!text) {
+				return null;
+			}
+			rectsByPage = this.rectsByPageFromRange(range);
+		} else {
+			text = lines.map((l) => l.text).join("\n");
+			if (!text) {
+				return null;
+			}
+			// 行盒按中心点归属页（与直接建卡/文字遮罩共用同一归页单源，见 lineBoxesByPage）
+			rectsByPage = this.lineBoxesByPage(lines);
+		}
+		if (rectsByPage.size === 0) {
+			return null;
+		}
+		if (rectsByPage.size > 1) {
+			new Notice("跨页摘录请分次选择");
+			return null;
+		}
+		const [page, rects] = [...rectsByPage.entries()][0];
+		const pageBox = this.pageViewByNumber.get(page)!.el.getBoundingClientRect();
+		return { text, page, rects: rectsRelativeToPage(rects, pageBox) };
+	}
+
+	/**
+	 * 惰性建划选工具栏（75）：首次划选时创建（此刻 docKind 已就绪——书签钮按
+	 * 文档形态显隐）；cleanupContent 销毁后换文档自动重建。回调全部以点击时刻
+	 * 快照为参（收尾 hide/清选区由工具栏统一做），点击时直读设置保证取值新鲜。
+	 */
+	private ensureSelectionToolbar(): void {
+		if (this.selectionToolbar) {
+			return;
+		}
+		this.selectionToolbar = new SelectionToolbar(this.contentEl, {
+			// md 文档书签停用（㊻-B）：书签钮不显示（pdf 页码/epub 章号均可）
+			showBookmark: this.docKind !== "md",
+			// 77 线型：菜单打开/刷新 title 时刻取值（设置变化即时反映）
+			currentLineStyle: () => this.plugin.settings.excerptLineStyle,
+			actions: {
+				onExcerpt: (snap: SelectionSnapshot, color?: HighlightColorValue) => {
+					// 色点 = 该点颜色；摘录钮（color 缺省）= 当前文字工具色
+					this.plugin.cards.create({
+						documentId: this.currentDocId!,
+						page: snap.page,
+						rects: snap.rects,
+						excerptType: "text",
+						excerptText: snap.text,
+						color: color ?? this.plugin.settings.excerptColors.text,
+						// 77 线型跟随全局设置（underline 归一 null：序列化省键 + 内存规范形）
+						lineStyle: this.plugin.settings.excerptLineStyle !== "underline"
+							? this.plugin.settings.excerptLineStyle
+							: null,
+					});
+					// 回显走 cardBus 事件回环（无 Notice——高亮即反馈，与旧直接建卡一致；
+					// 自动入图/自动闪卡 Notice 由 main.ts 既有订阅承接）
+				},
+				onPickLineStyle: (style: LineStyle) => {
+					// 镜像 cycleExcerptColor 即时写回样板：改设置 → saveData → 刷新钮 → Notice
+					this.plugin.settings.excerptLineStyle = style;
+					void this.plugin.saveData({ ...this.plugin.settings });
+					this.selectionToolbar?.syncLineStyle();
+					new Notice(`文字摘录线型：${LINE_STYLE_LABELS[style]}`);
+				},
+				onTranslate: (snap: SelectionSnapshot) => {
+					const docId = this.currentDocId; // 开弹窗时刻捕获，弹窗内换文档不误挂
+					if (!docId) {
+						return;
+					}
+					new TranslateModal(this.app, {
+						sourceText: snap.text,
+						target: this.plugin.settings.translateTarget,
+						onTargetChange: (code) => {
+							// 弹窗内切换即持久化，下次打开沿用
+							this.plugin.settings.translateTarget = code;
+							void this.plugin.saveData({ ...this.plugin.settings });
+						},
+						onSaveBlank: (translation) =>
+							this.saveTranslationFromSelection(docId, snap, translation),
+					}).open();
+				},
+				onCopy: (text: string) => {
+					void (async () => {
+						try {
+							await navigator.clipboard.writeText(text);
+							new Notice("已复制选中文字");
+						} catch (err) {
+							console.error("[MarinMind] 复制选中文字失败", err);
+							new Notice("复制失败（剪贴板不可用）");
+						}
+					})();
+				},
+				onBookmark: (snap: SelectionSnapshot) => {
+					const docId = this.currentDocId;
+					if (!docId) {
+						return;
+					}
+					// 书签名 = 选中文本截断 30 字（超长省略号）
+					const label = snap.text.length > 30 ? `${snap.text.slice(0, 30)}…` : snap.text;
+					this.plugin.bookmarks.add(docId, snap.page, label);
+					// ㊳ 跨标签：同文档的全部阅读视图侧栏一起刷新（含本视图）
+					this.plugin.refreshReaderBookmarks(docId);
+					new Notice(`书签已添加（第 ${snap.page} ${this.pageWord}）`);
+				},
+				onSearch: (text: string) => {
+					// Obsidian 全局搜索为内置插件：internalPlugins 私有 API 守卫窄化，
+					// 未命中（旧版/被禁用）宁拒不赌（镜像 executeCommandById 先例的防御风格）
+					const internalPlugins = (
+						this.app as unknown as {
+							internalPlugins?: {
+								getPluginById?: (
+									id: string,
+								) => {
+									instance?: {
+										openGlobalSearch?: (query: string) => void;
+									};
+								} | undefined;
+							};
+						}
+					).internalPlugins;
+					const openGlobalSearch = internalPlugins?.getPluginById?.("global-search")
+						?.instance?.openGlobalSearch;
+					if (typeof openGlobalSearch === "function") {
+						openGlobalSearch(text);
+					} else {
+						new Notice("未找到全局搜索插件");
+					}
+				},
+			},
+		});
 	}
 
 	/** 整段 Range 的 client rects 按中心点归属页（超大选区的老路径） */
@@ -2878,10 +3152,13 @@ export class MarinMindReaderView extends ItemView {
 		// 该卡在某张打开的脑图中 → 画布平移到对应节点并闪烁；不在图中无动作
 		this.plugin.locateCardInMindmaps(card.id);
 		const info = card.note ?? card.excerptText ?? "区域摘录";
+		// R2（E2-05）：菜单首项 30 字截断（镜像脑图节点菜单先例）——长摘录整段
+		// 进 Menu title 会折行爆高数屏
+		const infoBrief = info.length > 30 ? `${info.slice(0, 30)}…` : info;
 		const menu = new Menu();
 		menu.addItem((item) =>
 			item
-				.setTitle(`第 ${card.page} ${this.pageWord} · ${info}`)
+				.setTitle(`第 ${card.page} ${this.pageWord} · ${infoBrief}`)
 				.setIcon("square-pen")
 				.setDisabled(true),
 		);
@@ -2933,6 +3210,26 @@ export class MarinMindReaderView extends ItemView {
 					.setTitle("遮挡区域…")
 					.setIcon("eye-off")
 					.onClick(() => this.startOcclusionEdit(card)),
+			);
+			// 文字遮罩（74）：划选文字即遮罩——逐行矩形精确到选中字符（cloze 语义，
+			// 与拖框遮挡互斥的瞬态模式）；入口与遮挡区域同守卫（photo/audio 无矩形不给）
+			menu.addItem((item) =>
+				item
+					.setTitle("文字遮罩…")
+					.setIcon("text-select")
+					.onClick(() => this.startOcclusionTextEdit(card)),
+			);
+			// 71 行吸附开关（会话态）：text 卡拖框时垂直吸附整行，防半行残字
+			menu.addItem((item) =>
+				item
+					.setTitle(
+						this.occlusionSnapLines ? "遮挡行吸附（当前开，点击关）" : "遮挡行吸附（拖框吸附整文字行）",
+					)
+					.setIcon("magnet")
+					.onClick(() => {
+						this.occlusionSnapLines = !this.occlusionSnapLines;
+						new Notice(this.occlusionSnapLines ? "遮挡行吸附：开" : "遮挡行吸附：关");
+					}),
 			);
 			if (card.occlusions.length > 0) {
 				menu.addItem((item) =>
@@ -2990,6 +3287,39 @@ export class MarinMindReaderView extends ItemView {
 					}).open();
 				}),
 		);
+		// 线型（77）：text 卡专属（线型只作用于文字形态高亮）；三选 Menu 当前打勾，
+		// 选后 cards.update → cardBus changed → syncCard 补刷 dataset.lineStyle
+		if (card.excerptType === "text") {
+			menu.addItem((item) =>
+				item
+					.setTitle("线型…")
+					.setIcon("underline")
+					.onClick((evt) => {
+						const current = highlightLineStyle(card);
+						const picker = new Menu();
+						for (const style of LINE_STYLES) {
+							picker.addItem((it) =>
+								it
+									.setTitle(LINE_STYLE_LABELS[style])
+									.setIcon(LINE_STYLE_ICONS[style])
+									.setChecked(style === current)
+									.onClick(() => {
+										// 改回下划线 = null（序列化省键，与 color null 同构）
+										this.plugin.cards.update(card.id, {
+											lineStyle: style === "underline" ? null : style,
+										});
+									}),
+							);
+						}
+						// onClick 回调签名含 KeyboardEvent（键盘激活菜单项），无鼠标坐标时落屏幕中上
+						if (evt instanceof MouseEvent) {
+							picker.showAtMouseEvent(evt);
+						} else {
+							picker.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 3 });
+						}
+					}),
+			);
+		}
 		menu.addItem((item) =>
 			item
 				.setTitle("删除卡片")
@@ -3003,6 +3333,12 @@ export class MarinMindReaderView extends ItemView {
 
 	/** 进入遮挡编辑模式：目标卡所在页可拖框画遮挡（连续多个），Esc/切工具退出 */
 	private startOcclusionEdit(card: Card): void {
+		this.selectionToolbar?.hide(); // 75 瞬态模式互斥：工具栏先隐（选区保留）
+		// 与文字遮罩模式互斥（74）：显式退出——两模式共用 Esc/切工具退出链，
+		// 同时激活会让 overlay 类叠加语义混乱
+		if (this.occlusionTextTarget) {
+			this.stopOcclusionTextEdit();
+		}
 		this.occlusionEditTarget = card;
 		for (const layer of this.excerptLayers.values()) {
 			layer.setOcclusionTarget(card); // 层内按页号过滤，只有目标页真正接管
@@ -3018,14 +3354,56 @@ export class MarinMindReaderView extends ItemView {
 		}
 	}
 
-	/** 遮挡拖框完成：追加给目标卡（changed 事件回环让遮挡块即时回显） */
+	/**
+	 * 进入文字遮罩模式（74）：划选文字即把选中段落的逐行矩形追加为该卡遮挡——
+	 * 与「遮挡区域…」拖框互斥的瞬态模式。overlay 必须保持穿透放行原生划选，
+	 * 因此强制回到 text 工具（excerpt-on 的 user-select:none 会阻断选区；
+	 * setReaderTool 同工具幂等早退不清瞬态模式/手写，互斥与退出显式做）。
+	 * 被目标卡自身高亮（整行盒盖在文本上方）覆盖的文字，经层的
+	 * marinmind-occlusion-text-on 类关掉高亮/遮挡块指针事件后可正常起笔选区。
+	 */
+	private startOcclusionTextEdit(card: Card): void {
+		this.selectionToolbar?.hide(); // 75 瞬态模式互斥：工具栏先隐（选区保留）
+		if (this.occlusionEditTarget) {
+			this.stopOcclusionEdit(); // 互斥：退出拖框遮挡模式
+		}
+		if (this.handwriteMode) {
+			this.setHandwriteMode(false);
+		}
+		if (this.activeTool !== "text") {
+			this.setReaderTool("text"); // 内部清 occlusionEditTarget 并保证 overlay 穿透
+		}
+		this.occlusionTextTarget = card;
+		for (const layer of this.excerptLayers.values()) {
+			layer.setOcclusionTextTarget(card); // 层内按页号过滤，只有目标页真正接管
+		}
+		new Notice("划选文字即遮罩（可连续多段），Esc 结束", 6000);
+	}
+
+	/** 退出文字遮罩模式（Esc / 切换工具 / 关闭文档 / 目标卡被删） */
+	private stopOcclusionTextEdit(): void {
+		this.occlusionTextTarget = null;
+		for (const layer of this.excerptLayers.values()) {
+			layer.setOcclusionTextTarget(null);
+		}
+	}
+
+	/**
+	 * 遮挡拖框完成：追加给目标卡（changed 事件回环让遮挡块即时回显）。
+	 * 71 行吸附：开关开且 text 卡时先 snapOcclusionToLines 吸附到整行——
+	 * text 卡 rects 即逐行矩形（数据源 card 本身），垂直吸附整行防半行残字。
+	 */
 	private onOcclusionDraw(_page: number, rect: DocRect): void {
 		const target = this.occlusionEditTarget;
 		if (!target || !this.plugin.store) {
 			return;
 		}
+		const snapped =
+			this.occlusionSnapLines && target.excerptType === "text"
+				? snapOcclusionToLines(rect, target.rects)
+				: rect;
 		const next = this.plugin.cards.update(target.id, {
-			occlusions: [...target.occlusions, rect],
+			occlusions: [...target.occlusions, snapped],
 		});
 		if (next) {
 			this.occlusionEditTarget = next; // 同步本地快照，连续绘制正确叠加
@@ -3177,6 +3555,27 @@ export class MarinMindReaderView extends ItemView {
 		new Notice("译文已存为留白（原文下方）");
 	}
 
+	/**
+	 * 划选工具栏译文落留白（75）：镜像 saveTranslationAsBlank——锚点取选区行矩形
+	 * 正下方（translationAnchor，并排对照），色随留白工具当前色系；docId 在开弹窗
+	 * 时刻由 onTranslate 捕获传入（弹窗内换文档不误挂）
+	 */
+	private saveTranslationFromSelection(
+		docId: string,
+		snap: SelectionSnapshot,
+		translation: string,
+	): void {
+		this.plugin.cards.create({
+			documentId: docId,
+			page: snap.page,
+			rects: [translationAnchor(snap.rects)],
+			excerptType: "blank",
+			excerptText: translation,
+			color: this.plugin.settings.excerptColors.blank,
+		});
+		new Notice("译文已存为留白（原文下方）");
+	}
+
 	/** 把卡片加入脑图：选图器（可就地新建）→ 根节点区顺延落位为根节点 */
 	private addToMindmap(card: Card): void {
 		new MindmapPickerModal(this.app, this.plugin, (map) => {
@@ -3215,6 +3614,10 @@ export class MarinMindReaderView extends ItemView {
 		this.mapTargetBtn = null; // 摘录目标按钮（㊴）随工具行一并移除
 		this.flashcardBtn = null; // 自动转闪卡按钮（㊷）随工具行一并移除
 		this.occlusionEditTarget = null; // 遮挡编辑是瞬态模式，切文档即失效（㊷）
+		this.occlusionTextTarget = null; // 文字遮罩同为瞬态模式（74），切文档即失效
+		// 75 划选工具栏销毁（移除宿主捕获监听；DOM 随下方 empty 一并消亡）
+		this.selectionToolbar?.destroy();
+		this.selectionToolbar = null;
 		this.outlineEntries = [];
 		this.outlineLoaded = false; // P2 懒解析状态随文档重置
 		this.outlineLoading = null;

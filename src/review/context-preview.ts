@@ -71,6 +71,13 @@ export class ContextPreviewRenderer {
 			const wrap = container.createDiv({ cls: "marinmind-review-context" });
 			wrap.createDiv({ cls: "marinmind-review-context-label", text: `📍 原文上下文 · 第 ${page} 页` });
 			wrap.appendChild(canvas);
+			// 71 点击缩略图跳原文：openCardSource 统一入口（精确定位 + 闪烁高亮），
+			// title 提示可点（CSS .marinmind-review-context 挂 cursor/hover 态）
+			wrap.addClass("is-clickable");
+			wrap.setAttribute("title", "点击跳转到原文位置");
+			wrap.addEventListener("click", () => {
+				void this.plugin.openCardSource(card);
+			});
 		} catch (err) {
 			// 上下文是增强能力：任何失败（文件读不了/pdf.js 报错/页码越界）都不打扰复习
 			console.debug("[MarinMind] 上下文缩略图渲染跳过", err);

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SETTINGS, validateDirInput } from "../../src/settings/settings";
+import type { Plugin } from "obsidian";
+import {
+	DEFAULT_SETTINGS,
+	loadSettings,
+	validateDirInput,
+} from "../../src/settings/settings";
 
 describe("DEFAULT_SETTINGS", () => {
 	it("默认数据目录为 ㉚ md 存储的显式目录（老用户旧数据经启动迁移引导搬家）", () => {
@@ -21,6 +26,10 @@ describe("DEFAULT_SETTINGS", () => {
 		expect(DEFAULT_SETTINGS.homeFoldersHidden).toBe(false);
 	});
 
+	it("73 卡片页卡组树栏默认展开（homeCardsFoldersHidden=false，与文档页独立记忆）", () => {
+		expect(DEFAULT_SETTINGS.homeCardsFoldersHidden).toBe(false);
+	});
+
 	it("㊹ 四类摘录工具默认色系全浅黄（按钮循环切色后经 data.json 持久化）", () => {
 		expect(DEFAULT_SETTINGS.excerptColors).toEqual({
 			text: "yellow",
@@ -28,6 +37,77 @@ describe("DEFAULT_SETTINGS", () => {
 			lasso: "yellow",
 			blank: "yellow",
 		});
+	});
+
+	it("65 复习设置默认值：新卡上限 0=不限、批次 20（due 分批与新卡混排在 68 消费）", () => {
+		expect(DEFAULT_SETTINGS.reviewNewPerDay).toBe(0);
+		expect(DEFAULT_SETTINGS.reviewBatchSize).toBe(20);
+	});
+
+	it("75 划选工具栏默认开（text 工具划选弹工具栏；关闭恢复划选直接建卡旧路径）", () => {
+		expect(DEFAULT_SETTINGS.selectionToolbar).toBe(true);
+	});
+
+	it("77 文字摘录线型默认下划线（存量观感不变；波浪线/删除线为显式选择）", () => {
+		expect(DEFAULT_SETTINGS.excerptLineStyle).toBe("underline");
+	});
+});
+
+describe("loadSettings 复习设置字段（65）", () => {
+	/** 最小 Plugin stub：loadSettings 只消费 loadData */
+	function fakePlugin(raw: unknown): Plugin {
+		return { loadData: async () => raw } as unknown as Plugin;
+	}
+
+	it("旧版 data.json 缺字段取默认（合并式加载前向兼容）", async () => {
+		const merged = await loadSettings(fakePlugin({ dataDir: "X" }));
+		expect(merged.reviewNewPerDay).toBe(0);
+		expect(merged.reviewBatchSize).toBe(20);
+	});
+
+	it("合法存量值原样保留（不因归一化改写用户偏好）", async () => {
+		const merged = await loadSettings(
+			fakePlugin({ reviewNewPerDay: 15, reviewBatchSize: 50 }),
+		);
+		expect(merged.reviewNewPerDay).toBe(15);
+		expect(merged.reviewBatchSize).toBe(50);
+	});
+
+	it("非法/越界值钳制回界内（手编 data.json 防御：NaN/字符串回默认、小数取整、越界夹取）", async () => {
+		const merged = await loadSettings(
+			fakePlugin({ reviewNewPerDay: -5, reviewBatchSize: 1000 }),
+		);
+		expect(merged.reviewNewPerDay).toBe(0);
+		expect(merged.reviewBatchSize).toBe(200);
+		const weird = await loadSettings(
+			fakePlugin({ reviewNewPerDay: "abc", reviewBatchSize: 7.4 }),
+		);
+		expect(weird.reviewNewPerDay).toBe(0);
+		expect(weird.reviewBatchSize).toBe(7);
+	});
+});
+
+describe("loadSettings 线型字段（77）", () => {
+	/** 最小 Plugin stub：loadSettings 只消费 loadData */
+	function fakePlugin(raw: unknown): Plugin {
+		return { loadData: async () => raw } as unknown as Plugin;
+	}
+
+	it("旧版 data.json 缺字段取默认下划线（合并式加载前向兼容）", async () => {
+		const merged = await loadSettings(fakePlugin({ dataDir: "X" }));
+		expect(merged.excerptLineStyle).toBe("underline");
+	});
+
+	it("合法值原样保留（用户偏好不被归一化改写）", async () => {
+		const merged = await loadSettings(fakePlugin({ excerptLineStyle: "squiggle" }));
+		expect(merged.excerptLineStyle).toBe("squiggle");
+	});
+
+	it("非法值归一回下划线（防脏值流进 dataset/CSS）", async () => {
+		const merged = await loadSettings(fakePlugin({ excerptLineStyle: "wavy" }));
+		expect(merged.excerptLineStyle).toBe("underline");
+		const num = await loadSettings(fakePlugin({ excerptLineStyle: 42 }));
+		expect(num.excerptLineStyle).toBe("underline");
 	});
 });
 

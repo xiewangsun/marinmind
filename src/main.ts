@@ -21,6 +21,9 @@ import { MarinMindHomeView, HOME_VIEW_TYPE } from "./home/home-view";
 import { PdfPickerModal, pickTarget, type ExternalDocEntry } from "./reader/pdf-picker-modal";
 import type { ViewMode } from "./ui/view-mode-bar";
 import { MarinMindReviewView, REVIEW_VIEW_TYPE } from "./review/review-view";
+import type { ReviewScope } from "./review/review-view";
+import { DeckPickerModal } from "./review/deck-picker-modal";
+import { ReviewStatsModal } from "./review/review-stats-modal";
 import { exportBackup, promptImportBackup } from "./backup/backup-service";
 import { AttachmentStore } from "./attachments/attachment-store";
 import { CardEventBus } from "./events/card-bus";
@@ -196,6 +199,21 @@ export default class MarinMindPlugin extends Plugin {
 			name: "开始复习（到期闪卡）",
 			callback: () => void this.openReview(),
 		});
+		// 卡组批：按卡组开练——先弹卡组选择器（卡组由卡片 deck 设置派生，无实体表）
+		this.addCommand({
+			id: "start-review-deck",
+			name: "按卡组复习（选择卡组）",
+			checkCallback: (checking: boolean) => {
+				// 数据层未就绪时 cards 为空——选组器无从取组，命令不可用
+				if (!this.store) return false;
+				if (!checking) {
+					new DeckPickerModal(this.app, this, (deck) => {
+						void this.openReviewDeck(deck);
+					}).open();
+				}
+				return true;
+			},
+		});
 		this.addCommand({
 			id: "open-mindmap",
 			name: "打开思维导图（选择 / 新建脑图）",
@@ -232,7 +250,7 @@ export default class MarinMindPlugin extends Plugin {
 		);
 		this.addCommand({
 			id: "show-stats",
-			name: "显示库统计（文档 / 卡片 / 待复习）",
+			name: "复习统计（热力图 / 到期分布 / 库统计）",
 			callback: () => this.showStats(),
 		});
 		this.addCommand({
@@ -805,12 +823,48 @@ export default class MarinMindPlugin extends Plugin {
 	}
 
 	/**
+	 * 打开指定脑图并定位到卡片（71 溯源进阶）：openMindmap 后 locateCard
+	 * 居中平移 + 闪烁。loadMap 是同步内存读取，await 后即可定位；卡片不在
+	 * 图中（折叠隐藏/已移出）locateCard 返 false → Notice 提示。
+	 */
+	async openMindmapAtCard(mapId: string, cardId: string): Promise<void> {
+		await this.openMindmap(mapId);
+		const leaf = this.app.workspace.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
+		const view = leaf?.view;
+		if (view instanceof MarinMindMindmapView && !view.locateCard(cardId)) {
+			new Notice("该卡片不在图中（可能已被折叠或移出）");
+		}
+	}
+
+	/**
 	 * 打开复习：复用已有复习标签页则激活并重启会话，否则新开标签页。
 	 * public——阅读器工具行与脑图 header 的「复习」入口按钮也走这里（㉑）。
 	 * docId（㊷）：传入 = 只复习该书（阅读器入口按书过滤）；缺省 = 全部书籍
 	 * （命令面板/脑图/主页入口）。
 	 */
 	async openReview(docId?: string): Promise<void> {
+		// undefined 归一 null：显式传参语义（null = 清范围为全部书籍）与入口缺省一致
+		await this.focusReviewView(docId != null ? { kind: "book", docId } : null);
+	}
+
+	/**
+	 * 按卡组开练（卡组批）：公开入口——命令「按卡组复习」与主页卡片页
+	 * 「复习本组」link 调用；选组弹窗由调用方负责（命令入口弹、主页直传）。
+	 */
+	async openReviewDeck(deck: string): Promise<void> {
+		await this.focusReviewView({ kind: "deck", deck });
+	}
+
+	/**
+	 * 按卡片 id 集合开练（70 cards 泛化范围）：公开入口——主页卡片页
+	 * 「复习筛选结果」与脑图节点右键「复习此分支」调用；label 供范围 chip 显示。
+	 */
+	async openReviewCards(cardIds: string[], label: string): Promise<void> {
+		await this.focusReviewView({ kind: "cards", cardIds, label });
+	}
+
+	/** 复习视图聚焦 + 重启会话（openReview / openReviewDeck 共用的样板抽取） */
+	private async focusReviewView(scope: ReviewScope): Promise<void> {
 		let leaf = this.app.workspace.getLeavesOfType(REVIEW_VIEW_TYPE)[0];
 		if (!leaf) {
 			leaf = this.newTabLeaf();
@@ -820,8 +874,7 @@ export default class MarinMindPlugin extends Plugin {
 		// 后台标签页可能是延迟加载的占位视图，需先加载拿到真实 view
 		await leaf.loadIfDeferred();
 		if (leaf.view instanceof MarinMindReviewView) {
-			// undefined 归一 null：显式传参语义（null = 清范围）与入口缺省一致
-			await leaf.view.startSession(docId ?? null);
+			await leaf.view.startSession(scope);
 		}
 	}
 
@@ -998,10 +1051,11 @@ export default class MarinMindPlugin extends Plugin {
 		await side.loadIfDeferred();
 		if (mode === "study" && side.view instanceof MarinMindReviewView) {
 			// 与"开始复习"命令一致：进入学习状态即重启会话；㊷ 学习模式必有阅读器——
-			// 复习窗格跟随其当前书（无文档/库外读失败时 docId 为 null = 全部书籍）
+			// 复习窗格跟随其当前书（无文档/库外读失败时为全部书籍）。卡组批起
+			// scope 是判别联合：必须显式传 null（省略参数 = 保持当前范围，语义相反）
 			const readerDocId =
 				readerLeaf.view instanceof MarinMindReaderView ? readerLeaf.view.docId : null;
-			await side.view.startSession(readerDocId);
+			await side.view.startSession(readerDocId != null ? { kind: "book", docId: readerDocId } : null);
 		}
 		this.app.workspace.setActiveLeaf(readerLeaf, { focus: true });
 		// 研究模式复用脑图窗格时纠正到本书目标图（㊿ 一对一，弃「保持当前图」）
@@ -1456,9 +1510,7 @@ export default class MarinMindPlugin extends Plugin {
 			new Notice("MarinMind：数据层未就绪");
 			return;
 		}
-		new Notice(
-			`文档 ${this.documents.count()} · 卡片 ${this.cards.count()} · ` +
-				`待复习 ${this.reviews.dueCount()} · 脑图 ${this.mindmaps.list().length}`,
-		);
+		// 69 升级为统计面板（原 Notice 的文档/卡片/脑图计数吸收为面板库统计行）
+		new ReviewStatsModal(this.app, this).open();
 	}
 }

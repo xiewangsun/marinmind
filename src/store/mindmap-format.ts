@@ -185,6 +185,8 @@ export function parseMindmapMd(
 			y: typeof json.y === "number" ? json.y : 0,
 			collapsed: json.col === 1,
 			branchStyle: typeof json.style === "string" && isBranchStyle(json.style) ? json.style : null,
+			// 61 子脑图：sub = 子图 id（悬空引用原样保留，读取侧 get 守卫自愈）
+			childMapId: typeof json.sub === "string" ? json.sub : null,
 			createdAt: typeof json.created === "number" ? json.created : 0,
 		};
 		nodes.push(node);
@@ -250,6 +252,7 @@ export function serializeMindmapMd(
 			const machine: Record<string, unknown> = { id: node.id, x: node.x, y: node.y };
 			if (node.collapsed) machine.col = 1;
 			if (node.branchStyle) machine.style = node.branchStyle;
+			if (node.childMapId) machine.sub = node.childMapId; // 61 子脑图（null 省键零写入契约）
 			machine.created = node.createdAt;
 			const link = `[[${resolved.fileBase}#^card-${node.cardId}|${escapeWikiTitle(resolved.title)}]]`;
 			out.push(`${indent}- ${link} ${MM_COMMENT_PREFIX}${JSON.stringify(machine)} -->`);

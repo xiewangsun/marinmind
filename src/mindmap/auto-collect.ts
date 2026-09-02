@@ -2,7 +2,14 @@ import type { DocumentRepository } from "../db/repositories/document-repo";
 import type { CardRepository } from "../db/repositories/card-repo";
 import type { MindmapRepository } from "../db/repositories/mindmap-repo";
 import type { Card, Mindmap } from "../types";
-import { autoCollectPlacement, fixedRootPlacement } from "./mindmap-graph";
+import { jumpAnchorY } from "../reader/rect-utils";
+import {
+	autoCollectPlacement,
+	effectiveBranchStyle,
+	fixedRootPlacement,
+	suggestChildPosition,
+	type GraphNode,
+} from "./mindmap-graph";
 
 /**
  * 摘录自动入图服务（㉗，替代 ⑲ 的视图级自动收录）：
@@ -76,8 +83,8 @@ export function ensureBookMindmap(
 	return map.id;
 }
 
-/** 图内确保《书名》分组根节点存在（已存在则原样返回其节点 id） */
-function ensureGroupCard(
+/** 图内确保《书名》分组根节点存在（已存在则原样返回其节点 id）；55 起框架建卡流程复用 */
+export function ensureGroupCard(
 	host: AutoCollectHost,
 	map: Mindmap,
 	doc: { id: string; title: string },
@@ -149,6 +156,48 @@ export function followBookRename(
 }
 
 /**
+ * 归章判定（55 纯函数；62 起 (page, anchorY) 字典序泛化）：该书 outline 章节
+ * 骨架卡中，起始位置 (page, y) 整体不晚于摘录锚点的最大者（平位置取先序首个
+ * 稳定命中）；无命中返回 null（调用方回退组卡直挂）。
+ * 章节卡 y 取 jumpAnchorY(rects)（md 框架建卡合成锚 rect；pdf/epub rects 空
+ * 视页顶 0）——pdf/epub 退化为纯 page 比较，行为与 55 逐字节保持；md 单页
+ * 长文走同页 y 比较（先于本章起始的摘录归前章）。摘录 anchorY 缺省视页顶。
+ * 刻意不限组卡子树——用户把摘录挪出章节分支后，后续摘录按页归章仍生效。
+ */
+export function chapterParentFor(
+	nodes: Array<GraphNode & { card: Card }>,
+	documentId: string,
+	page: number,
+	anchorY?: number | null,
+): (GraphNode & { card: Card }) | null {
+	const eY = anchorY ?? 0; // 无 y 摘录（photo/audio/无 rects 卡）视页顶
+	let best: (GraphNode & { card: Card }) | null = null;
+	let bestPage = 0;
+	let bestY = 0;
+	for (const n of nodes) {
+		if (!n.card.outline || n.card.documentId !== documentId) {
+			continue;
+		}
+		const p = n.card.page;
+		if (p == null || p > page) {
+			continue;
+		}
+		const cY = jumpAnchorY(n.card.rects) ?? 0;
+		// 字典序 (page, y) 须整体不晚于摘录锚点：同页章节 y 超过摘录 y → 该章尚未开始
+		if (p === page && cY > eY) {
+			continue;
+		}
+		// 严格大于才换（平 (page, y) 保持首个命中——建框架时章节按目录序先建，前章节优先）
+		if (!best || p > bestPage || (p === bestPage && cY > bestY)) {
+			best = n;
+			bestPage = p;
+			bestY = cY;
+		}
+	}
+	return best;
+}
+
+/**
  * 把一张新摘录卡加入脑图。返回受影响的 mapId（调用方据此通知打开中的
  * 视图刷新）；无需处理（开关外/回环卡/已在图中/文档缺失）返回 null。
  */
@@ -156,6 +205,11 @@ export function autoAddCard(host: AutoCollectHost, card: Card): string | null {
 	// 只收文档摘录卡：分组卡（page null）是本流程自己建的卡，在此被拦——
 	// 拦住即无 cardBus 事件回环；手工卡（documentId null）不自动入图
 	if (card.documentId == null || card.page == null) {
+		return null;
+	}
+	// 目录章节骨架卡（55）不入图：框架建卡流程自身触发 created 回环在此拦截——
+	// 章节卡 page 非空会穿透上面的摘录判定，被当摘录塞进该书默认图（跨图脏节点）
+	if (card.outline) {
 		return null;
 	}
 
@@ -219,12 +273,29 @@ export function autoAddCard(host: AutoCollectHost, card: Card): string | null {
 	if (!parentId) {
 		return null;
 	}
+	// 归章（55；62 起 (page, y) 字典序）：目标图内有该书目录框架时，摘录挂
+	// 起始位置不晚于摘录锚点的最近章节分支下而非组卡直挂——早于首章的摘录
+	// （前言等）与无框架图维持组卡直挂。md 同页按 y 分章、pdf/epub 纯 page 比较。
+	// nodes 是组卡确保前拉的快照：框架已建时组卡必已存在，章节卡不受快照影响
+	const chapter = chapterParentFor(
+		nodes,
+		card.documentId,
+		card.page,
+		jumpAnchorY(card.rects),
+	);
+	const pos = chapter
+		? suggestChildPosition(
+				chapter,
+				nodes.filter((n) => n.parentId === chapter.id),
+				effectiveBranchStyle(nodes, chapter.id, map.defaultBranchStyle),
+			)
+		: plan.childPos;
 	const added = host.mindmaps.addNode(
 		map.id,
 		card.id,
-		parentId,
-		Math.round(plan.childPos.x),
-		Math.round(plan.childPos.y),
+		chapter ? chapter.id : parentId,
+		Math.round(pos.x),
+		Math.round(pos.y),
 	);
 	return added ? map.id : null;
 }
