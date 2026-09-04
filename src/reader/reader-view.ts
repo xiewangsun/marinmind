@@ -15,7 +15,7 @@ import type { Card, DocRect, LineStyle, NormPoint } from "../types";
 import { LINE_STYLES, LINE_STYLE_LABELS } from "../types";
 import { AudioRecorder, audioDurationSec, formatDurSec } from "./audio-recorder";
 import { AutoExcerptModal } from "./auto-excerpt-modal";
-import { epubChapterTitleOf, epubOutline, parseEpub, type EpubBook } from "./epub-document";
+import { epubChapterTitleOf, entryText, epubOutline, parseEpub, type EpubBook } from "./epub-document";
 import { EpubSession, type EpubLinkTarget } from "./epub-session";
 import { RecordingBar } from "./recording-bar";
 import { ExcerptLayer, flashEl, type ExcerptTool, type ReaderTool } from "./excerpt-layer";
@@ -32,6 +32,8 @@ import { MdDocument } from "./md-document";
 import { outlineFromDom } from "./md-outline";
 import { TextPromptModal } from "./note-edit-modal";
 import { PageView, type PageSize } from "./page-view";
+import { pdfLinesFromSpecs, type DocSearchHit, type PdfSearchLine } from "./doc-search";
+import { DocSearchModal, collectBlockEls, type DocSearchHost } from "./doc-search-modal";
 import { PdfDocument, type OutlineEntry } from "./pdf-document";
 import { acquirePdf, pdfCacheKey, retainPdf, type PdfHandle } from "./pdf-cache";
 import { SelectionToolbar, type SelectionSnapshot } from "./selection-toolbar";
@@ -60,6 +62,8 @@ const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 5;
 /** 缩放按钮步长倍率 */
 const ZOOM_STEP = 1.25;
+/** 89 Ctrl+滚轮缩放灵敏度（指数曲线系数，镜像脑图 ZOOM_SENSITIVITY=0.0015） */
+const WHEEL_ZOOM_SENSITIVITY = 0.0015;
 /** fit-width 计算预留的滚动容器水平内边距（与 CSS padding 12px×2 对应） */
 const SCROLL_PADDING_X = 24;
 
@@ -176,7 +180,7 @@ function mediaCardLabel(card: Card, pageWord: string): string {
  *   每次 await 后校验，旧代际立即销毁其新建资源
  * - onClose 走 cleanupContent（幂等）
  */
-export class MarinMindReaderView extends ItemView {
+export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	private readonly plugin: MarinMindPlugin;
 
 	private pdf: PdfDocument | null = null;
@@ -253,10 +257,11 @@ export class MarinMindReaderView extends ItemView {
 	private tocPanel: HTMLElement | null = null;
 	/** 目录开关按钮（工具行；is-active 同步用） */
 	private tocBtn: HTMLElement | null = null;
-	/** 摘录目标脑图按钮（㊴）：本书摘录的落点图显示与切换入口 */
-	private mapTargetBtn: HTMLElement | null = null;
-	/** 自动转闪卡按钮（㊷）：本书开关状态显示与切换入口 */
-	private flashcardBtn: HTMLElement | null = null;
+	/** ⋯ 溢出菜单按钮（89）：手型/选择/AI 摘录/缩放/脑图目标/闪卡折叠于此；
+	 *  当前工具藏在菜单里（hand/select）时点亮提示非默认态 */
+	private overflowBtn: HTMLElement | null = null;
+	/** 89-D 文档内搜索：PDF 聚行缓存（扫描期填充、reveal 定位消费；随 cleanupContent 清空） */
+	private readonly pdfSearchLines = new Map<number, readonly PdfSearchLine[]>();
 	/** 遮挡编辑目标卡（㊷）：非空时进入画遮挡模式（Esc/切工具退出） */
 	private occlusionEditTarget: Card | null = null;
 	/** 文字遮罩目标卡（74）：非空时进入划选文字即遮罩模式（Esc/切工具退出；与拖框遮挡互斥） */
@@ -349,21 +354,17 @@ export class MarinMindReaderView extends ItemView {
 			plugin.cardBus.onCardRemoved((cardId, last) => this.handleCardRemoved(cardId, last)),
 		);
 
-		// 工具栏（标签页头部）：手写 / 插图 / 录音 / 放大 / 缩小 / 适应宽度。
-		// 四类摘录工具 + 手型 + 选择在视图内工具行（loadFileInto 构建），见 TOOLBAR_TOOLS
+		// 工具栏（标签页头部）：手写 / 插图 / 录音（摘录入口，89 精简后仅保留这组）。
+		// 缩放并入工具行「⋯」菜单 + Ctrl+滚轮（构造器下方注册）；四类摘录工具 +
+		// 手型/选择在视图内工具行（loadFileInto 构建），见 TOOLBAR_TOOLS
 		const handwriteBtn = this.addAction("pencil-line", "手写批注模式", () => {
 			this.setHandwriteMode(!this.handwriteMode);
 		});
 		this.handwriteBtn = handwriteBtn;
 		this.addAction("image-plus", "插入图片摘录（亦可粘贴 / 拖入）", () => this.pickImages());
 		this.addAction("mic", "录音摘录", () => void this.toggleRecording());
-		// ㊻-B 缩放/手写为 PDF 专属（md 固定栏宽、无手写层）——收引用供 md 文档隐藏
-		this.pdfOnlyActions = [
-			handwriteBtn,
-			this.addAction("zoom-in", "放大", () => this.setZoom(this.scale * ZOOM_STEP)),
-			this.addAction("zoom-out", "缩小", () => this.setZoom(this.scale / ZOOM_STEP)),
-			this.addAction("stretch-horizontal", "适应宽度", () => this.fitWidth()),
-		];
+		// ㊻-B 手写为 PDF 专属（md 固定栏宽、无手写层）——收引用供 md 文档隐藏
+		this.pdfOnlyActions = [handwriteBtn];
 
 		this.rerenderSoon = debounce(() => this.handleResize(), 200, true);
 		this.commitOffscreenSoon = debounce(() => this.commitOffscreenInk(), 400, true);
@@ -481,6 +482,26 @@ export class MarinMindReaderView extends ItemView {
 		this.registerDomEvent(document, "paste", (evt) => this.onPaste(evt));
 		this.registerDomEvent(this.contentEl, "dragover", (evt) => evt.preventDefault());
 		this.registerDomEvent(this.contentEl, "drop", (evt) => this.onDrop(evt));
+
+		// 89 Ctrl+滚轮缩放（镜像脑图 ZOOM_SENSITIVITY 指数曲线）：头部缩放按钮并入
+		// 「⋯」菜单后的高频快捷路径。仅 PDF 生效（md/epub 栏宽自适应，滚轮不劫持）；
+		// passive:false 才能 preventDefault（拦下浏览器的 Ctrl+滚轮整页缩放）。
+		// 挂常驻 contentEl + contains 判定，避免随 scrollEl 重建堆积监听器
+		this.registerDomEvent(
+			this.contentEl,
+			"wheel",
+			(evt: WheelEvent) => {
+				if (!evt.ctrlKey || this.docKind !== "pdf" || !this.scrollEl) {
+					return;
+				}
+				if (!this.scrollEl.contains(evt.target as Node)) {
+					return; // 工具行/侧栏上的 Ctrl+滚轮不劫持
+				}
+				evt.preventDefault();
+				this.setZoom(this.scale * Math.exp(-evt.deltaY * WHEEL_ZOOM_SENSITIVITY));
+			},
+			{ passive: false },
+		);
 
 		// 文件重命名：oldPath 从 vault 事件取。DB 侧的 file_path 同步已上移 main.ts
 		// 全局处理（覆盖库内全部文档，不限当前打开者），这里只维护视图自身的当前路径状态。
@@ -1551,8 +1572,11 @@ export class MarinMindReaderView extends ItemView {
 	}
 
 	/**
-	 * 构建工具行：手型 + 选择 + 四类摘录工具，图标+文字标签（标签兜底——即使图标缺失按钮仍可见可用）。
-	 * 手型与其余工具之间加分隔线（只读浏览 vs 选择/摘录创作两组语义）。
+	 * 构建工具行（89 MN3 式精简）：单行 icon-only——目录 + 四类摘录工具 + 复习 +
+	 * 视图模式条 + ⋯。图标即按钮（title/aria-label 悬停提示与读屏兜底，图标名
+	 * 均已对照 obsidian.asar 注册表验证，见 TOOLBAR_TOOLS 注释）；手型/选择/
+	 * AI 摘录/缩放/脑图目标/闪卡折叠进 ⋯ 溢出菜单（openToolOverflowMenu，
+	 * 图标+文字+状态勾选）。分隔线分语义组（导航 / 摘录 / 复习）。
 	 */
 	private buildToolRow(): void {
 		this.toolBtns.clear();
@@ -1571,25 +1595,20 @@ export class MarinMindReaderView extends ItemView {
 			},
 		});
 		setIcon(this.tocBtn, "list");
-		this.tocBtn.createEl("span", { cls: "marinmind-tool-btn-label", text: "目录" });
 		this.tocBtn.addEventListener("click", () => this.toggleToc());
 		row.createEl("div", { cls: "marinmind-tool-sep" });
-		let separated = false;
+		// 四类摘录工具（89 起行内只留摘录组；手型/选择进 ⋯ 菜单）
 		for (const def of TOOLBAR_TOOLS) {
-			if (def.tool !== "hand" && !separated) {
-				row.createEl("div", { cls: "marinmind-tool-sep" });
-				separated = true;
+			if (!isExcerptTool(def.tool)) {
+				continue;
 			}
 			const btn = row.createEl("button", {
 				cls: "marinmind-tool-btn",
 				attr: { type: "button", "aria-label": def.hint, title: def.hint },
 			});
 			setIcon(btn, def.icon);
-			btn.createEl("span", { cls: "marinmind-tool-btn-label", text: def.title });
 			// ㊹ 四类摘录工具加色点（显示当前色系）+ 点击已激活的工具 = 循环切色（MN3 式）
-			if (isExcerptTool(def.tool)) {
-				btn.createEl("span", { cls: "marinmind-tool-color-dot" });
-			}
+			btn.createEl("span", { cls: "marinmind-tool-color-dot" });
 			btn.classList.toggle("is-active", def.tool === this.activeTool);
 			btn.addEventListener("click", () => {
 				if (def.tool === this.activeTool && isExcerptTool(def.tool)) {
@@ -1599,53 +1618,11 @@ export class MarinMindReaderView extends ItemView {
 				this.setReaderTool(def.tool);
 			});
 			this.toolBtns.set(def.tool, btn);
-			if (isExcerptTool(def.tool)) {
-				this.syncToolColorUI(def.tool);
-			}
+			this.syncToolColorUI(def.tool);
 		}
-		// AI 一键摘录（㉓，MN4「一键摘录」对齐）：版面识别 + 批量建卡。
-		// ㊻-B md 文档无 pdf 文字层版面（依赖 getPageLayout 几何），不建入口
-		if (!this.isReflowDoc) {
-			row.createEl("div", { cls: "marinmind-tool-sep" });
-			const autoBtn = row.createEl("button", {
-				cls: "marinmind-tool-btn",
-				attr: {
-					type: "button",
-					"aria-label": "AI 一键摘录（自动识别标题/正文批量建卡）",
-					title: "AI 一键摘录（自动识别标题/正文批量建卡）",
-				},
-			});
-			setIcon(autoBtn, "wand-2");
-			autoBtn.createEl("span", { cls: "marinmind-tool-btn-label", text: "AI 摘录" });
-			autoBtn.addEventListener("click", () => this.openAutoExcerpt());
-		}
-		// 摘录目标脑图（㊴）：本书摘录默认进同名图，点开可按书切换落点图
-		this.mapTargetBtn = row.createEl("button", {
-			cls: "marinmind-tool-btn",
-			attr: {
-				type: "button",
-				"aria-label": "摘录目标脑图",
-				title: "摘录目标脑图",
-			},
-		});
-		setIcon(this.mapTargetBtn, "git-fork");
-		this.mapTargetBtn.createEl("span", {
-			cls: "marinmind-tool-btn-label",
-			text: "脑图",
-		});
-		this.mapTargetBtn.addEventListener("click", (evt) => this.openMapTargetMenu(evt));
-		// 自动转闪卡开关（㊷，每本书独立）：开启后本书新摘录自动进入复习队列
-		this.flashcardBtn = row.createEl("button", {
-			cls: "marinmind-tool-btn",
-			attr: {
-				type: "button",
-				"aria-label": "自动转闪卡（每本书独立记忆）",
-				title: "自动转闪卡（每本书独立记忆）",
-			},
-		});
-		setIcon(this.flashcardBtn, "zap");
-		this.flashcardBtn.createEl("span", { cls: "marinmind-tool-btn-label", text: "闪卡" });
-		this.flashcardBtn.addEventListener("click", () => this.toggleAutoFlashcard());
+		// 89 AI 摘录 / 摘录目标脑图（㊴）/ 自动转闪卡（㊷）折叠进 ⋯ 菜单——
+		// 菜单项每次打开现读状态（目标图名/开关勾选），无需行内按钮同步
+		row.createEl("div", { cls: "marinmind-tool-sep" });
 		// 复习入口（㉑，MN4 学习集「复习」按钮）：打开/复用复习窗格并开始到期会话
 		const reviewBtn = row.createEl("button", {
 			cls: "marinmind-tool-btn",
@@ -1658,19 +1635,282 @@ export class MarinMindReaderView extends ItemView {
 		// P2-1：复习图标统一 swords（原 layers 语义已被主页「卡片」导航占用，
 		// 与脑图 header「复习」/ 主页入口三处对齐——可感知变更，理由见评估报告 E-19）
 		setIcon(reviewBtn, "swords");
-		reviewBtn.createEl("span", { cls: "marinmind-tool-btn-label", text: "复习" });
 		// ㊷ 阅读器入口默认只复习当前书（复习界面徽标可切全部书籍）
 		reviewBtn.addEventListener("click", () =>
 			void this.plugin.openReview(this.docId ?? undefined),
 		);
+		// 文档内搜索（89-D，MN3 搜索一级入口）：当前文档全文检索，点击结果跳页定位
+		const searchBtn = row.createEl("button", {
+			cls: "marinmind-tool-btn",
+			attr: {
+				type: "button",
+				"aria-label": "搜索文档",
+				title: "搜索文档（全文检索，点击结果跳转定位）",
+			},
+		});
+		setIcon(searchBtn, "search");
+		searchBtn.addEventListener("click", () => this.openDocSearch());
 		// 三态视图模式切换条 [文档|脑图|联动] 靠右（MarginNote 学习集同款）
 		row.createEl("div", { cls: "marinmind-tool-spacer" });
 		const modeBar = createViewModeBar(this.plugin);
 		this.viewModeOff = modeBar.off;
 		row.appendChild(modeBar.el);
+		// ⋯ 溢出菜单（89）：低频工具折叠收纳，菜单项每次打开现读状态
+		this.overflowBtn = row.createEl("button", {
+			cls: "marinmind-tool-btn",
+			attr: {
+				type: "button",
+				"aria-label": "更多工具",
+				title: "更多工具（手型 / 选择 / AI 摘录 / 缩放 / 摘录目标脑图 / 自动转闪卡）",
+			},
+		});
+		setIcon(this.overflowBtn, "more-horizontal");
+		this.overflowBtn.addEventListener("click", (evt) => this.openToolOverflowMenu(evt));
+		this.syncOverflowActive();
 		this.contentEl.appendChild(row);
-		this.refreshMapTargetBtn();
-		this.refreshAutoFlashcardBtn();
+	}
+
+	/**
+	 * ⋯ 溢出菜单（89）：手型/选择（勾选反映当前工具）、AI 摘录与缩放（PDF 专属）、
+	 * 摘录目标脑图（title 带当前目标图名，开二段菜单）、自动转闪卡（勾选态）。
+	 * Menu 即开即建，状态每次打开现读，无需持久同步。
+	 */
+	private openToolOverflowMenu(evt: MouseEvent): void {
+		const menu = new Menu();
+		// 工具组：手型/选择（行内只留摘录组后的浏览/复制工具归置地）
+		for (const def of TOOLBAR_TOOLS) {
+			if (isExcerptTool(def.tool)) {
+				continue;
+			}
+			menu.addItem((mi) =>
+				mi
+					.setTitle(def.title)
+					.setIcon(def.icon)
+					.setChecked(def.tool === this.activeTool)
+					.onClick(() => this.setReaderTool(def.tool)),
+			);
+		}
+		// AI 一键摘录（㉓）与缩放：PDF 专属（㊻-B md/epub 无版面几何/固定栏宽）
+		if (!this.isReflowDoc) {
+			menu.addSeparator();
+			menu.addItem((mi) =>
+				mi
+					.setTitle("AI 摘录")
+					.setIcon("wand-2")
+					.onClick(() => this.openAutoExcerpt()),
+			);
+			menu.addItem((mi) =>
+				mi
+					.setTitle("缩放…")
+					.setIcon("zoom-in")
+					.onClick(() => this.showZoomMenu(evt)),
+			);
+		}
+		// 摘录目标脑图（㊴）+ 自动转闪卡开关（㊷）：仅在文档就绪时提供
+		const docId = this.currentDocId;
+		const doc =
+			docId != null && this.plugin.store
+				? this.plugin.documents.get(docId)
+				: undefined;
+		if (doc) {
+			menu.addSeparator();
+			const target = collectTargetOf(this.collectHost(), doc.id);
+			const nameBrief =
+				target && target.map.name.length > 12
+					? `${target.map.name.slice(0, 12)}…`
+					: (target?.map.name ?? "");
+			const where = target
+				? `${target.overridden ? "" : "同名（默认）"}《${nameBrief}》`
+				: "同名脑图（默认）";
+			menu.addItem((mi) =>
+				mi
+					.setTitle(`摘录目标脑图：${where}`)
+					.setIcon("git-fork")
+					.onClick(() => this.openMapTargetMenu(evt)),
+			);
+			menu.addItem((mi) =>
+				mi
+					.setTitle("自动转闪卡")
+					.setIcon("zap")
+					.setChecked(doc.autoFlashcard)
+					.onClick(() => this.toggleAutoFlashcard()),
+			);
+		}
+		menu.showAtMouseEvent(evt);
+	}
+
+	/** 缩放二段菜单（89：原头部 放大/缩小/适应宽度 三枚并入）：百分比信息项 + 三档操作 */
+	private showZoomMenu(evt: MouseEvent): void {
+		const menu = new Menu();
+		menu.addItem((mi) =>
+			mi
+				.setTitle(`当前 ${Math.round(this.scale * 100)}%`)
+				.setIcon("info")
+				.setDisabled(true),
+		);
+		menu.addSeparator();
+		menu.addItem((mi) =>
+			mi
+				.setTitle("放大")
+				.setIcon("zoom-in")
+				.onClick(() => this.setZoom(this.scale * ZOOM_STEP)),
+		);
+		menu.addItem((mi) =>
+			mi
+				.setTitle("缩小")
+				.setIcon("zoom-out")
+				.onClick(() => this.setZoom(this.scale / ZOOM_STEP)),
+		);
+		menu.addItem((mi) =>
+			mi
+				.setTitle("适应宽度")
+				.setIcon("stretch-horizontal")
+				.onClick(() => this.fitWidth()),
+		);
+		menu.showAtMouseEvent(evt);
+	}
+
+	/** ⋯ 按钮点亮同步（89）：当前工具折叠在菜单里（hand/select）时点亮，提示非默认态 */
+	private syncOverflowActive(): void {
+		this.overflowBtn?.classList.toggle(
+			"is-active",
+			this.activeTool === "hand" || this.activeTool === "select",
+		);
+	}
+
+	// ---------- 文档内搜索（89-D） ----------
+
+	/** 打开文档内搜索（MN3 搜索一级入口对齐）：未加载文档时 Notice 兜底 */
+	private openDocSearch(): void {
+		if (this.docSearchKind() == null) {
+			new Notice("当前没有打开的文档");
+			return;
+		}
+		new DocSearchModal(this.app, this).open();
+	}
+
+	docSearchKind(): "pdf" | "epub" | "md" | null {
+		// 滚动容器在 = 文档骨架已就绪（cleanupContent 后 docKind 复位且 scrollEl 清空）
+		return this.scrollEl ? this.docKind : null;
+	}
+
+	docSearchPdfPageCount(): number {
+		return this.pdf?.numPages ?? this.totalPages;
+	}
+
+	docSearchPdfLines(page: number): Promise<readonly PdfSearchLine[] | null> {
+		const pdf = this.pdf;
+		if (!pdf) {
+			return Promise.resolve(null);
+		}
+		// buildTextLayer(page, 1) 顺带预热 spec 缓存（P5）；聚行结果缓存供 reveal 定位
+		return pdf
+			.buildTextLayer(page, 1)
+			.then((specs) => {
+				const lines = pdfLinesFromSpecs(specs);
+				this.pdfSearchLines.set(page, lines);
+				return lines;
+			})
+			.catch(() => null); // 页损坏/worker 已断：跳过该页不阻塞扫描
+	}
+
+	docSearchEpubChapterCount(): number {
+		return this.epub?.spine.length ?? 0;
+	}
+
+	docSearchEpubBlocks(chapter: number): string[] {
+		const book = this.epub;
+		const item = book?.spine[chapter - 1];
+		if (!book || !item) {
+			return [];
+		}
+		// 源解析而非渲染后 DOM——未渲染章也能搜（text/html 容错解析仅取文本，
+		// 不需要 EpubSession 的 XHTML 两级解析精度）
+		const text = entryText(book, item.href);
+		if (text == null) {
+			return [];
+		}
+		const body = new DOMParser().parseFromString(text, "text/html").body;
+		return collectBlockEls(body).map((el) => el.textContent ?? "");
+	}
+
+	docSearchMdBlocks(): string[] {
+		// ㊻-B md：源文本渲染后即弃，唯一可搜形态是活 DOM
+		const pv = this.pageViewByNumber.get(1);
+		return pv ? collectBlockEls(pv.el).map((el) => el.textContent ?? "") : [];
+	}
+
+	docSearchHitLabel(hit: DocSearchHit): string {
+		if (this.docKind === "epub") {
+			return `第 ${hit.page} 章`;
+		}
+		if (this.docKind === "md") {
+			return `第 ${hit.lineIndex + 1} 段`;
+		}
+		return `第 ${hit.page} 页`;
+	}
+
+	docSearchReveal(hit: DocSearchHit, query: string): void {
+		if (this.docKind === "pdf") {
+			void this.revealPdfHit(hit);
+		} else {
+			void this.revealReflowHit(hit, query);
+		}
+		this.syncLastPageBaseline(); // 82：定位位移不算阅读进度
+	}
+
+	/**
+	 * PDF 命中定位：jumpToPage 骨架/尺寸就绪 → 滚到行（落视口上部约 1/4，
+	 * 与 locateCard 同款数学）→ 页容器叠 absolute 闪烁框（不动 DOM 文本锚点）。
+	 */
+	private async revealPdfHit(hit: DocSearchHit): Promise<void> {
+		await this.jumpToPage(hit.page);
+		const pv = this.pageViewByNumber.get(hit.page);
+		const scroll = this.scrollEl;
+		if (!pv || !scroll) {
+			return;
+		}
+		const line = this.pdfSearchLines.get(hit.page)?.[hit.lineIndex];
+		if (!line) {
+			return; // 缓存被清（防御）：已跳到目标页，不再精定位
+		}
+		// 混合页尺寸（㉳）：spec@1 的坐标按本页有效缩放换算（镜像 PageView.render 的 eff）
+		const eff = (this.basePageWidth * this.scale) / pv.baseSize.width;
+		const pvTop = pv.el.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
+		scroll.scrollTop += pvTop + Math.max(0, line.top * eff - scroll.clientHeight * 0.25);
+		const box = pv.el.createEl("div", { cls: "marinmind-search-flash" });
+		box.style.left = `${Math.max(0, line.left * eff - 4)}px`;
+		box.style.top = `${Math.max(0, line.top * eff - 2)}px`;
+		box.style.height = `${Math.max(12, line.fontSize * eff * 1.3)}px`;
+		box.style.width = `${Math.max(120, pv.el.clientWidth - line.left * eff)}px`;
+		window.setTimeout(() => box.remove(), 1600);
+	}
+
+	/**
+	 * 可重排文档（md/epub）命中定位：epub 先 jumpToPage 保证章骨架与渲染，
+	 * 再按块序取元素（epub 源解析序 vs 渲染序有偏差风险，文本兜底复扫），
+	 * scrollIntoView 居中 + 复用 flashEl 闪烁。
+	 */
+	private async revealReflowHit(hit: DocSearchHit, query: string): Promise<void> {
+		if (this.docKind === "epub") {
+			await this.jumpToPage(hit.page); // 内含 ensureChapterRendered
+		}
+		const pv = this.pageViewByNumber.get(hit.page);
+		if (!pv) {
+			return;
+		}
+		const blocks = collectBlockEls(pv.el);
+		const byIndex = blocks[hit.lineIndex];
+		const q = query.toLowerCase();
+		const el =
+			byIndex && (byIndex.textContent ?? "").toLowerCase().includes(q)
+				? byIndex
+				: (blocks.find((b) => (b.textContent ?? "").toLowerCase().includes(q)) ?? null);
+		if (!el) {
+			return; // 章已跳转（兜底效果），元素找不到（净化丢块等边缘）不再闪
+		}
+		el.scrollIntoView({ block: "center" });
+		flashEl(el);
 	}
 
 	// ---------- 摘录目标脑图（㊴） ----------
@@ -1687,55 +1927,7 @@ export class MarinMindReaderView extends ItemView {
 		};
 	}
 
-	/** 刷新目标按钮的可见性与悬浮提示（工具行重建/切换目标后调用） */
-	private refreshMapTargetBtn(): void {
-		const btn = this.mapTargetBtn;
-		if (!btn) {
-			return;
-		}
-		const docId = this.currentDocId;
-		const doc =
-			docId != null && this.plugin.store
-				? this.plugin.documents.get(docId)
-				: undefined;
-		if (!doc) {
-			btn.style.display = "none";
-			return;
-		}
-		btn.style.display = "";
-		const target = collectTargetOf(this.collectHost(), doc.id);
-		const where = target
-			? `${target.overridden ? "" : "同名脑图（默认）"}《${target.map.name}》`
-			: "同名脑图（默认）";
-		btn.title = this.plugin.mindmaps.fixedRoot()
-			? "摘录目标：固定根节点生效中（优先于本书目标），点开查看"
-			: `摘录目标脑图：${where}（点开切换）`;
-	}
-
 	// ---------- 自动转闪卡（㊷） ----------
-
-	/** 刷新闪卡开关按钮的可见性与激活态（工具行重建/切换开关后调用） */
-	private refreshAutoFlashcardBtn(): void {
-		const btn = this.flashcardBtn;
-		if (!btn) {
-			return;
-		}
-		const docId = this.currentDocId;
-		const doc =
-			docId != null && this.plugin.store
-				? this.plugin.documents.get(docId)
-				: undefined;
-		if (!doc) {
-			btn.style.display = "none";
-			return;
-		}
-		btn.style.display = "";
-		btn.classList.toggle("is-active", doc.autoFlashcard);
-		btn.setAttribute("aria-pressed", String(doc.autoFlashcard));
-		btn.title = doc.autoFlashcard
-			? "自动转闪卡：已开启（本书新摘录自动进入复习队列），点击关闭"
-			: "自动转闪卡：已关闭，点击开启（每本书独立记忆）";
-	}
 
 	/** 切换本书自动转闪卡开关（写书文件 frontmatter，重启保持） */
 	private toggleAutoFlashcard(): void {
@@ -1749,7 +1941,6 @@ export class MarinMindReaderView extends ItemView {
 		}
 		const next = !doc.autoFlashcard;
 		this.plugin.documents.update(docId, { autoFlashcard: next });
-		this.refreshAutoFlashcardBtn();
 		new Notice(
 			next ? "本书新摘录将自动转为闪卡" : "本书新摘录不再自动转为闪卡",
 		);
@@ -1836,8 +2027,8 @@ export class MarinMindReaderView extends ItemView {
 			new Notice(`本书摘录将进入《${name ?? "所选脑图"}》`);
 		}
 		// 主动切换目标图立即反映到联动脑图侧（㊿ 一对一，"除非主动切换"的闭环）
+		// 89 目标图状态由 ⋯ 菜单打开时现读，无需按钮同步刷新
 		void this.plugin.syncLinkedMindmap();
-		this.refreshMapTargetBtn();
 	}
 
 	// ---------- 目录/书签侧栏（㉓） ----------
@@ -2397,6 +2588,8 @@ export class MarinMindReaderView extends ItemView {
 		for (const [t, btn] of this.toolBtns) {
 			btn.classList.toggle("is-active", t === tool);
 		}
+		// 89 ⋯ 点亮同步：当前工具折叠在菜单里（hand/select）时提示非默认态
+		this.syncOverflowActive();
 	}
 
 	/**
@@ -4323,8 +4516,8 @@ export class MarinMindReaderView extends ItemView {
 		// 目录侧栏（㉓）：面板随 contentEl.empty 移除，引用与大纲数据同步清理
 		this.tocPanel = null;
 		this.tocBtn = null;
-		this.mapTargetBtn = null; // 摘录目标按钮（㊴）随工具行一并移除
-		this.flashcardBtn = null; // 自动转闪卡按钮（㊷）随工具行一并移除
+		this.overflowBtn = null; // ⋯ 溢出按钮（89）随工具行一并移除
+		this.pdfSearchLines.clear(); // 89-D 搜索聚行缓存随文档清（换文档页坐标失效）
 		this.occlusionEditTarget = null; // 遮挡编辑是瞬态模式，切文档即失效（㊷）
 		this.occlusionTextTarget = null; // 文字遮罩同为瞬态模式（74），切文档即失效
 		this.photoRelocateTarget = null; // 照片重定位同为瞬态模式（84-D），切文档即失效

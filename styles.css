@@ -72,7 +72,7 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	flex-direction: column;
 }
 
-/* ---- 阅读器工具行：手型 + 四类摘录工具（单独一行，图标+文字标签） ---- */
+/* ---- 阅读器工具行（89 MN3 式单行 icon-only：目录 + 四摘录 + 复习 + 模式条 + ⋯） ---- */
 .marinmind-tool-row {
 	display: flex;
 	align-items: center;
@@ -86,8 +86,9 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 .marinmind-tool-btn {
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
 	gap: 5px;
-	padding: 3px 10px;
+	padding: 4px 8px;
 	margin: 0;
 	border: none;
 	border-radius: var(--radius-s);
@@ -108,10 +109,6 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 .marinmind-tool-btn.is-active {
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
-}
-
-.marinmind-tool-btn .marinmind-tool-btn-label {
-	white-space: nowrap;
 }
 
 .marinmind-tool-sep {
@@ -778,6 +775,73 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 
 .marinmind-picker-external button {
 	width: 100%;
+}
+
+/* ===== 搜索弹窗通用布局（89-C 脑图节点搜索 / 89-D 文档内搜索共用） ===== */
+
+/* 宽度收窄（Modal 默认全宽对单行结果过宽），上下留白紧凑 */
+.marinmind-search-modal {
+	width: min(560px, 90vw);
+	padding: 0.8em 0.9em 0.6em;
+}
+
+.marinmind-search-modal-input {
+	width: 100%;
+	margin-bottom: 0.6em;
+}
+
+/* 结果列表：限高滚动（大量命中不撑爆弹窗） */
+.marinmind-search-modal-list {
+	max-height: 45vh;
+	overflow-y: auto;
+}
+
+.marinmind-search-modal-item {
+	padding: 0.45em 0.6em;
+	border-radius: var(--radius-s);
+	cursor: var(--cursor);
+}
+
+.marinmind-search-modal-item:hover,
+.marinmind-search-modal-item.is-selected {
+	background: var(--background-modifier-hover);
+}
+
+.marinmind-search-modal-item.is-selected .marinmind-picker-title {
+	color: var(--text-accent);
+}
+
+/* 命中字段徽标（标题/批注/摘录）：与 picker-ext-badge 同配方，颜色中性区分 */
+.marinmind-search-modal-badge {
+	flex-shrink: 0;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	padding: 0 0.5em;
+}
+
+.marinmind-search-modal-empty {
+	padding: 1.2em 0.6em;
+	color: var(--text-faint);
+	text-align: center;
+}
+
+.marinmind-search-modal-count {
+	margin-top: 0.4em;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	text-align: right;
+}
+
+/* 89-D 文档内搜索：PDF 命中行闪烁框（页容器内 absolute 覆盖层，不动文本 DOM；
+   复用 marinmind-highlight-flash outline 脉冲动画，accent 淡底增强整行可见性） */
+.marinmind-search-flash {
+	position: absolute;
+	pointer-events: none;
+	border-radius: 3px;
+	background: color-mix(in srgb, var(--interactive-accent) 15%, transparent);
+	animation: marinmind-highlight-flash 0.75s ease-in-out 2;
 }
 
 /* ===== 复习视图（闪卡） ===== */
@@ -1486,41 +1550,14 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	flex: 1;
 }
 
-.marinmind-mm-header-btn {
-	background: none;
-	border: none;
-	box-shadow: none;
-	padding: 0.15em 0.3em;
-	font-size: var(--font-ui-smaller);
-	height: auto;
-	cursor: pointer;
-}
+/* 89-B 起 header 三枚胶囊钮（autocollect 系）与重命名/删除图标钮移除：
+   添加到脑图/复习/⋯ 改挂 .marinmind-tool-btn（与阅读器工具行统一，
+   R4 D1-01「复习入口三处重量不一」随此收敛）；其余操作进 ⋯ 菜单 */
 
-/* 自动收录摘录开关（⑲）：会话级，开启后新摘录自动入图（is-active 高亮） */
-.marinmind-mm-autocollect {
-	display: inline-flex; /* P2-1：emoji→lucide 后图标 span 与文字需 flex 排列（原 emoji 是文本一部分无 gap） */
-	align-items: center;
-	gap: 4px;
-	background: transparent;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: var(--radius-s);
-	padding: 2px 8px;
-	font-size: var(--font-ui-smaller);
-	height: auto;
-	cursor: pointer;
-	white-space: nowrap;
-}
-
-/* P2-1 图标+文字按钮的图标槽（脑图 header / 节点编辑器共用；svg 随字体行高对齐） */
+/* P2-1 图标+文字按钮的图标槽（节点编辑器仍在用；svg 随字体行高对齐） */
 .marinmind-mm-btn-icon {
 	display: inline-flex;
 	flex: none;
-}
-
-.marinmind-mm-autocollect.is-active {
-	background: var(--interactive-accent);
-	border-color: var(--interactive-accent);
-	color: var(--text-on-accent);
 }
 
 /* 画布：事件宿主（世界层是 0×0 变换容器，收不到事件） */
@@ -1794,18 +1831,7 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	left: -22px;
 }
 
-/* 图级默认分支样式选择器（⑱）：header 内轻量下拉 */
-.marinmind-mm-style-select {
-	font-size: var(--font-ui-smaller);
-	height: auto;
-	padding: 2px 4px;
-	margin-left: 8px;
-	background: var(--background-secondary);
-	border: 1px solid var(--background-modifier-border);
-	border-radius: var(--radius-s, 4px);
-	color: var(--text-muted);
-	cursor: pointer;
-}
+/* 89-B 图级默认分支样式下拉移除（入 ⋯ 菜单 showMapStyleMenu）；本规则随之删除 */
 
 /* 空态提示（画布居中，不挡指针） */
 .marinmind-mm-empty {
@@ -4143,7 +4169,8 @@ body.theme-light .marinmind-autoex-badge.is-body {
    ============================================================ */
 
 /* W-01：原生 select 主题化。裸 select 无显式背景/文字色时，Windows 深色模式
-   渲染 UA 默认白底成刺眼白块（配方同 .marinmind-mm-style-select）。
+   渲染 UA 默认白底成刺眼白块（显式 background/color 配方，原镜像的
+   .marinmind-mm-style-select 已随 89-B 下拉菜单化删除）。
    覆盖：翻译弹窗语言（tr-lang）/ 取词侧栏语言（tt-lang）/ 自动摘录范围（autoex-select） */
 .marinmind-tr-lang,
 .marinmind-tt-lang,

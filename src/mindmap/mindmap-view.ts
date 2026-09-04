@@ -8,6 +8,7 @@ import { TextPromptModal } from "../reader/note-edit-modal";
 import { CardPickerModal } from "./card-picker-modal";
 import { LinkPickerModal } from "./link-picker-modal";
 import { ConfirmModal } from "./confirm-modal";
+import { NodeSearchModal } from "./node-search-modal";
 import { deleteCardCascade } from "../home/card-actions";
 import { buildCardCopyText } from "../links/card-links";
 import { createViewModeBar } from "../ui/view-mode-bar";
@@ -202,12 +203,11 @@ export class MarinMindMindmapView extends ItemView {
 	private emptyEl: HTMLElement | null = null;
 	private titleSpan: HTMLElement | null = null;
 	private countSpan: HTMLElement | null = null;
-	/** 图级默认分支样式选择器（header 内，⑱） */
-	private styleSelect: HTMLSelectElement | null = null;
-	/** 「添加到脑图」总开关按钮（header 内，㉗）：全局持久化 settings.autoAddToMindmap */
+	/** 「添加到脑图」总开关按钮（header 内，㉗；89-B 起 icon-only）：全局持久化 settings.autoAddToMindmap */
 	private autoAddBtn: HTMLElement | null = null;
-	/** 「固定根」状态按钮（header 内，㉗）：显示当前固定态；点击取消固定 */
-	private fixedRootBtn: HTMLElement | null = null;
+	/** ⋯ 溢出菜单按钮（header 内，89-B）：分支样式/固定根/重命名/删除/自动布局/
+	 *  目录建框架/撤销/重做/刷新折叠于此 */
+	private headerOverflowBtn: HTMLElement | null = null;
 	/** 当前全局固定根节点 id（loadMap 重拉刷新；null=未设定） */
 	private fixedRootId: string | null = null;
 
@@ -236,11 +236,8 @@ export class MarinMindMindmapView extends ItemView {
 	private cardBusOffs: Array<() => void> = [];
 	/** 51 折叠全部/展开全部双态钮（标签页头部）：图标与禁用态随图数据同步 */
 	private collapseBtnEl: HTMLElement | null = null;
-	/** 59 撤销钮（标签页头部）：栈空时禁用 */
-	private undoBtnEl: HTMLElement | null = null;
-	/** 59 重做钮（标签页头部）：重做分支空时禁用 */
-	private redoBtnEl: HTMLElement | null = null;
-	/** 59 全局撤销/重做双栈（随视图生命周期；换图/清图整体作废） */
+	/** 59 全局撤销/重做双栈（随视图生命周期；换图/清图整体作废）；
+	 *  89-B 起头部按钮并入 ⋯ 菜单，栈空态由菜单项打开时 setDisabled 现读 */
 	private readonly undoStack = new MindmapUndoStack();
 	/** 59 进行中的撤销捕获（begin→写路径→commit；同步区间无交错，防御换图丢弃） */
 	private undoCapture: { mapId: string; nodes: MapSnapshot; mapDefault: BranchStyle } | null =
@@ -273,20 +270,17 @@ export class MarinMindMindmapView extends ItemView {
 		super(leaf);
 		this.plugin = plugin;
 
-		// 工具栏：添加已有卡片 / 新建文字卡片 / 自动布局 / 手动刷新（跨视图改卡后同步）
+		// 工具栏（89-B 精简为 4 枚高频入口）：添加已有卡片 / 新建文字卡片 /
+		// 折叠全部 / 导出。自动布局/目录建框架/撤销/重做/刷新折叠进视图内 ⋯ 菜单
+		// （撤销重做 Ctrl+Z/Ctrl+Shift+Z 快捷键不受影响，见 onKeydown）
 		this.addAction("list-plus", "添加卡片", () => this.openCardPicker());
 		this.addAction("plus", "新建文字卡片", () => this.createTextCard());
-		this.addAction("layout-template", "自动布局", () => this.autoLayout());
-		this.addAction("list-tree", "从文档目录建框架", () => this.pickOutlineSource());
 		this.addAction("download", "导出（大纲 / OPML / 图片）", (evt) => this.openExportMenu(evt));
 		this.collapseBtnEl = this.addAction(
 			"chevrons-down-up",
 			"折叠全部",
 			() => this.bulkCollapse(true),
 		);
-		this.undoBtnEl = this.addAction("undo-2", "撤销 (Ctrl+Z)", () => this.undoHistory());
-		this.redoBtnEl = this.addAction("redo-2", "重做 (Ctrl+Shift+Z)", () => this.redoHistory());
-		this.addAction("rotate-cw", "刷新", () => this.refresh());
 		// keydown 解绑兜底：popout 迁移等路径若漏调 onClose 的显式解绑，卸载时兜底清理
 		this.register(() => this.unbindKeydown());
 	}
@@ -473,14 +467,12 @@ export class MarinMindMindmapView extends ItemView {
 		refreshActiveMindmaps(mapId);
 	}
 
-	/** header 两个开关按钮的激活态同步（buildSkeleton/loadMap/开关切换后调用） */
+	/** header「添加到脑图」开关按钮的激活态同步（buildSkeleton/loadMap/开关切换后调用；
+	 *  89-B 起固定根无行内按钮，固定态由 ⋯ 菜单打开时现读 fixedRootId） */
 	private syncHeaderButtons(): void {
 		const on = this.plugin.settings.autoAddToMindmap;
 		this.autoAddBtn?.classList.toggle("is-active", on);
 		this.autoAddBtn?.setAttribute("aria-pressed", String(on));
-		const fixed = this.fixedRootId != null;
-		this.fixedRootBtn?.classList.toggle("is-active", fixed);
-		this.fixedRootBtn?.setAttribute("aria-pressed", String(fixed));
 	}
 
 	/** 正在展示 mapId 时重拉画布（插件级写图的外部同步入口；平移缩放保持） */
@@ -515,7 +507,6 @@ export class MarinMindMindmapView extends ItemView {
 		this.rebuildWorld();
 		this.updateHeader();
 		this.syncCollapseButton();
-		this.syncUndoButtons();
 	}
 
 	/** 手动刷新：重新拉取当前图（跨视图改卡/删卡后的兜底同步） */
@@ -536,7 +527,6 @@ export class MarinMindMindmapView extends ItemView {
 		this.rebuildWorld();
 		this.updateHeader();
 		this.syncCollapseButton();
-		this.syncUndoButtons();
 	}
 
 	/** 弹出选图器（命令入口 / 空态 / 删除图后） */
@@ -631,13 +621,7 @@ export class MarinMindMindmapView extends ItemView {
 		}
 	}
 
-	/** 59 撤销/重做双钮刷新：栈空挂 is-disabled（51 自备禁用样式沿用） */
-	private syncUndoButtons(): void {
-		this.undoBtnEl?.classList.toggle("is-disabled", !this.undoStack.canUndo());
-		this.redoBtnEl?.classList.toggle("is-disabled", !this.undoStack.canRedo());
-	}
-
-	// ---------- 全局撤销/重做（59；51 布局单槽被取代） ----------
+	// ---------- 全局撤销/重做（59；51 布局单槽被取代；89-B 起入口在 ⋯ 菜单） ----------
 
 	/**
 	 * 开始一次撤销捕获：从 repo 读操作前快照（**绝不读 this.nodes**——拖拽
@@ -675,7 +659,6 @@ export class MarinMindMindmapView extends ItemView {
 		if (entry) {
 			this.undoStack.push(entry);
 		}
-		this.syncUndoButtons();
 	}
 
 	/** 撤销最近一条命令：重放 before 侧（悬空节点 repo 静默跳过——契约见 undo-stack.ts） */
@@ -689,7 +672,6 @@ export class MarinMindMindmapView extends ItemView {
 		if (this.mapId === entry.mapId) {
 			this.loadMap(entry.mapId);
 		}
-		this.syncUndoButtons();
 		new Notice(`已撤销：${entry.label}`);
 	}
 
@@ -704,7 +686,6 @@ export class MarinMindMindmapView extends ItemView {
 		if (this.mapId === entry.mapId) {
 			this.loadMap(entry.mapId);
 		}
-		this.syncUndoButtons();
 		new Notice(`已重做：${entry.label}`);
 	}
 
@@ -751,87 +732,72 @@ export class MarinMindMindmapView extends ItemView {
 		this.contentEl.empty();
 		this.contentEl.classList.add("marinmind-mindmap");
 
-		// header：图名 + 节点数 + 视图模式切换条 + 重命名 / 删除
+		// header（89-B MN3 式单行 icon-only）：图名 + 节点数 + 添加到脑图 + 复习 +
+		// 视图模式条 + ⋯。分支样式/固定根/重命名/删除/自动布局/目录建框架/撤销/
+		// 重做/刷新折叠进 ⋯ 溢出菜单（openHeaderOverflowMenu 四组）
 		const header = this.contentEl.createDiv({ cls: "marinmind-mm-header" });
 		this.titleSpan = header.createSpan({ cls: "marinmind-mm-title" });
 		this.titleSpan.textContent = "未打开脑图";
 		this.countSpan = header.createSpan({ cls: "marinmind-mm-count" });
-		// 图级默认分支样式选择器（⑱）：未覆盖的节点全部跟随；节点可在右键菜单单独覆盖
-		this.styleSelect = header.createEl("select", {
-			cls: "marinmind-mm-style-select",
-			attr: { "aria-label": "默认分支样式" },
-		});
-		for (const s of BRANCH_STYLES) {
-			this.styleSelect.createEl("option", {
-				value: s,
-				text: BRANCH_STYLE_LABELS[s],
-			});
-		}
-		this.styleSelect.addEventListener("change", () => {
-			if (!this.styleSelect) {
-				return;
-			}
-			if (!this.mapId) {
-				new Notice("请先打开或创建一张脑图");
-				this.styleSelect.value = this.mapDefault;
-				return;
-			}
-			this.setDefaultStyle(this.styleSelect.value as BranchStyle);
-		});
-		// R4 D2-01: 样式选择器后加分隔线，图级操作组与视图操作组区分
 		header.createEl("div", { cls: "marinmind-tool-sep" });
 		// 「添加到脑图」总开关（㉗，MN4「自动添加到脑图」对齐，默认开）：
 		// 全局持久化（settings.autoAddToMindmap）——新摘录自动入图，
-		// 固定根节点优先，否则加入该书的默认脑图（见 auto-collect.ts）
+		// 固定根节点优先，否则加入该书的默认脑图（见 auto-collect.ts）。
+		// 89-B 起 icon-only（ghost 风格 .marinmind-tool-btn，与阅读器工具行统一——
+		// R4 评审 D1-01「复习入口三处重量不一」随本次对齐收敛）
 		this.autoAddBtn = header.createEl("button", {
-			cls: "marinmind-mm-autocollect",
-			attr: { type: "button", "aria-pressed": "true", title: "开关：新摘录自动添加到脑图" },
-		});
-		// P2-1 图标语言统一：emoji → lucide（zap 留给闪卡语义，入图取脑图家族 git-fork）
-		setIcon(this.autoAddBtn.createSpan({ cls: "marinmind-mm-btn-icon" }), "git-fork");
-		this.autoAddBtn.createSpan({ text: "添加到脑图" });
-		this.autoAddBtn.addEventListener("click", () => void this.toggleAutoAdd());
-		// 「固定根」状态按钮（㉗）：显示当前固定态，点击取消固定；
-		// 设定入口在节点右键菜单「设为固定根节点」
-		this.fixedRootBtn = header.createEl("button", {
-			cls: "marinmind-mm-autocollect",
+			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
-				"aria-pressed": "false",
-				title: "固定根节点：新摘录都挂到该节点下。在节点上右键设定；点此取消",
+				"aria-pressed": "true",
+				"aria-label": "添加到脑图",
+				title: "开关：新摘录自动添加到脑图",
 			},
 		});
-		setIcon(this.fixedRootBtn.createSpan({ cls: "marinmind-mm-btn-icon" }), "pin");
-		this.fixedRootBtn.createSpan({ text: "固定根" });
-		this.fixedRootBtn.addEventListener("click", () => this.toggleFixedRoot());
+		// P2-1 图标语言统一：emoji → lucide（zap 留给闪卡语义，入图取脑图家族 git-fork）
+		setIcon(this.autoAddBtn, "git-fork");
+		this.autoAddBtn.addEventListener("click", () => void this.toggleAutoAdd());
 		// 复习入口（㉑，MN4 学习集「复习」按钮）：打开/复用复习窗格并开始到期会话
 		const reviewBtn = header.createEl("button", {
-			cls: "marinmind-mm-autocollect",
-			attr: { type: "button", "aria-label": "开始复习（到期闪卡）" },
+			cls: "marinmind-tool-btn",
+			attr: {
+				type: "button",
+				"aria-label": "开始复习（到期闪卡）",
+				title: "开始复习（到期闪卡）",
+			},
 		});
-		setIcon(reviewBtn.createSpan({ cls: "marinmind-mm-btn-icon" }), "swords");
-		reviewBtn.createSpan({ text: "复习" });
+		setIcon(reviewBtn, "swords");
 		reviewBtn.addEventListener("click", () => void this.plugin.openReview());
+		// 节点搜索（89-C，MN3 搜索一级入口对齐）：标题/批注/摘录匹配 → 定位居中闪烁
+		const searchBtn = header.createEl("button", {
+			cls: "marinmind-tool-btn",
+			attr: {
+				type: "button",
+				"aria-label": "搜索脑图节点",
+				title: "搜索脑图节点（标题 / 批注 / 摘录）",
+			},
+		});
+		setIcon(searchBtn, "search");
+		searchBtn.addEventListener("click", () => this.openNodeSearch());
 		// 三态视图模式切换条 [文档|脑图|联动] 靠右（与阅读器工具行同款，⑰）
 		this.viewModeOff?.();
 		const modeBar = createViewModeBar(this.plugin);
 		this.viewModeOff = modeBar.off;
 		header.createEl("div", { cls: "marinmind-mm-header-spacer" });
 		header.appendChild(modeBar.el);
-		// R4 D2-01: 模式条后加分隔线，视图操作组与管理操作组区分
-		header.createEl("div", { cls: "marinmind-tool-sep" });
-		const renameBtn = header.createEl("button", {
-			cls: "marinmind-mm-header-btn clickable-icon",
-			attr: { "aria-label": "重命名" },
+		// ⋯ 溢出菜单（89-B）：低频图级操作折叠收纳，菜单项每次打开现读状态
+		this.headerOverflowBtn = header.createEl("button", {
+			cls: "marinmind-tool-btn",
+			attr: {
+				type: "button",
+				"aria-label": "更多操作",
+				title: "更多操作（分支样式 / 固定根 / 重命名 / 删除 / 自动布局 / 目录建框架 / 撤销 / 重做 / 刷新）",
+			},
 		});
-		setIcon(renameBtn, "pencil");
-		renameBtn.addEventListener("click", () => this.renameMap());
-		const deleteBtn = header.createEl("button", {
-			cls: "marinmind-mm-header-btn clickable-icon",
-			attr: { "aria-label": "删除脑图" },
-		});
-		setIcon(deleteBtn, "trash-2");
-		deleteBtn.addEventListener("click", () => this.deleteMap());
+		setIcon(this.headerOverflowBtn, "more-horizontal");
+		this.headerOverflowBtn.addEventListener("click", (evt) =>
+			this.openHeaderOverflowMenu(evt),
+		);
 
 		// 画布：事件宿主是 viewport（world 是 0×0 的 transform 容器，收不到事件）
 		this.viewportEl = this.contentEl.createDiv({ cls: "marinmind-mm-viewport" });
@@ -848,6 +814,92 @@ export class MarinMindMindmapView extends ItemView {
 
 		this.registerCanvasEvents();
 		this.applyTransform();
+	}
+
+	/**
+	 * ⋯ 溢出菜单（89-B，四组九项，图标+文字）：图（分支样式…/固定根）｜管理
+	 * （重命名/删除脑图）｜排版（自动布局/从文档目录建框架）｜历史（撤销/重做/刷新）。
+	 * Menu 即开即建，勾选/禁用态每次打开现读（mapDefault/fixedRootId/undoStack）。
+	 */
+	private openHeaderOverflowMenu(evt: MouseEvent): void {
+		const menu = new Menu();
+		// 图组
+		menu.addItem((mi) =>
+			mi
+				.setTitle("分支样式…")
+				.setIcon("git-branch")
+				.onClick(() => this.showMapStyleMenu(evt)),
+		);
+		menu.addItem((mi) =>
+			mi
+				.setTitle("固定根")
+				.setIcon("pin")
+				.setChecked(this.fixedRootId != null)
+				.onClick(() => this.toggleFixedRoot()),
+		);
+		// 管理组
+		menu.addSeparator();
+		menu.addItem((mi) =>
+			mi.setTitle("重命名").setIcon("pencil").onClick(() => this.renameMap()),
+		);
+		menu.addItem((mi) =>
+			mi.setTitle("删除脑图").setIcon("trash-2").onClick(() => this.deleteMap()),
+		);
+		// 排版组
+		menu.addSeparator();
+		menu.addItem((mi) =>
+			mi
+				.setTitle("自动布局")
+				.setIcon("layout-template")
+				.onClick(() => this.autoLayout()),
+		);
+		menu.addItem((mi) =>
+			mi
+				.setTitle("从文档目录建框架")
+				.setIcon("list-tree")
+				.onClick(() => this.pickOutlineSource()),
+		);
+		// 历史组（快捷键仍在：onKeydown Ctrl+Z / Ctrl+Shift+Z；栈空挂禁用）
+		menu.addSeparator();
+		menu.addItem((mi) =>
+			mi
+				.setTitle("撤销 (Ctrl+Z)")
+				.setIcon("undo-2")
+				.setDisabled(!this.undoStack.canUndo())
+				.onClick(() => this.undoHistory()),
+		);
+		menu.addItem((mi) =>
+			mi
+				.setTitle("重做 (Ctrl+Shift+Z)")
+				.setIcon("redo-2")
+				.setDisabled(!this.undoStack.canRedo())
+				.onClick(() => this.redoHistory()),
+		);
+		menu.addItem((mi) =>
+			mi.setTitle("刷新").setIcon("rotate-cw").onClick(() => this.refresh()),
+		);
+		menu.showAtMouseEvent(evt);
+	}
+
+	/**
+	 * 图级默认分支样式二段菜单（⑱ select 的菜单化替代，89-B）：九种样式单选
+	 * （勾选 = 当前 mapDefault），选中即 setDefaultStyle（未覆盖的节点全部跟随）。
+	 */
+	private showMapStyleMenu(evt: MouseEvent): void {
+		if (!this.mapId) {
+			new Notice("请先打开或创建一张脑图");
+			return;
+		}
+		const menu = new Menu();
+		for (const s of BRANCH_STYLES) {
+			menu.addItem((mi) =>
+				mi
+					.setTitle(BRANCH_STYLE_LABELS[s])
+					.setChecked(s === this.mapDefault)
+					.onClick(() => this.setDefaultStyle(s)),
+			);
+		}
+		menu.showAtMouseEvent(evt);
 	}
 
 	/** 全量重建 world 内的节点与连线（loadMap / 刷新；折叠隐藏的节点不建 DOM） */
@@ -1297,9 +1349,7 @@ export class MarinMindMindmapView extends ItemView {
 		if (this.countSpan) {
 			this.countSpan.textContent = this.nodes.length ? `${this.nodes.length} 个节点` : "";
 		}
-		if (this.styleSelect) {
-			this.styleSelect.value = this.mapDefault;
-		}
+		// 89-B 分支样式无行内 select：当前 mapDefault 由 ⋯ 菜单打开时现读勾选
 		if (this.emptyEl) {
 			this.emptyEl.style.display = this.nodes.length ? "none" : "";
 			this.syncEmptyHint();
@@ -1456,6 +1506,45 @@ export class MarinMindMindmapView extends ItemView {
 			window.setTimeout(() => el.classList.remove("marinmind-mm-flash"), 1600);
 		}
 		return true;
+	}
+
+	/**
+	 * 节点搜索入口（89-C，MN3 搜索一级入口对齐）：标题/批注/摘录匹配；
+	 * 选中后 locateCard 定位（居中 + 展开折叠祖先 + 闪烁全内建），
+	 * 节点被跨标签删除时兜底提示。次行描述按卡片归属拼《书名》· 第 N 页/章。
+	 */
+	private openNodeSearch(): void {
+		if (!this.mapId) {
+			new Notice("请先打开或创建一张脑图");
+			return;
+		}
+		if (this.nodes.length === 0) {
+			new Notice("当前脑图没有节点");
+			return;
+		}
+		new NodeSearchModal(this.app, {
+			nodes: () => this.nodes,
+			describe: (node) => {
+				const card = node.card;
+				if (card.documentId == null) {
+					return "手工卡片";
+				}
+				const doc = this.plugin.documents.get(card.documentId);
+				if (!doc) {
+					return "手工卡片";
+				}
+				const page =
+					card.page != null
+						? ` · 第 ${card.page} ${pageWordOf(doc.filePath)}`
+						: "";
+				return `《${doc.title}》${page}`;
+			},
+			onChoose: (node) => {
+				if (!this.locateCard(node.cardId)) {
+					new Notice("该节点已不在当前脑图中（可能已被删除）");
+				}
+			},
+		}).open();
 	}
 
 	// ---------- 52 键盘操作（选中态 + 方向键导航 + Tab/Enter/Delete） ----------
