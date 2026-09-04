@@ -3,7 +3,7 @@ import { MarinMindStore } from "../../src/store/marinmind-store";
 import { CardRepository } from "../../src/db/repositories/card-repo";
 import { DocumentRepository } from "../../src/db/repositories/document-repo";
 import { MindmapRepository } from "../../src/db/repositories/mindmap-repo";
-import { autoAddCard, chapterParentFor, collectTargetOf, ensureBookMindmap, followBookRename, linkedMapOf } from "../../src/mindmap/auto-collect";
+import { autoAddCard, chapterParentFor, collectTargetOf, ensureBookMindmap, fixedRootDocOf, followBookRename, linkedMapOf } from "../../src/mindmap/auto-collect";
 import type { Card } from "../../src/types";
 import { MemoryAdapter } from "../helpers/memory-adapter";
 
@@ -112,24 +112,20 @@ describe("摘录自动入图（㉗：书籍默认脑图 + 固定根节点）", (
 		expect(mindmaps.listNodes(mapId!)).toHaveLength(2);
 	});
 
-	it("固定根节点优先：跨文档摘录直挂固定根下，不经书图分组", () => {
+	it("固定根节点优先：本书摘录直挂固定根下，不经书图分组（80 起书图钉仅收本书）", () => {
 		const docA = documents.upsertByPath("books/a.pdf", "书A");
-		const docB = documents.upsertByPath("books/b.pdf", "书B");
 		// 书A 先按默认路径建图建分组
 		autoAddCard({ documents, cards, mindmaps }, excerpt("A1", docA.id));
 
-		// 在书A图里钉一个节点为固定根
+		// 在书A图里钉一个节点为固定根（书图有 documentId → 仅收书A摘录）
 		const mapA = mindmaps.findByDocument(docA.id)!;
 		const pinnedNode = mindmaps.listNodes(mapA.id)[0];
 		mindmaps.setFixedRoot(mapA.id, pinnedNode.id);
 
-		// 书B 的摘录不再建书B图，直挂固定根下
-		const bCard = excerpt("B1", docB.id);
-		const touched = autoAddCard({ documents, cards, mindmaps }, bCard);
+		const aCard = excerpt("A2", docA.id, 3);
+		const touched = autoAddCard({ documents, cards, mindmaps }, aCard);
 		expect(touched).toBe(mapA.id);
-		expect(mindmaps.findByDocument(docB.id)).toBeUndefined(); // 未建书B图
-		const nodes = mindmaps.listNodes(mapA.id);
-		expect(nodes.find((n) => n.cardId === bCard.id)?.parentId).toBe(pinnedNode.id);
+		expect(mindmaps.listNodes(mapA.id).find((n) => n.cardId === aCard.id)?.parentId).toBe(pinnedNode.id);
 	});
 
 	it("固定根取消后：回到书籍默认脑图路径", () => {
@@ -179,6 +175,22 @@ describe("摘录目标图（㊴：打开即建同名图 + 按书切换 + 改名�
 		expect(ensureBookMindmap({ documents, cards, mindmaps }, doc.id)).toBe(mapId);
 		expect(mindmaps.list().length).toBe(1);
 		expect(mindmaps.listNodes(mapId!)).toHaveLength(1);
+	});
+
+	it("书名分组卡带 group 标记（81）：建卡即落标，不进卡片视角（列表/计数）", () => {
+		const doc = documents.upsertByPath("books/a.pdf", "书A");
+		ensureBookMindmap({ documents, cards, mindmaps }, doc.id); // ensure 路径建组卡
+		autoAddCard({ documents, cards, mindmaps }, excerpt("要点", doc.id)); // autoAdd 懒建路径不触发（组卡已存在）
+		const docB = documents.upsertByPath("books/b.pdf", "书B");
+		autoAddCard({ documents, cards, mindmaps }, excerpt("B 要点", docB.id)); // autoAdd 懒建路径建组卡
+
+		// 卡片视角（listAll/count）只见两张摘录，组卡经 get 逐一验证均带标记
+		expect(cards.listAll()).toHaveLength(2);
+		for (const mapId of mindmaps.list().map((m) => m.id)) {
+			const root = mindmaps.listNodes(mapId).find((n) => n.parentId === null)!;
+			expect(cards.get(root.cardId)!.group).toBe(true);
+		}
+		expect(cards.count()).toBe(2); // 计数同为摘录口径
 	});
 
 	it("ensure 后首张摘录挂既有分组下（不再另建分组）", () => {
@@ -247,19 +259,18 @@ describe("摘录目标图（㊴：打开即建同名图 + 按书切换 + 改名�
 		});
 	});
 
-	it("固定根 + 按书覆盖并存：固定根胜（㊴ 三级落点保持㉗语义）", () => {
+	it("固定根 + 按书覆盖并存（归属文档内）：固定根胜——书A 自覆盖仍直挂固定根", () => {
 		const docA = documents.upsertByPath("books/a.pdf", "书A");
-		const docB = documents.upsertByPath("books/b.pdf", "书B");
 		autoAddCard({ documents, cards, mindmaps }, excerpt("A1", docA.id));
 		const mapA = mindmaps.findByDocument(docA.id)!;
 		const pinned = mindmaps.listNodes(mapA.id)[0];
 		mindmaps.setFixedRoot(mapA.id, pinned.id);
 
-		// 书B 覆盖到主题图——但固定根仍在：摘录优先落固定根
+		// 书A 自己覆盖到主题图——固定根属书A仍胜：摘录优先落固定根
 		const topic = mindmaps.create("主题图");
-		documents.update(docB.id, { collectMapId: topic.id });
-		const bCard = excerpt("B1", docB.id);
-		expect(autoAddCard({ documents, cards, mindmaps }, bCard)).toBe(mapA.id);
+		documents.update(docA.id, { collectMapId: topic.id });
+		const aCard = excerpt("A2", docA.id, 3);
+		expect(autoAddCard({ documents, cards, mindmaps }, aCard)).toBe(mapA.id);
 		expect(mindmaps.listNodes(topic.id)).toHaveLength(0);
 	});
 
@@ -308,21 +319,174 @@ describe("联动展示图判定（㊿ linkedMapOf：文档↔脑图一对一）"
 		expect(linkedMapOf({ documents, cards, mindmaps }, doc.id)).toBe(topic.id);
 	});
 
-	it("固定根所在图最优先（与摘录落点同源：展示收拢地）", () => {
+	it("固定根所在图最优先（归属文档内）；他书让位走本书目标图（80）", () => {
 		const docA = documents.upsertByPath("books/a.pdf", "书A");
 		const docB = documents.upsertByPath("books/b.pdf", "书B");
 		autoAddCard({ documents, cards, mindmaps }, excerpt("A1", docA.id));
 		const mapA = mindmaps.findByDocument(docA.id)!;
 		mindmaps.setFixedRoot(mapA.id, mindmaps.listNodes(mapA.id)[0].id);
 
-		// 书B 即使覆盖到主题图：固定根胜（镜像摘录三级落点语义）
+		// 书A 即使覆盖到主题图：固定根胜（镜像摘录三级落点语义）
 		const topic = mindmaps.create("主题图");
-		documents.update(docB.id, { collectMapId: topic.id });
-		expect(linkedMapOf({ documents, cards, mindmaps }, docB.id)).toBe(mapA.id);
+		documents.update(docA.id, { collectMapId: topic.id });
+		expect(linkedMapOf({ documents, cards, mindmaps }, docA.id)).toBe(mapA.id);
+		// 80：固定根属书A——书B 联动让位，走书B 同名图（get-or-create）
+		expect(linkedMapOf({ documents, cards, mindmaps }, docB.id)).toBe(
+			mindmaps.findByDocument(docB.id)?.id,
+		);
 	});
 
 	it("文档缺失返回 null（调用方静默降级）", () => {
 		expect(linkedMapOf({ documents, cards, mindmaps }, "no-such-doc")).toBeNull();
+	});
+});
+
+describe("固定根仅所属文档生效（80：fixedRootDocOf 推导 + 三级落点/联动门控）", () => {
+	it("钉在书A默认图节点：A 摘录直挂固定根；B 摘录让位自建书B图（原跨文档设计收窄）", () => {
+		const docA = documents.upsertByPath("books/a.pdf", "书A");
+		const docB = documents.upsertByPath("books/b.pdf", "书B");
+		autoAddCard({ documents, cards, mindmaps }, excerpt("A1", docA.id));
+		const mapA = mindmaps.findByDocument(docA.id)!;
+		const pinned = mindmaps.listNodes(mapA.id)[0];
+		mindmaps.setFixedRoot(mapA.id, pinned.id);
+
+		const aCard = excerpt("A2", docA.id, 2);
+		expect(autoAddCard({ documents, cards, mindmaps }, aCard)).toBe(mapA.id);
+		expect(mindmaps.listNodes(mapA.id).find((n) => n.cardId === aCard.id)!.parentId).toBe(pinned.id);
+
+		// B 让位：走第 2 级自建书B图（组卡正常，不混入固定根）
+		const bCard = excerpt("B1", docB.id);
+		const touchedB = autoAddCard({ documents, cards, mindmaps }, bCard);
+		const mapB = mindmaps.findByDocument(docB.id)!;
+		expect(touchedB).toBe(mapB.id);
+		const bNode = mindmaps.listNodes(mapB.id).find((n) => n.cardId === bCard.id)!;
+		expect(bNode.parentId).not.toBe(pinned.id);
+	});
+
+	it("钉在无归属主题图（图与钉节点卡片均无 documentId）：跨文档收拢保留", () => {
+		const docA = documents.upsertByPath("books/a.pdf", "书A");
+		const docB = documents.upsertByPath("books/b.pdf", "书B");
+		const topic = mindmaps.create("主题图");
+		const manual = cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "主题",
+		});
+		const pinned = mindmaps.addNode(topic.id, manual.id, null, 0, 0)!;
+		mindmaps.setFixedRoot(topic.id, pinned.id);
+
+		const aCard = excerpt("A1", docA.id);
+		const bCard = excerpt("B1", docB.id);
+		expect(autoAddCard({ documents, cards, mindmaps }, aCard)).toBe(topic.id);
+		expect(autoAddCard({ documents, cards, mindmaps }, bCard)).toBe(topic.id);
+		// 两书摘录都直挂固定根，不再建书图
+		expect(mindmaps.findByDocument(docA.id)).toBeUndefined();
+		expect(mindmaps.findByDocument(docB.id)).toBeUndefined();
+		expect(mindmaps.listNodes(topic.id).find((n) => n.cardId === aCard.id)!.parentId).toBe(pinned.id);
+		expect(mindmaps.listNodes(topic.id).find((n) => n.cardId === bCard.id)!.parentId).toBe(pinned.id);
+	});
+
+	it("钉在主题图但钉节点卡片属书A（摘录卡节点）：仅 A 收集，B 让位", () => {
+		const docA = documents.upsertByPath("books/a.pdf", "书A");
+		const docB = documents.upsertByPath("books/b.pdf", "书B");
+		const aCard = excerpt("A1", docA.id);
+		autoAddCard({ documents, cards, mindmaps }, aCard); // 建书A图（本用例不消费）
+		const topic = mindmaps.create("主题图");
+		const pinned = mindmaps.addNode(topic.id, aCard.id, null, 0, 0)!;
+		mindmaps.setFixedRoot(topic.id, pinned.id);
+
+		expect(autoAddCard({ documents, cards, mindmaps }, excerpt("A2", docA.id, 2))).toBe(topic.id);
+		expect(autoAddCard({ documents, cards, mindmaps }, excerpt("B1", docB.id))).toBe(
+			mindmaps.findByDocument(docB.id)!.id,
+		);
+	});
+
+	it("linkedMapOf 门控：固定根属A时 A→固定根图、B→B目标图；无归属主题图两书都→固定根图", () => {
+		const docA = documents.upsertByPath("books/a.pdf", "书A");
+		const docB = documents.upsertByPath("books/b.pdf", "书B");
+		autoAddCard({ documents, cards, mindmaps }, excerpt("A1", docA.id));
+		const mapA = mindmaps.findByDocument(docA.id)!;
+		mindmaps.setFixedRoot(mapA.id, mindmaps.listNodes(mapA.id)[0].id);
+		expect(linkedMapOf({ documents, cards, mindmaps }, docA.id)).toBe(mapA.id);
+		expect(linkedMapOf({ documents, cards, mindmaps }, docB.id)).toBe(
+			mindmaps.findByDocument(docB.id)!.id,
+		);
+
+		// 换钉到无归属主题图（全局唯一，原钉自动清除）：两书联动都指向固定根图
+		const topic = mindmaps.create("主题图");
+		const manual = cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "主题",
+		});
+		mindmaps.setFixedRoot(topic.id, mindmaps.addNode(topic.id, manual.id, null, 0, 0)!.id);
+		expect(linkedMapOf({ documents, cards, mindmaps }, docA.id)).toBe(topic.id);
+		expect(linkedMapOf({ documents, cards, mindmaps }, docB.id)).toBe(topic.id);
+	});
+
+	it("让位后按书覆盖仍生效：固定根属A，B 覆盖到主题图X → B 摘录落 X（图内建《书B》组）", () => {
+		const docA = documents.upsertByPath("books/a.pdf", "书A");
+		const docB = documents.upsertByPath("books/b.pdf", "书B");
+		autoAddCard({ documents, cards, mindmaps }, excerpt("A1", docA.id));
+		const mapA = mindmaps.findByDocument(docA.id)!;
+		mindmaps.setFixedRoot(mapA.id, mindmaps.listNodes(mapA.id)[0].id);
+
+		const topic = mindmaps.create("主题图X");
+		documents.update(docB.id, { collectMapId: topic.id });
+		const bCard = excerpt("B1", docB.id);
+		expect(autoAddCard({ documents, cards, mindmaps }, bCard)).toBe(topic.id);
+		const nodes = mindmaps.listNodes(topic.id);
+		const group = nodes.find((n) => n.card.page === null && n.card.excerptText === "《书B》")!;
+		expect(nodes.find((n) => n.cardId === bCard.id)!.parentId).toBe(group.id);
+	});
+
+	it("fixedRootDocOf：图 documentId 优先；回退钉节点卡片 documentId；双 null → null", () => {
+		const docA = documents.upsertByPath("books/a.pdf", "书A");
+		const docB = documents.upsertByPath("books/b.pdf", "书B");
+		autoAddCard({ documents, cards, mindmaps }, excerpt("A1", docA.id));
+		const mapA = mindmaps.findByDocument(docA.id)!;
+
+		// 图级归属优先：即使钉节点卡片属 B，返回图的 documentId（书默认图绑定优先）
+		const bCard = excerpt("B1", docB.id);
+		const node = mindmaps.addNode(mapA.id, bCard.id, null, 0, 0)!;
+		mindmaps.setFixedRoot(mapA.id, node.id);
+		expect(fixedRootDocOf({ documents, cards, mindmaps }, { mapId: node.mapId, nodeId: node.id })).toBe(docA.id);
+
+		// 主题图（无 documentId）钉 B 卡节点 → 回退卡片归属
+		const topic = mindmaps.create("主题图");
+		const tnode = mindmaps.addNode(topic.id, bCard.id, null, 0, 0)!;
+		expect(fixedRootDocOf({ documents, cards, mindmaps }, { mapId: tnode.mapId, nodeId: tnode.id })).toBe(docB.id);
+
+		// 主题图钉手工卡（无 documentId）→ null（跨文档）
+		const manual = cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "手工",
+		});
+		const mnode = mindmaps.addNode(topic.id, manual.id, null, 0, 0)!;
+		expect(fixedRootDocOf({ documents, cards, mindmaps }, { mapId: mnode.mapId, nodeId: mnode.id })).toBeNull();
+	});
+
+	it("固定根幂等：已在固定根所在图的卡重复触发返回 null", () => {
+		const docA = documents.upsertByPath("books/a.pdf", "书A");
+		const aCard = excerpt("A1", docA.id);
+		const topic = mindmaps.create("主题图");
+		mindmaps.addNode(topic.id, aCard.id, null, 0, 0); // 手动挂入固定根图
+		const manual = cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "主题",
+		});
+		mindmaps.setFixedRoot(topic.id, mindmaps.addNode(topic.id, manual.id, null, 0, 0)!.id);
+		expect(autoAddCard({ documents, cards, mindmaps }, aCard)).toBeNull();
 	});
 });
 

@@ -55,11 +55,15 @@ export class ReviewStatsModal extends Modal {
 		contentEl.createDiv({ cls: "marinmind-stats-h", text: "近 13 周复习热力图" });
 		const grid = contentEl.createDiv({ cls: "marinmind-stats-heatmap" });
 		for (const cell of heatmapCells(log, nowMs, 13)) {
+			// R3（W-15）：title 仅悬停可见，补 aria-label 供读屏逐格播报；未来格纯装饰隐藏
+			const label =
+				cell.count > 0 ? `${cell.dateKey} · 复习 ${cell.count} 张` : cell.dateKey;
 			const el = grid.createDiv({
 				cls: `marinmind-stats-cell${cell.future ? " is-future" : ` lv${cell.level}`}`,
+				attr: cell.future ? { "aria-hidden": "true" } : { "aria-label": label },
 			});
 			if (!cell.future) {
-				el.title = cell.count > 0 ? `${cell.dateKey} · 复习 ${cell.count} 张` : cell.dateKey;
+				el.title = label;
 			}
 		}
 

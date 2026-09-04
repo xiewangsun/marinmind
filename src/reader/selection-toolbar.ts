@@ -93,7 +93,12 @@ export class SelectionToolbar {
 						.setTitle(LINE_STYLE_LABELS[style])
 						.setIcon(LINE_STYLE_ICONS[style])
 						.setChecked(style === this.currentLineStyle())
-						.onClick(() => this.actions.onPickLineStyle(style)),
+						.onClick(() => {
+							this.actions.onPickLineStyle(style);
+							// R4 D1-02: 切换线型后移除旧激活态
+							this.lineBtn.classList.remove("is-active");
+							this.applyLineStyleUI();
+						}),
 				);
 			}
 			menu.showAtMouseEvent(evt);
@@ -162,13 +167,15 @@ export class SelectionToolbar {
 		this.applyLineStyleUI();
 	}
 
-	/** 线型钮外观：图标随当前线型切换 + title/aria-label 显示线型名 */
+	/** 线型钮外观：图标随当前线型切换 + title/aria-label 显示线型名 + is-active 高亮 */
 	private applyLineStyleUI(): void {
 		const style = this.currentLineStyle();
 		setIcon(this.lineBtn, LINE_STYLE_ICONS[style]);
 		const label = `线型：${LINE_STYLE_LABELS[style]}`;
 		this.lineBtn.setAttribute("aria-label", label);
 		this.lineBtn.title = label;
+		// R4 D1-02: 线型按钮加激活态视觉反馈
+		this.lineBtn.classList.add("is-active");
 	}
 
 	/** 读 + 复位抑制旗标（handleSelectionEnd 消费：工具栏按钮点击链的 mouseup 短路） */

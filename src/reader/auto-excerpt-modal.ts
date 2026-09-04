@@ -82,12 +82,23 @@ export class AutoExcerptModal extends Modal {
 		// 范围：当前页 / 页码范围
 		const scopeRow = this.contentEl.createDiv({ cls: "marinmind-autoex-row" });
 		scopeRow.createEl("span", { cls: "marinmind-autoex-label", text: "范围" });
-		const select = scopeRow.createEl("select", { cls: "marinmind-autoex-select" });
+		// R3（W-04）：select 无关联 label，补可访问名
+		const select = scopeRow.createEl("select", {
+			cls: "marinmind-autoex-select",
+			attr: { "aria-label": "摘录范围" },
+		});
 		select.createEl("option", { value: "current", text: `当前页（第 ${this.opts.currentPage} 页）` });
 		select.createEl("option", { value: "range", text: "页码范围" });
 		const rangeBox = scopeRow.createDiv({ cls: "marinmind-autoex-range" });
-		const from = rangeBox.createEl("input", { type: "number" });
-		const to = rangeBox.createEl("input", { type: "number" });
+		// R3（W-04）：数字输入补可访问名（相邻双框无 label 无法区分起止）
+		const from = rangeBox.createEl("input", {
+			type: "number",
+			attr: { "aria-label": "起始页" },
+		});
+		const to = rangeBox.createEl("input", {
+			type: "number",
+			attr: { "aria-label": "结束页" },
+		});
 		from.value = String(this.rangeFrom);
 		to.value = String(this.rangeTo);
 		from.min = "1";
@@ -239,6 +250,8 @@ export class AutoExcerptModal extends Modal {
 		const countLabel = head.createSpan({
 			cls: "marinmind-autoex-count",
 			text: `共 ${this.rows.length} 块${dupCount > 0 ? ` · ${dupCount} 块与已有卡片重复` : ""}`,
+			// R3（W-03）：识别完成（异步）后计数可被屏幕阅读器感知
+			attr: { "aria-live": "polite" },
 		});
 		allCb.addEventListener("change", () => {
 			for (const row of this.rows) {

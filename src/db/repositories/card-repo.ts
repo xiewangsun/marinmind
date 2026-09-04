@@ -26,12 +26,18 @@ export interface CreateCardInput {
 	occlusions?: DocRect[];
 	/** 目录章节骨架卡（55，PDF 目录转框架）：缺省非骨架卡 */
 	outline?: boolean;
+	/** 书名分组卡（81，摘录自动入图的《书名》根节点）：缺省普通卡 */
+	group?: boolean;
+	/** 语音时长秒（84-B，audio 卡）：缺省 undefined = 未知 */
+	durationSec?: number;
 	tags?: string[];
 }
 
 /** 卡片可编辑字段：undefined 表示不改，null 表示清空 */
 export interface CardPatch {
 	page?: number | null;
+	/** 摘录矩形（84-D photo 展示框定位）：传数组整体替换，undefined 不动 */
+	rects?: DocRect[];
 	excerptText?: string | null;
 	excerptRef?: string | null;
 	note?: string | null;
@@ -43,6 +49,8 @@ export interface CardPatch {
 	deck?: string | null;
 	/** 闪卡遮挡区域（㊷）：传数组整体替换，undefined 不动 */
 	occlusions?: DocRect[];
+	/** 语音时长秒（84-B）：null = 清空（未知），undefined 不动 */
+	durationSec?: number | null;
 	tags?: string[];
 }
 
@@ -94,6 +102,10 @@ export class CardRepository {
 			occlusions: input.occlusions ?? [],
 			// 目录章节骨架卡（55）：显式落布尔（false 同缺省，序列化省键零写入契约）
 			outline: input.outline ?? false,
+			// 书名分组卡（81）：显式落布尔（与 outline 同构）
+			group: input.group ?? false,
+			// 语音时长秒（84-B）：undefined = 未知（非 audio / 存量卡）
+			...(input.durationSec !== undefined ? { durationSec: input.durationSec } : {}),
 			tags: input.tags ?? [],
 			createdAt: ts,
 			updatedAt: ts,
@@ -124,6 +136,8 @@ export class CardRepository {
 		const next: Card = {
 			...current,
 			...(patch.page !== undefined ? { page: patch.page } : {}),
+			// 摘录矩形（84-D photo 展示框）：整体替换语义（与 occlusions 同构）
+			...(patch.rects !== undefined ? { rects: patch.rects } : {}),
 			...(patch.excerptText !== undefined ? { excerptText: patch.excerptText } : {}),
 			...(patch.excerptRef !== undefined ? { excerptRef: patch.excerptRef } : {}),
 			...(patch.note !== undefined ? { note: patch.note } : {}),
@@ -132,6 +146,8 @@ export class CardRepository {
 			...(patch.title !== undefined ? { title: patch.title } : {}),
 			...(patch.deck !== undefined ? { deck: patch.deck } : {}),
 			...(patch.occlusions !== undefined ? { occlusions: patch.occlusions } : {}),
+			// 语音时长秒（84-B）：null 清空（归一 undefined = 未知）/ undefined 不动
+			...(patch.durationSec !== undefined ? { durationSec: patch.durationSec ?? undefined } : {}),
 			...(patch.tags !== undefined ? { tags: patch.tags } : {}),
 			updatedAt: now(),
 		};
@@ -152,35 +168,51 @@ export class CardRepository {
 		return true;
 	}
 
-	/** 某文档下的全部卡片，按页码排序（无页码的排最后） */
+	/**
+	 * 某文档下的全部卡片，按页码排序（无页码的排最后）。
+	 * 81 起排除书名分组卡（结构卡不进卡片系统——列表/统计视角）；
+	 * 组卡本体经 get() 仍可取（脑图节点渲染/编辑用）。
+	 */
 	listByDocument(documentId: string): Card[] {
-		return [...(this.store.books.get(documentId)?.cards.values() ?? [])].sort(
-			(a, b) =>
-				(a.page ?? Infinity) - (b.page ?? Infinity) ||
-				a.createdAt - b.createdAt ||
-				(a.id < b.id ? -1 : 1),
-		);
+		return [...(this.store.books.get(documentId)?.cards.values() ?? [])]
+			.filter((c) => !c.group)
+			.sort(
+				(a, b) =>
+					(a.page ?? Infinity) - (b.page ?? Infinity) ||
+					a.createdAt - b.createdAt ||
+					(a.id < b.id ? -1 : 1),
+			);
 	}
 
-	/** 最近更新的卡片（工作区"最近"列表用） */
+	/** 最近更新的卡片（工作区"最近"列表用）——81 起随 listAll 排除书名分组卡 */
 	recent(limit = 50): Card[] {
 		return this.listAll().slice(0, limit);
 	}
 
-	/** 全库卡片（含孤儿卡），按更新时间降序——主页卡片页全量浏览的数据源 */
+	/** 全库卡片（含孤儿卡），按更新时间降序——主页卡片页全量浏览的数据源。
+	 *  81 起排除书名分组卡（结构卡不纳入卡片系统，选择器/卡组派生同源受益） */
 	listAll(): Card[] {
-		return [...allCards(this.store)].sort(
-			(a, b) =>
-				b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1),
-		);
+		return [...allCards(this.store)].filter(
+			(c) => !c.group,
+		).sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1));
 	}
 
+	/** 卡片总数（81 起不含书名分组卡——统计砖/每书卡数/relink 占用判定均为
+	 *  摘录视角；结构卡计数只会虚标"每本至少 1 张"） */
 	count(documentId?: string): number {
 		if (documentId === undefined) {
 			let n = this.store.orphanState.cards.size;
-			for (const book of this.store.books.values()) n += book.cards.size;
+			for (const book of this.store.books.values()) {
+				for (const c of book.cards.values()) {
+					if (!c.group) n++;
+				}
+			}
 			return n;
 		}
-		return this.store.books.get(documentId)?.cards.size ?? 0;
+		let n = 0;
+		for (const c of this.store.books.get(documentId)?.cards.values() ?? []) {
+			if (!c.group) n++;
+		}
+		return n;
 	}
 }

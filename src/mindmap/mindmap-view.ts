@@ -30,6 +30,7 @@ import {
 	edgeDots,
 	edgePath,
 	compareSiblings,
+	collapsedAncestorsOf,
 	effectiveBranchStyle,
 	fitViewportTransform,
 	frameRectFor,
@@ -76,24 +77,46 @@ const activeViews = new Set<MarinMindMindmapView>();
  * 更新全部活跃脑图的落点提示（悬停的 viewport/节点上高亮类）。
  * 返回指针悬停的视图（无则 null）——阅读器拖卡的 pointermove/pointerup 调用。
  */
+/**
+ * 拖拽落点提示汇总（阅读器拖卡）：全部活跃脑图依次尝试，返回指针下的视图。
+ * doc 过滤（79-6 多窗口）：只允许"坐标所属文档"的视图吃提示——两窗并屏时
+ * 他窗视口矩形与本窗 client 坐标可能数值重叠，不过滤会串窗误亮；
+ * 非匹配视图只清不加（指针不在其坐标空间）。缺省 = 不过滤（旧语义）。
+ */
 export function updateMindmapDropHint(
 	x: number,
 	y: number,
+	doc?: Document,
 ): MarinMindMindmapView | null {
 	let hovered: MarinMindMindmapView | null = null;
 	for (const view of activeViews) {
-		if (view.updateDropHint(x, y)) {
-			hovered = view;
+		if (!doc || view.contentEl.ownerDocument === doc) {
+			if (view.updateDropHint(x, y)) {
+				hovered = view;
+			}
+		} else {
+			view.clearDropHint();
 		}
 	}
 	return hovered;
 }
 
-/** 清除全部活跃脑图的落点提示（拖拽结束/取消时调用） */
-export function clearMindmapDropHints(): void {
+/**
+ * 清除全部活跃脑图的落点提示（拖拽结束/取消时调用）。
+ * doc 过滤（79-6）：只清指定文档的视图——跨窗拖拽期间源窗与他窗提示
+ * 由各自坐标路径分管；缺省 = 全部清（拖拽结束语义）。
+ */
+export function clearMindmapDropHints(doc?: Document): void {
 	for (const view of activeViews) {
-		view.clearDropHint();
+		if (!doc || view.contentEl.ownerDocument === doc) {
+			view.clearDropHint();
+		}
 	}
+}
+
+/** 活跃脑图视图快照出口（79-6 跨窗口拖卡按窗口分组遍历；只读用途） */
+export function activeMindmapViews(): MarinMindMindmapView[] {
+	return [...activeViews];
 }
 
 /**
@@ -237,6 +260,14 @@ export class MarinMindMindmapView extends ItemView {
 		title: HTMLInputElement;
 		note: HTMLTextAreaElement;
 	} | null = null;
+	/** keydown 宿主文档（bindKeydown 记录，unbindKeydown 解绑用；弹窗/主窗随 ownerDocument 切换） */
+	private keydownDoc: Document | null = null;
+	/** 文档级 keydown 处理器（箭头字段持有 this 绑定，绑/解同一引用） */
+	private readonly onDocKeydown = (evt: KeyboardEvent): void => {
+		this.onKeydown(evt);
+	};
+	/** 无选中时键盘操作提示是否已弹过（实例级一次；避免每次按键都 Notice 刷屏） */
+	private keyHintShown = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: MarinMindPlugin) {
 		super(leaf);
@@ -256,6 +287,8 @@ export class MarinMindMindmapView extends ItemView {
 		this.undoBtnEl = this.addAction("undo-2", "撤销 (Ctrl+Z)", () => this.undoHistory());
 		this.redoBtnEl = this.addAction("redo-2", "重做 (Ctrl+Shift+Z)", () => this.redoHistory());
 		this.addAction("rotate-cw", "刷新", () => this.refresh());
+		// keydown 解绑兜底：popout 迁移等路径若漏调 onClose 的显式解绑，卸载时兜底清理
+		this.register(() => this.unbindKeydown());
 	}
 
 	getViewType(): string {
@@ -324,6 +357,7 @@ export class MarinMindMindmapView extends ItemView {
 	protected async onClose(): Promise<void> {
 		// 联动互关（㊿）：先捕获本图 id，关闭后交给 plugin 匹配绑定到本图的阅读标签
 		const linkedMapId = this.mapId;
+		this.unbindKeydown(); // 文档级 keydown 显式解绑（幂等）
 		this.closeNodeEditor(false); // ㊺ 面板挂 viewportEl，显式清防残留
 		for (const off of this.cardBusOffs) {
 			off();
@@ -744,6 +778,8 @@ export class MarinMindMindmapView extends ItemView {
 			}
 			this.setDefaultStyle(this.styleSelect.value as BranchStyle);
 		});
+		// R4 D2-01: 样式选择器后加分隔线，图级操作组与视图操作组区分
+		header.createEl("div", { cls: "marinmind-tool-sep" });
 		// 「添加到脑图」总开关（㉗，MN4「自动添加到脑图」对齐，默认开）：
 		// 全局持久化（settings.autoAddToMindmap）——新摘录自动入图，
 		// 固定根节点优先，否则加入该书的默认脑图（见 auto-collect.ts）
@@ -782,6 +818,8 @@ export class MarinMindMindmapView extends ItemView {
 		this.viewModeOff = modeBar.off;
 		header.createEl("div", { cls: "marinmind-mm-header-spacer" });
 		header.appendChild(modeBar.el);
+		// R4 D2-01: 模式条后加分隔线，视图操作组与管理操作组区分
+		header.createEl("div", { cls: "marinmind-tool-sep" });
 		const renameBtn = header.createEl("button", {
 			cls: "marinmind-mm-header-btn clickable-icon",
 			attr: { "aria-label": "重命名" },
@@ -806,7 +844,7 @@ export class MarinMindMindmapView extends ItemView {
 		this.emptyEl = this.viewportEl.createDiv({ cls: "marinmind-mm-empty" });
 
 		const hint = this.contentEl.createDiv({ cls: "marinmind-mm-hint" });
-		hint.textContent = "拖节点到另一节点=连线（挂为子节点）· 拖空白=平移 · Ctrl+滚轮=缩放 · 双击空白=新建卡片 · 节点右缘 ▾=折叠/展开子树 · 右键节点=更多操作";
+		hint.textContent = "拖节点到另一节点=连线（挂为子节点）· 拖空白=平移 · Ctrl+滚轮=缩放 · 双击空白=新建卡片 · 节点右缘 ▾=折叠/展开子树 · 右键节点=更多操作 · 点选节点后：Tab=建子卡 · Enter=建兄弟卡 · Delete=移出 · 方向键=导航";
 
 		this.registerCanvasEvents();
 		this.applyTransform();
@@ -1361,10 +1399,12 @@ export class MarinMindMindmapView extends ItemView {
 
 	/**
 	 * 指针下的本视图节点 id（无则 null）。
+	 * elementFromPoint 用本视图所在窗口的 document（79-6 跨 popout：popout 内
+	 * 视图只有其 ownerDocument 认得自己的坐标空间，全局 document 命中不了他窗）。
 	 * 归属验证 nodeEls.get(id) === el：多脑图同屏时 elementFromPoint 可能命中他图节点。
 	 */
 	private hitNodeAt(x: number, y: number): string | null {
-		const hit = document
+		const hit = this.contentEl.ownerDocument
 			.elementFromPoint(x, y)
 			?.closest<HTMLElement>(".marinmind-mm-node");
 		const id = hit?.dataset.nodeId;
@@ -1378,16 +1418,29 @@ export class MarinMindMindmapView extends ItemView {
 
 	/**
 	 * 定位到卡片对应节点：平移画布使节点居中（保持当前缩放）并闪烁高亮。
-	 * 节点不在本图 / 被折叠隐藏时返回 false（调用方继续尝试其他脑图视图）。
+	 * 节点被折叠隐藏时自动展开祖先链后定位（79-2）；不在本图返回 false
+	 * （调用方继续尝试其他脑图视图）。
 	 */
 	public locateCard(cardId: string): boolean {
-		const node = this.nodes.find((n) => n.cardId === cardId);
 		const vp = this.viewportEl;
+		let node = this.nodes.find((n) => n.cardId === cardId);
 		if (!node || !vp) {
 			return false;
 		}
 		if (!visibleNodes(this.nodes).has(node.id)) {
-			return false; // 折叠隐藏的后代：v1 不自动展开
+			// 79-2 折叠隐藏的后代：自动展开祖先链后重定位。repo setCollapsed 直写
+			// 不进撤销栈——展开属定位的视图便利而非内容编辑（toggleCollapsed 视图
+			// 写路径才进栈）；无折叠祖先可救（孤儿/脏数据）仍返回 false
+			const anc = collapsedAncestorsOf(this.nodes, node.id);
+			if (anc.length === 0 || !this.mapId) {
+				return false;
+			}
+			for (const id of anc) {
+				this.plugin.mindmaps.setCollapsed(id, false);
+			}
+			// 折叠隐藏节点无 DOM：loadMap 重建；平移缩放保持（createChildCard 先例）
+			this.loadMap(this.mapId);
+			node = this.nodes.find((n) => n.cardId === cardId) ?? node; // loadMap 重建 this.nodes，重取
 		}
 		const h = this.nodeEls.get(node.id)?.offsetHeight ?? NODE_HEIGHT_EST;
 		const rect = vp.getBoundingClientRect();
@@ -1634,6 +1687,24 @@ export class MarinMindMindmapView extends ItemView {
 		noteLabel.appendChild(note);
 		el.appendChild(noteLabel);
 
+		// 85-D 摘录只读块：OCR/划选文字存 excerptText，编辑器此前只读写
+		// title/note——用户在面板里"看不到 OCR 文字"。只读展示（OCR 纠错走
+		// 阅读器覆盖确认流程，编辑面不改 excerptText 语义）。
+		const excerpt = node.card.excerptText?.trim();
+		if (excerpt) {
+			const excerptBlock = document.createElement("div");
+			excerptBlock.className = "marinmind-mm-editor-excerpt";
+			const excerptLabel = document.createElement("div");
+			excerptLabel.className = "marinmind-mm-editor-excerpt-label";
+			excerptLabel.textContent = "摘录（只读）";
+			const excerptBody = document.createElement("div");
+			excerptBody.className = "marinmind-mm-editor-excerpt-body";
+			excerptBody.textContent = excerpt;
+			excerptBlock.appendChild(excerptLabel);
+			excerptBlock.appendChild(excerptBody);
+			el.appendChild(excerptBlock);
+		}
+
 		const actions = document.createElement("div");
 		actions.className = "marinmind-mm-editor-actions";
 		const cancel = document.createElement("button");
@@ -1755,11 +1826,43 @@ export class MarinMindMindmapView extends ItemView {
 		this.registerDomEvent(vp, "wheel", (evt) => this.onWheel(evt), { passive: false });
 
 		// 52 键盘操作（MarginNote 风格）：Esc 取消（㊳ 拖拽取消扩展）+ 方向键树内导航 +
-		// Tab 建子 / Enter 建兄弟 / Delete 移出。keydown 挂 document + activeLeaf 守卫
+		// Tab 建子 / Enter 建兄弟 / Delete 移出。keydown 挂视图宿主文档 + activeLeaf 守卫
 		// （同 reader-view 的 Esc 先例）；弹窗/菜单/输入态让位（它们自己消费按键）。
-		this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
-			this.onKeydown(evt);
-		});
+		// 绑 contentEl.ownerDocument 而非全局 document：弹出窗口（popout）里主文档收不到
+		// 键盘事件；且 Obsidian 迁移 popout 会 onClose→onOpen 重跑，registerDomEvent 会
+		// 累积重复处理器——改手动绑/解（bindKeydown/unbindKeydown）幂等可重入。
+		this.bindKeydown();
+	}
+
+	/** 绑定文档级 keydown（幂等：已绑先解再绑，onOpen/popout 迁移重跑安全） */
+	private bindKeydown(): void {
+		this.unbindKeydown();
+		const doc = this.contentEl.ownerDocument;
+		doc.addEventListener("keydown", this.onDocKeydown);
+		this.keydownDoc = doc;
+	}
+
+	/** 解绑文档级 keydown（onClose 调用；this.register 兜底防泄漏） */
+	private unbindKeydown(): void {
+		if (this.keydownDoc) {
+			this.keydownDoc.removeEventListener("keydown", this.onDocKeydown);
+			this.keydownDoc = null;
+		}
+	}
+
+	/**
+	 * 联动定位原文后归还 activeLeaf（Tab 键失效修复）：
+	 * revealCardInReader 内部 setActiveLeaf(readerLeaf) 会把 activeLeaf 抢给阅读器，
+	 * 而 onKeydown 以 activeLeaf !== this.leaf 守卫让位——点完节点后 Tab/Enter/
+	 * Delete/方向键全部失效。await 完成后把 activeLeaf 拿回本视图（不抢 DOM 焦点，
+	 * focus:false 阅读器侧滚动定位不受影响）。
+	 */
+	private async revealAndRestoreFocus(card: Card): Promise<void> {
+		await this.plugin.revealCardInReader(card);
+		if (!this.contentEl.isConnected) {
+			return; // await 期间视图被拆（关闭/换窗）：不再归还
+		}
+		this.app.workspace.setActiveLeaf(this.leaf, { focus: false });
 	}
 
 	/** 键盘路由：59 撤销重做（Ctrl+Z 系）→ 白名单 → 修饰键/焦点让位 → Esc 既有链（编辑器 > 拖拽取消 > 清选中）→ 六键分发 */
@@ -1840,6 +1943,11 @@ export class MarinMindMindmapView extends ItemView {
 		}
 		const sel = this.selectedNodeId;
 		if (!this.mapId || !sel) {
+			// 六键无锚点时一次性提示（此前静默 no-op，用户不知道为何 Tab 不生效）
+			if (!this.keyHintShown) {
+				this.keyHintShown = true;
+				new Notice("请先点选一个节点：Tab=建子卡 · Enter=建兄弟卡 · Delete=移出 · 方向键=导航");
+			}
 			return;
 		}
 		const node = this.nodes.find((n) => n.id === sel);
@@ -2023,7 +2131,7 @@ export class MarinMindMindmapView extends ItemView {
 					node.card.documentId &&
 					this.app.workspace.getLeavesOfType(READER_VIEW_TYPE).length > 0
 				) {
-					void this.plugin.revealCardInReader(node.card);
+					void this.revealAndRestoreFocus(node.card);
 				}
 			} else {
 				// 点击画布空白：关闭面板（取消语义）+ 清空键盘选中（52）
@@ -2569,6 +2677,9 @@ export class MarinMindMindmapView extends ItemView {
 				.setDisabled(true),
 		);
 		menu.addSeparator();
+		// R4 D4-01: 脑图节点右键菜单分组（定位/编辑/链接/复习/脑图/危险）
+		menu.addSeparator();
+		// 定位组
 		if (card.documentId && card.page != null) {
 			menu.addItem((item) =>
 				item
@@ -2580,6 +2691,7 @@ export class MarinMindMindmapView extends ItemView {
 					}),
 			);
 		}
+		// 编辑组
 		menu.addItem((item) =>
 			item
 				.setTitle("编辑标题/批注")
@@ -2599,6 +2711,7 @@ export class MarinMindMindmapView extends ItemView {
 				.setIcon("copy")
 				.onClick(() => void this.plugin.copyCardLink(card, "embed")),
 		);
+		// 链接组
 		// 卡片互链（53）：建链入口 + 有邻居时的解链入口（数据层 CardLink 早已就绪）
 		menu.addItem((item) =>
 			item
@@ -2622,20 +2735,24 @@ export class MarinMindMindmapView extends ItemView {
 				.setIcon("git-merge")
 				.onClick(() => this.openMergePicker(card)),
 		);
-		// 闪卡开关：每次打开菜单即时查 DB（卡片可能在会话外被改变）
-		const isFlashcard = this.plugin.reviews.get(card.id)?.isFlashcard ?? false;
-		menu.addItem((item) =>
-			item
-				.setTitle(isFlashcard ? "取消闪卡" : "转为闪卡")
-				.setIcon(isFlashcard ? "layers" : "graduation-cap")
-				.onClick(() => {
-					if (isFlashcard) {
-						this.plugin.reviews.disable(card.id);
-					} else {
-						this.plugin.reviews.enable(card.id);
-					}
-				}),
-		);
+		// 复习组
+		// 闪卡开关：每次打开菜单即时查 DB（卡片可能在会话外被改变）。
+		// 81 书名分组卡不进复习队列（结构卡不纳入卡片系统），不提供开关
+		if (!card.group) {
+			const isFlashcard = this.plugin.reviews.get(card.id)?.isFlashcard ?? false;
+			menu.addItem((item) =>
+				item
+					.setTitle(isFlashcard ? "取消闪卡" : "转为闪卡")
+					.setIcon(isFlashcard ? "zap" : "graduation-cap")
+					.onClick(() => {
+						if (isFlashcard) {
+							this.plugin.reviews.disable(card.id);
+						} else {
+							this.plugin.reviews.enable(card.id);
+						}
+					}),
+			);
+		}
 		// 复习此分支（70）：整子树卡片（含折叠隐藏后代）的 cards 范围复习——
 		// 复习视图 dueByIds 直查，未启用/未到期的子树卡自然缺席
 		menu.addItem((item) =>
@@ -2654,6 +2771,7 @@ export class MarinMindMindmapView extends ItemView {
 					void this.plugin.openReviewCards(cardIds, info.slice(0, 12));
 				}),
 		);
+		// 脑图组
 		// 分支样式（⑱）：作用于该节点的子树（其子节点如何挂出）
 		menu.addItem((item) =>
 			item
@@ -2700,6 +2818,7 @@ export class MarinMindMindmapView extends ItemView {
 					.onClick(() => this.setFixedRootFor(node)),
 			);
 		}
+		// 危险操作（删除）
 		menu.addItem((item) =>
 			item
 				.setTitle("移出脑图")
@@ -2716,6 +2835,7 @@ export class MarinMindMindmapView extends ItemView {
 					}
 				}),
 		);
+		menu.addSeparator();
 		menu.addItem((item) =>
 			item
 				.setTitle("删除卡片")

@@ -32,6 +32,7 @@ import {
 	suggestChildPosition,
 	suggestRootPosition,
 	visibleNodes,
+	collapsedAncestorsOf,
 } from "../../src/mindmap/mindmap-graph";
 import type { GraphNode } from "../../src/mindmap/mindmap-graph";
 
@@ -178,6 +179,58 @@ describe("mindmap-graph 图纯逻辑", () => {
 	it("visibleNodes：成环脏数据不死循环，环上节点均可见（链上无折叠）", () => {
 		const nodes = [makeNode("a", "b"), makeNode("b", "a"), makeNode("r", null)];
 		expect(visibleNodes(nodes)).toEqual(new Set(["a", "b", "r"]));
+	});
+
+	// ---------- 79-2 联动定位自动展开 ----------
+
+	it("collapsedAncestorsOf：直接父折叠返回 [父]", () => {
+		const nodes = [
+			makeNode("a", null),
+			makeNode("b", "a", 0, 0, true), // 父折叠
+			makeNode("c", "b"), // 目标：被折叠隐藏
+		];
+		expect(collapsedAncestorsOf(nodes, "c")).toEqual(["b"]);
+	});
+
+	it("collapsedAncestorsOf：祖父+父双折叠返回近 → 远两元素", () => {
+		const nodes = [
+			makeNode("a", null, 0, 0, true), // 祖父折叠
+			makeNode("b", "a", 0, 0, true), // 父折叠
+			makeNode("c", "b"),
+		];
+		expect(collapsedAncestorsOf(nodes, "c")).toEqual(["b", "a"]);
+	});
+
+	it("collapsedAncestorsOf：祖先链上仅远祖折叠也收集（近祖展开不影响）", () => {
+		const nodes = [
+			makeNode("a", null, 0, 0, true),
+			makeNode("b", "a"), // 近祖未折叠
+			makeNode("c", "b"),
+		];
+		expect(collapsedAncestorsOf(nodes, "c")).toEqual(["a"]);
+	});
+
+	it("collapsedAncestorsOf：无折叠祖先 / 根节点 / 不在集合 → 空数组", () => {
+		const nodes = [makeNode("a", null), makeNode("b", "a")];
+		expect(collapsedAncestorsOf(nodes, "b")).toEqual([]);
+		expect(collapsedAncestorsOf(nodes, "a")).toEqual([]);
+		expect(collapsedAncestorsOf(nodes, "missing")).toEqual([]);
+	});
+
+	it("collapsedAncestorsOf：目标自身折叠不算（藏的是后代，自身可见）", () => {
+		const nodes = [makeNode("a", null, 0, 0, true)];
+		expect(collapsedAncestorsOf(nodes, "a")).toEqual([]);
+	});
+
+	it("collapsedAncestorsOf：孤儿（父悬空）空数组；成环脏数据不死循环且环内截断", () => {
+		expect(collapsedAncestorsOf([makeNode("a", null), makeNode("o", "missing")], "o")).toEqual([]);
+		// b ↔ c 成环：从 c 上溯经 b 后回到 c 截断（环外节点不可达）
+		const cyclic = [
+			makeNode("a", null, 0, 0, true),
+			makeNode("b", "c", 0, 0, true),
+			makeNode("c", "b"),
+		];
+		expect(collapsedAncestorsOf(cyclic, "c")).toEqual(["b"]);
 	});
 
 	it("bulkCollapsePlan：折叠全部只取有子且未折叠的节点", () => {

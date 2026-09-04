@@ -10,12 +10,14 @@ import { buildMapThumbnailSvg } from "./map-thumbnail";
 import { DeckPickerModal } from "./deck-picker-modal";
 import { ReviewStatsModal } from "./review-stats-modal";
 import { CardPreviewModal } from "../home/card-preview-modal";
-import { deleteCardCascade, promptCardDeck, promptCardNote, promptCardTags } from "../home/card-actions";
+import { deleteCardCascade, promptCardDeck, promptCardEdit, promptCardTags } from "../home/card-actions";
 import { ConfirmModal } from "../mindmap/confirm-modal";
-import { occlusionBounds, occlusionPercent } from "../reader/rect-utils";
+import { occlusionBounds, occlusionPercent, snapshotImgSize } from "../reader/rect-utils";
 import { renderExcerptVisual } from "../reader/excerpt-visual";
 import { HIGHLIGHT_COLORS, highlightFallbackColor, highlightLineColor } from "../reader/highlight-colors";
 import { pageWordOf } from "../storage/paths";
+import { resolveEngineCall, translationAnchor, type EngineCall } from "../translate/translate-engine";
+import { TranslateModal } from "../translate/translate-modal";
 
 /** 复习视图的 viewType */
 export const REVIEW_VIEW_TYPE = "marinmind-review";
@@ -298,6 +300,9 @@ export class MarinMindReviewView extends ItemView {
 			return;
 		}
 		this.renderCard(stage, s, card);
+		// 79-5 深度复习：三窗格布局下当前卡驱动阅读滚动 + 脑图定位
+		//（插件侧判定布局/激活/翻面去重；非深度布局零影响）
+		void this.plugin.deepNavigateToCard(card, this.leaf);
 	}
 
 	/** Empty 屏文案按范围四态区分（全部/本书/卡组/自定义范围） */
@@ -392,6 +397,15 @@ export class MarinMindReviewView extends ItemView {
 		setIcon(undo, "undo-2");
 		undo.disabled = s.undoDepth === 0;
 		undo.addEventListener("click", () => this.undoLastGrade());
+		// 83-F 复习界面翻译入口（后续优化方向 :258 清账）：摘录文字即译即对照；
+		// 无摘录文字的卡（照片/语音/纯区域）置灰；手工卡（无页码）弹窗仅对照+复制
+		const translate = topbar.createEl("button", {
+			cls: "marinmind-review-nav-btn",
+			attr: { type: "button", "aria-label": "翻译", title: "翻译摘录文字" },
+		});
+		setIcon(translate, "languages");
+		translate.disabled = (card.excerptText ?? "").trim().length === 0;
+		translate.addEventListener("click", () => this.openTranslateForCard(card));
 		// ⋯ 管理（卡组批）：查看 / 打标签 / 设卡组 / 删除——任何卡都有，不套 ↗原文
 		// 的 doc/page 守卫（自由卡片与照片/语音卡同样可管理；已考回看/后面的卡同可用）
 		const manage = topbar.createEl("button", {
@@ -648,6 +662,10 @@ export class MarinMindReviewView extends ItemView {
 			} else {
 				const img = parent.createEl("img", { cls: "marinmind-review-media" });
 				img.alt = mediaLabel(card);
+				// R3（W-02）：按 rects 包围盒预留宽高比（photo 兜底 4:3）——防加载后布局跳动
+				const size = snapshotImgSize(card);
+				img.width = size.width;
+				img.height = size.height;
 				void this.mediaUrl(card.excerptRef).then((url) => {
 					if (img.isConnected) {
 						img.src = url;
@@ -1024,7 +1042,54 @@ export class MarinMindReviewView extends ItemView {
 	}
 
 	/**
-	 * ⋯ 管理菜单（卡组批 + 65 批注）：查看卡片 / 编辑批注 / 打标签 / 设卡组 / 删除。
+	 * 83-F 复习界面翻译（后续优化方向 :258 清账）：摘录文字开翻译弹窗对照，
+	 * 引擎/目标语言跟随翻译设置；有页码定位的卡可把译文存为原文正下方留白
+	 * （translationAnchor 锚点 + cardBus 自动回显阅读器），手工卡（page==null）
+	 * 不传 onSaveBlank——弹窗仅对照 + 复制。
+	 */
+	private openTranslateForCard(card: Card): void {
+		const text = (card.excerptText ?? "").trim();
+		if (!text) {
+			return;
+		}
+		let engineCall: EngineCall;
+		try {
+			engineCall = resolveEngineCall(this.plugin.settings);
+		} catch (err) {
+			new Notice(err instanceof Error ? err.message : String(err));
+			return;
+		}
+		new TranslateModal(this.app, {
+			sourceText: text,
+			target: this.plugin.settings.translateTarget,
+			engineCall,
+			onTargetChange: (code) => {
+				// 弹窗内切换即持久化，下次打开沿用（与阅读器入口同语义）
+				this.plugin.settings.translateTarget = code;
+				void this.plugin.saveData({ ...this.plugin.settings });
+			},
+			...(card.documentId && card.page != null
+				? {
+						onSaveBlank: (translation: string) => {
+							this.plugin.cards.create({
+								documentId: card.documentId!,
+								page: card.page!,
+								rects: [translationAnchor(card.rects)],
+								excerptType: "blank",
+								excerptText: translation,
+								// 与阅读器译文留白同款：跟随留白工具当前色系
+								color: this.plugin.settings.excerptColors.blank,
+							});
+							new Notice("译文已存为留白（原文下方）");
+						},
+					}
+				: {}),
+		}).open();
+	}
+
+	/**
+	 * ⋯ 管理菜单（卡组批 + 65 批注 + 78 统一标题/批注双字段）：查看卡片 /
+	 * 编辑标题批注 / 打标签 / 设卡组 / 删除。
 	 * 四类编辑动作与卡片预览弹窗经 card-actions 单源共享（行为不分叉）；
 	 * 删除的会话剔除与重渲染由 cardBus removed 订阅完成，这里不手动 render。
 	 */
@@ -1044,9 +1109,9 @@ export class MarinMindReviewView extends ItemView {
 		);
 		menu.addItem((item) =>
 			item
-				.setTitle("编辑批注…")
+				.setTitle("编辑标题/批注…")
 				.setIcon("pencil")
-				.onClick(() => promptCardNote(this.app, this.plugin, card)),
+				.onClick(() => promptCardEdit(this.app, this.plugin, card)),
 		);
 		menu.addItem((item) =>
 			item

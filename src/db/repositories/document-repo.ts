@@ -34,6 +34,7 @@ export class DocumentRepository {
 			category: null,
 			collectMapId: null,
 			autoFlashcard: false,
+			lastPage: null,
 			createdAt: ts,
 			updatedAt: ts,
 		};
@@ -54,6 +55,10 @@ export class DocumentRepository {
 	 * category 语义：传 string 归入分类、传 null 显式移入未分类、不传（undefined）不动。
 	 * collectMapId 同款三态（㊴）：传 string 设目标图、传 null 切回默认图、不传不动。
 	 * autoFlashcard 布尔两态（㊷）：传值设置、不传不动。
+	 * lastPage 同款可空三态（80）：传数字设页码、传 null 清除（回到第 1 页）、不传不动。
+	 * lastPage-only 写入保留原 updatedAt：翻页是高频静默动作，若顶 updatedAt 会
+	 * 违背 touchBookOpen 的既定设计（打开书不落盘不重排）且打乱主页「最近」
+	 * 排序；patch 含其他字段时照常刷新。
 	 */
 	update(
 		id: string,
@@ -62,12 +67,19 @@ export class DocumentRepository {
 			category?: string | null;
 			collectMapId?: string | null;
 			autoFlashcard?: boolean;
+			lastPage?: number | null;
 		},
 	): BookDocument | undefined {
 		const current = this.store.books.get(id)?.doc;
 		if (!current) {
 			return undefined;
 		}
+		// lastPage-only（仅页码，无元数据变更）不刷新 updatedAt（见上方注释）
+		const metaOnly =
+			patch.title !== undefined ||
+			patch.category !== undefined ||
+			patch.collectMapId !== undefined ||
+			patch.autoFlashcard !== undefined;
 		const next: BookDocument = {
 			...current,
 			...(patch.title !== undefined ? { title: patch.title } : {}),
@@ -78,7 +90,8 @@ export class DocumentRepository {
 			...(patch.autoFlashcard !== undefined
 				? { autoFlashcard: patch.autoFlashcard }
 				: {}),
-			updatedAt: now(),
+			...(patch.lastPage !== undefined ? { lastPage: patch.lastPage } : {}),
+			updatedAt: metaOnly ? now() : current.updatedAt,
 		};
 		this.store.upsertBook(next);
 		return next;

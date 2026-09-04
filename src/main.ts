@@ -26,6 +26,13 @@ import { DeckPickerModal } from "./review/deck-picker-modal";
 import { ReviewStatsModal } from "./review/review-stats-modal";
 import { exportBackup, promptImportBackup } from "./backup/backup-service";
 import { AttachmentStore } from "./attachments/attachment-store";
+import {
+	removeOrphanAttachments,
+	scanAttachments,
+} from "./attachments/attachment-audit";
+import { importPhotoCard, pickImageFiles, type MediaAnchor } from "./attachments/media-import";
+import { AudioRecorder, audioDurationSec } from "./reader/audio-recorder";
+import { RecordingBar } from "./reader/recording-bar";
 import { CardEventBus } from "./events/card-bus";
 import {
 	ASSETS_SUBDIR,
@@ -52,7 +59,7 @@ import {
 import type { Card } from "./types";
 
 /** 工作区预设：study = 阅读 + 复习；research = 阅读 + 脑图 */
-type WorkspaceMode = "study" | "research";
+type WorkspaceMode = "study" | "research" | "deep";
 
 /**
  * MarinMind 插件入口
@@ -91,17 +98,33 @@ export default class MarinMindPlugin extends Plugin {
 	externalWatcher?: ExternalDocWatcher;
 
 	/**
+	 * 全局录音器（84-C：命令面板「录音摘录（自由卡片）」与主页重录入口共用，
+	 * 不依赖阅读器打开文档）。录音条挂 document.body 跨视图存续。
+	 */
+	private globalRecorder: AudioRecorder | null = null;
+	/** 全局录音条（84-C，挂 document.body；onunload 销毁） */
+	private globalRecBar: RecordingBar | null = null;
+	/** 当前全局录音的落卡锚点（84-C：start 时同步捕获，保存时消费） */
+	private globalRecAnchor: MediaAnchor | null = null;
+
+	/**
 	 * 数据层初始化 promise（失败在内部消化为 db 保持 undefined，不产生未处理拒绝）。
 	 * 默认已解决：onload 中 initStorage 完成后才指向真正的初始化（设置先行）。
 	 */
 	private dbReady: Promise<void> = Promise.resolve();
 
 	/**
-	 * 视图模式切换的恢复缓存（内存级，重启不保留）：隐藏侧 detach 前保存
-	 * 阅读状态（文件 + 页码）与脑图 id，切回联动/另一侧时原位恢复。
+	 * 视图模式切换的恢复缓存（内存级，读取时优先于 79-3 持久缓存）：隐藏侧
+	 * detach 前保存阅读状态（文件 + 页码）与脑图 id，切回联动/另一侧时原位恢复；
+	 * 跨会话回退源见 settings.workspaceHidden（restoreMapId/hiddenReaderState）。
 	 */
 	private lastReaderState: { file: string; page: number | null } | null = null;
 	private lastMapId: string | null = null;
+	/**
+	 * 深度复习上次导航到的卡（79-5 翻面去重）：评分/翻面会多次 render 同一张
+	 * 当前卡，重复触发阅读滚动 + 脑图定位；换卡才重新导航。
+	 */
+	private lastDeepCardId: string | null = null;
 	/**
 	 * 用户显式表达的视图模式意图（㊿ 会话内存，重启不保留；null = 未表达）：
 	 * 仅 setViewMode / openWorkspace 置位，手动关标签不更新。联动同步
@@ -230,6 +253,11 @@ export default class MarinMindPlugin extends Plugin {
 			callback: () => void this.openWorkspace("research"),
 		});
 		this.addCommand({
+			id: "open-workspace-deep",
+			name: "深度复习工作区（阅读 + 脑图 + 复习）",
+			callback: () => void this.openWorkspace("deep"),
+		});
+		this.addCommand({
 			id: "view-mode-doc",
 			name: "切换视图：单文档（隐藏脑图）",
 			callback: () => void this.setViewMode("doc"),
@@ -273,6 +301,57 @@ export default class MarinMindPlugin extends Plugin {
 			name: "文档管理（重关联失联文档）",
 			callback: () => new DocumentManagerModal(this.app, this).open(),
 		});
+		// 84-C 自由媒体卡：无文档归属的照片/语音卡（落「未归类卡片」，主页可见）
+		this.addCommand({
+			id: "capture-photo-card",
+			name: "捕捉照片为自由卡片",
+			checkCallback: (checking: boolean) => {
+				// 数据层未就绪时建不了卡——命令不可用（镜像 start-review-deck 先例）
+				if (!this.store) return false;
+				if (!checking) {
+					void (async () => {
+						// 取消返回 []：saved 0 时静默（用户主动放弃不扰民）
+						const files = await pickImageFiles(true);
+						const saved = await importPhotoCard(this, files, {
+							documentId: null,
+							page: null,
+						});
+						if (saved > 0) {
+							new Notice(`已保存 ${saved} 张照片卡（未归类卡片）`);
+						}
+					})();
+				}
+				return true;
+			},
+		});
+		this.addCommand({
+			id: "record-free-audio",
+			name: "录音摘录（自由卡片）",
+			checkCallback: (checking: boolean) => {
+				if (!this.store) return false;
+				if (!checking) {
+					// toggle 语义：在录则保存，未录则以 null 锚启动（→ 未归类卡片）
+					if (this.globalRecordingActive) {
+						void this.stopAndSaveGlobalRecording();
+					} else {
+						void this.startGlobalRecording({ documentId: null, page: null });
+					}
+				}
+				return true;
+			},
+		});
+		// 84-E 附件仓对账：孤儿文件确认后清理（默认取消，宁拒不赌）
+		this.addCommand({
+			id: "cleanup-attachments",
+			name: "扫描并清理附件…",
+			checkCallback: (checking: boolean) => {
+				if (!this.store) return false;
+				if (!checking) {
+					void this.auditAttachments(false);
+				}
+				return true;
+			},
+		});
 
 		// 设置页
 		this.addSettingTab(new MarinMindSettingTab(this.app, this));
@@ -293,6 +372,138 @@ export default class MarinMindPlugin extends Plugin {
 		this.store?.close();
 		// 库外文档观察（㊳）：停 watcher 与对账定时器
 		this.externalWatcher?.close();
+		// 84-C 全局录音：卸载即丢弃（未保存的录音不落库——宁丢勿残）
+		this.removeGlobalRecBar();
+		this.globalRecorder?.discard();
+		this.globalRecorder = null;
+	}
+
+	/** 全局录音是否进行中（阅读器 toggleRecording 启动前互斥反查用，84-C） */
+	get globalRecordingActive(): boolean {
+		return this.globalRecorder?.active ?? false;
+	}
+
+	/**
+	 * 启动全局录音（84-C）：锚点为建卡归属——命令面板传 null 锚（未归类卡片），
+	 * 主页重录传原卡归属。与阅读器录音互斥（麦克风独占，两条录音条并存必混淆）。
+	 */
+	async startGlobalRecording(anchor: MediaAnchor): Promise<void> {
+		if (this.globalRecordingActive) {
+			new Notice("已在录音中（命令面板再次执行「录音摘录（自由卡片）」可保存）");
+			return;
+		}
+		if (!this.store) {
+			new Notice("数据层未就绪，无法录音");
+			return;
+		}
+		// 防重：任一阅读器标签正在录音时不抢
+		for (const leaf of this.app.workspace.getLeavesOfType(READER_VIEW_TYPE)) {
+			if (leaf.view instanceof MarinMindReaderView && leaf.view.isRecording) {
+				new Notice("阅读器正在录音，请先在阅读器中保存或丢弃");
+				return;
+			}
+		}
+		try {
+			this.globalRecorder ??= new AudioRecorder();
+			await this.globalRecorder.start();
+		} catch (err) {
+			console.warn("[MarinMind] 麦克风不可用", err);
+			new Notice("无法访问麦克风：请在系统设置中允许 Obsidian 使用麦克风");
+			this.globalRecorder = null;
+			return;
+		}
+		this.globalRecAnchor = anchor;
+		this.globalRecBar = new RecordingBar({
+			app: this.app,
+			host: document.body, // 挂 body 跨视图存续（阅读器关标签录音条不消失）
+			recorder: this.globalRecorder,
+			onSave: () => void this.stopAndSaveGlobalRecording(),
+			onDiscard: () => {
+				this.removeGlobalRecBar();
+				this.globalRecorder?.discard();
+				new Notice("已丢弃录音");
+			},
+		});
+	}
+
+	/** 停止全局录音并保存为 audio 卡（锚点在启动时捕获——录音期间视图可能已切换） */
+	private async stopAndSaveGlobalRecording(): Promise<void> {
+		const rec = this.globalRecorder;
+		if (!rec?.active) {
+			return;
+		}
+		const anchor = this.globalRecAnchor;
+		this.removeGlobalRecBar();
+		try {
+			const { bytes, ext, durationMs } = await rec.stop();
+			if (bytes.byteLength === 0) {
+				new Notice("录音为空，已忽略");
+				return;
+			}
+			const ref = await this.attachments.save(bytes, ext);
+			this.cards.create({
+				documentId: anchor?.documentId ?? null,
+				page: anchor?.page ?? null,
+				rects: [],
+				excerptType: "audio",
+				excerptRef: ref,
+				color: "red", // ㊹ 四色化：照片/语音统一浅红
+				durationSec: audioDurationSec(durationMs), // 84-B 时长落库
+			});
+			new Notice(
+				anchor?.documentId != null
+					? "语音摘录已保存"
+					: "语音摘录已保存（未归类卡片）", // 84-C 自由卡落点：主页「未归类卡片」可见
+			);
+		} catch (err) {
+			console.error("[MarinMind] 录音保存失败", err);
+			new Notice("录音保存失败");
+		}
+	}
+
+	private removeGlobalRecBar(): void {
+		this.globalRecBar?.destroy();
+		this.globalRecBar = null;
+	}
+
+	/**
+	 * 附件仓对账（84-E）：孤儿（文件无卡引用——删卡级联中断的残留）弹确认
+	 * 清理，**默认取消宁拒不赌**（误删无法从库内恢复）；缺失（卡有 ref 无文件）
+	 * 不弹窗——用户只能自行恢复文件，弹窗无补救动作反而打扰，Notice 计数 +
+	 * console 明细足够。失败静默（启动路径不容错崩）。
+	 * @param idle true = 启动静默路径（无孤儿零提示）；false = 手动命令（无问题报平安）
+	 */
+	private async auditAttachments(idle: boolean): Promise<void> {
+		try {
+			const { orphans, missing } = await scanAttachments(this);
+			if (missing.length > 0) {
+				console.warn("[MarinMind] 附件缺失（卡片引用的文件不存在）", missing);
+				new Notice(`MarinMind：${missing.length} 张卡片的附件缺失（详见控制台）`);
+			}
+			if (orphans.length === 0) {
+				if (!idle) {
+					new Notice("附件完好：无孤儿文件");
+				}
+				return;
+			}
+			const preview = orphans
+				.slice(0, 5)
+				.map((p) => p.slice(p.lastIndexOf("/") + 1))
+				.join("、");
+			const more = orphans.length > 5 ? ` 等 ${orphans.length} 个` : "";
+			new ConfirmModal(
+				this.app,
+				"清理孤儿附件",
+				`发现 ${orphans.length} 个无卡片引用的附件文件（${preview}${more}），` +
+					"可能是删卡中断的残留。删除后不可恢复，且无法从库内找回。",
+				async () => {
+					const removed = await removeOrphanAttachments(this, orphans);
+					new Notice(`已清理 ${removed} 个孤儿附件`);
+				},
+			).open();
+		} catch (err) {
+			console.warn("[MarinMind] 附件对账失败", err);
+		}
 	}
 
 	/**
@@ -336,6 +547,9 @@ export default class MarinMindPlugin extends Plugin {
 			);
 			// 旧版 SQLite 库迁移引导（不阻塞启动；库为空 + 发现旧库才弹）
 			void this.detectLegacyDb();
+			// 84-E 附件仓对账（fire-and-forget 镜像 detectLegacyDb 先例）：静默路径，
+			// 发现孤儿才弹确认清理；失败仅 console 不打扰启动
+			void this.auditAttachments(true);
 			// ㊻-A-2：数据根为 vault 隐藏目录（点开头，如旧版 .marinmind）——Obsidian
 			// 索引不到其中笔记（搜索/阅读失效、卡片链接与嵌入解析失败、手编也无
 			// vault 事件回灌）。有数据时提醒迁移，否则用户只在复制链接失败时才隐约察觉
@@ -824,15 +1038,15 @@ export default class MarinMindPlugin extends Plugin {
 
 	/**
 	 * 打开指定脑图并定位到卡片（71 溯源进阶）：openMindmap 后 locateCard
-	 * 居中平移 + 闪烁。loadMap 是同步内存读取，await 后即可定位；卡片不在
-	 * 图中（折叠隐藏/已移出）locateCard 返 false → Notice 提示。
+	 * 居中平移 + 闪烁（79-2 折叠隐藏自动展开后定位）。loadMap 是同步内存读取，
+	 * await 后即可定位；卡片不在图中（已移出）locateCard 返 false → Notice 提示。
 	 */
 	async openMindmapAtCard(mapId: string, cardId: string): Promise<void> {
 		await this.openMindmap(mapId);
 		const leaf = this.app.workspace.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
 		const view = leaf?.view;
 		if (view instanceof MarinMindMindmapView && !view.locateCard(cardId)) {
-			new Notice("该卡片不在图中（可能已被折叠或移出）");
+			new Notice("该卡片不在图中（可能已被移出）");
 		}
 	}
 
@@ -996,6 +1210,11 @@ export default class MarinMindPlugin extends Plugin {
 	 * （选择器取消无回调 → 放弃布局，不动用户当前笔记）。
 	 */
 	private async openWorkspace(mode: WorkspaceMode): Promise<void> {
+		// 79-5 深度复习是三窗格独立编排，分流到专属方法
+		if (mode === "deep") {
+			await this.openDeepWorkspace();
+			return;
+		}
 		// ㊿ 记录显式意图：研究模式 = 阅读+脑图联动（sync 自动跟随），学习模式无脑图
 		this.viewModeIntent = mode === "research" ? "linked" : "doc";
 		const reader = this.app.workspace.getLeavesOfType(READER_VIEW_TYPE)[0];
@@ -1016,16 +1235,61 @@ export default class MarinMindPlugin extends Plugin {
 	}
 
 	/**
+	 * 保证 anchor 右侧并排存在一个 viewType 窗格（79-4 严格布局）：
+	 * - 无目标视图标签 → 从 anchor 右侧分裂新 leaf（split 铁律：setActiveLeaf
+	 *   与 getLeaf 之间零 await），**不装载视图**（调用方以 getViewState().type
+	 *   判定新空 leaf 后自行 setViewState）；
+	 * - 有且与 anchor 不同 tab 组（真并排 / 独立 popout）→ 原样复用返回
+	 *   （用户显式摆出的布局——含 popout——尊重不动）；
+	 * - 有且与 anchor 同组（被拖拽合并成后台标签）→ duplicateLeaf 以该标签为锚
+	 *   在右侧复制（视图 state 随之），校验复制出的类型不符或抛错则**回退手工
+	 *   搬运**：getViewState → anchor 右侧新 leaf setViewState；成功后 detach
+	 *   原后台标签——"阅读器组"里不再藏脑图/复习卡。
+	 * 返回就位 leaf；焦点与装载由调用方负责。
+	 */
+	private async ensureSideLeaf(anchor: WorkspaceLeaf, viewType: string): Promise<WorkspaceLeaf> {
+		const ws = this.app.workspace;
+		const side = ws.getLeavesOfType(viewType)[0];
+		if (!side) {
+			// 新分裂路径（零 await 铁律段，同 ensureSidePane 原实现）
+			ws.setActiveLeaf(anchor, { focus: true });
+			return ws.getLeaf("split", "vertical"); // 'vertical' = 右侧
+		}
+		// 桌面端 leaf 恒挂 WorkspaceTabs：parent 不同 = 不同组（并排或跨窗口）
+		if (side.parent !== anchor.parent) {
+			return side;
+		}
+		// 同组后台标签：复制到 anchor 右侧再撤离原标签
+		try {
+			const dup = await ws.duplicateLeaf(side, "vertical");
+			// 保守校验：duplicateLeaf 对自定义视图的 state 搬运不符即走回退
+			if (dup.getViewState().type !== viewType) {
+				throw new Error("duplicateLeaf 未搬运视图状态");
+			}
+			side.detach();
+			return dup;
+		} catch (err) {
+			console.warn("[MarinMind] duplicateLeaf 拆分失败，回退手工搬运视图状态", err);
+		}
+		// 回退：手工搬运 getViewState → 新 leaf setViewState → 撤离原标签
+		const st = side.getViewState();
+		ws.setActiveLeaf(anchor, { focus: true });
+		const fresh = ws.getLeaf("split", "vertical");
+		await fresh.setViewState(st);
+		side.detach();
+		return fresh;
+	}
+
+	/**
 	 * 保证右侧窗格存在并就位（幂等）：
 	 * 已有目标视图标签则复用（复习重启会话，脑图保持当前图）；没有则从阅读窗格右侧分裂。
 	 */
 	private async ensureSidePane(readerLeaf: WorkspaceLeaf, mode: WorkspaceMode): Promise<void> {
 		const target = mode === "study" ? REVIEW_VIEW_TYPE : MINDMAP_VIEW_TYPE;
-		let side = this.app.workspace.getLeavesOfType(target)[0];
-		if (!side) {
-			// split 锚点是"调用时刻的激活 leaf"：setActiveLeaf 与 getLeaf('split') 之间不得有 await
-			this.app.workspace.setActiveLeaf(readerLeaf, { focus: true });
-			side = this.app.workspace.getLeaf("split", "vertical"); // 'vertical' = 右侧
+		// 79-4 严格布局：目标视图藏在阅读器同组后台标签时强制拆出右侧再复用
+		const side = await this.ensureSideLeaf(readerLeaf, target);
+		// 新空 leaf（type 不符）装载视图；复用/拆分搬运而来的叶子 state 已就位
+		if (side.getViewState().type !== target) {
 			// ㊴ 研究模式选图：本书摘录目标图 > 上次浏览的图；皆 null（文档加载中）
 			// 不建空态脑图（㊿ 空态 onOpen 会弹选图器），由 loadFromPath 尾部 sync 补建
 			const mapId =
@@ -1047,7 +1311,7 @@ export default class MarinMindPlugin extends Plugin {
 			this.app.workspace.setActiveLeaf(readerLeaf, { focus: mode === "study" });
 			return;
 		}
-		// 后台标签可能是延迟加载的占位视图，需先加载拿到真实 view
+		// 复用既有（或拆分搬运而来）窗格：后台标签可能是延迟加载的占位视图，需先加载
 		await side.loadIfDeferred();
 		if (mode === "study" && side.view instanceof MarinMindReviewView) {
 			// 与"开始复习"命令一致：进入学习状态即重启会话；㊷ 学习模式必有阅读器——
@@ -1060,7 +1324,89 @@ export default class MarinMindPlugin extends Plugin {
 		this.app.workspace.setActiveLeaf(readerLeaf, { focus: true });
 		// 研究模式复用脑图窗格时纠正到本书目标图（㊿ 一对一，弃「保持当前图」）
 		if (mode === "research") {
-			await this.syncLinkedMindmap();
+			await this.syncLinkedMindmap({ explicit: true }); // 79-1 显式编排绕过门控
+		}
+	}
+
+	/**
+	 * 深度复习工作区（79-5，MN4 学习集式三窗格）：阅读 + 脑图 + 复习。
+	 * 编排：阅读窗格就位（复用/选择器，取消即放弃）→ 研究模式编排补脑图侧
+	 * （ensureSidePane 含 79-4 严格布局 + 显式纠正本书目标图）→ 脑图右侧
+	 * ensureSideLeaf 就位复习窗格（同样防同组后台标签）→ 焦点复习 + 全部书籍
+	 * 开练。viewModeIntent 置 doc（同学习模式）：脑图由复习卡深度导航驱动，
+	 * 不做切文档的书级自动跟随。脑图未建（文档加载中）时复习退居阅读器右侧
+	 * 二窗格，脑图稍后由 loadFromPath 尾部 sync 补建。
+	 */
+	private async openDeepWorkspace(): Promise<void> {
+		this.viewModeIntent = "doc";
+		this.lastDeepCardId = null; // 新会话：首张当前卡也要导航
+		const ws = this.app.workspace;
+		let reader = ws.getLeavesOfType(READER_VIEW_TYPE)[0];
+		if (!reader) {
+			const file = await this.pickPdfFile();
+			if (!file) {
+				return; // 选择器取消：放弃布局，不动用户当前笔记
+			}
+			reader = await this.openInReader(file);
+		}
+		await this.ensureSidePane(reader, "research");
+		// 复习窗格锚在脑图右侧（无脑图时退居阅读器右侧）
+		const anchor = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0] ?? reader;
+		const review = await this.ensureSideLeaf(anchor, REVIEW_VIEW_TYPE);
+		if (review.getViewState().type !== REVIEW_VIEW_TYPE) {
+			await review.setViewState({ type: REVIEW_VIEW_TYPE });
+		}
+		// 焦点给复习（键盘评分依赖 activeLeaf === 复习 leaf）；null = 全部书籍（显式传参）
+		ws.setActiveLeaf(review, { focus: true });
+		await review.loadIfDeferred();
+		if (review.view instanceof MarinMindReviewView) {
+			await review.view.startSession(null);
+		}
+	}
+
+	/** 深度复习布局判定（79-5）：阅读/脑图/复习三视图标签齐备（布局推导，同 getViewMode 哲学） */
+	private isDeepReviewLayout(): boolean {
+		const ws = this.app.workspace;
+		return (
+			ws.getLeavesOfType(READER_VIEW_TYPE).length > 0 &&
+			ws.getLeavesOfType(MINDMAP_VIEW_TYPE).length > 0 &&
+			ws.getLeavesOfType(REVIEW_VIEW_TYPE).length > 0
+		);
+	}
+
+	/**
+	 * 深度复习导航（79-5）：复习当前卡 → 阅读侧滚动定位 + 脑图侧定位/切图。
+	 * 仅三窗格齐备且复习窗格为激活标签时驱动——cardBus 外部改卡也会触发复习
+	 * 重渲染，此时复习在后台，不打扰用户当前阅读位置；lastDeepCardId 翻面去重。
+	 * 显式导航不受 linkDirection 门控（R9：深度复习命令属显式编排）。
+	 * 当前图无此卡时按卡→图映射切图：直接改脑图 leaf 视图状态再定位，不走
+	 * openMindmap——其 setActiveLeaf 会抢走复习窗格焦点致键盘评分失效（R2）。
+	 */
+	async deepNavigateToCard(card: Card, fromLeaf: WorkspaceLeaf): Promise<void> {
+		const ws = this.app.workspace;
+		if (!this.isDeepReviewLayout() || ws.activeLeaf !== fromLeaf) {
+			return;
+		}
+		if (this.lastDeepCardId === card.id) {
+			return;
+		}
+		this.lastDeepCardId = card.id;
+		await this.revealCardInReader(card, { explicit: true });
+		if (this.locateCardInMindmaps(card.id, { explicit: true })) {
+			return;
+		}
+		// 当前图无此卡：卡→图映射取第一张现存图切换脑图侧（不抢焦点）
+		const hit = this.mindmaps.nodesByCard(card.id)[0];
+		const mapLeaf = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
+		if (!hit || !mapLeaf) {
+			return; // 不在任何图中/脑图缺失：阅读侧定位已足够
+		}
+		await mapLeaf.setViewState({ type: MINDMAP_VIEW_TYPE, state: { mapId: hit.mapId } });
+		await mapLeaf.loadIfDeferred();
+		if (mapLeaf.view instanceof MarinMindMindmapView) {
+			// 新视图 onOpen 先消费 state.mapId；显式 loadMap 幂等兜底（㊿-A 同源）
+			mapLeaf.view.loadMap(hit.mapId);
+			mapLeaf.view.locateCard(card.id);
 		}
 	}
 
@@ -1146,6 +1492,12 @@ export default class MarinMindPlugin extends Plugin {
 			for (const leaf of maps) {
 				leaf.detach();
 			}
+			// 79-3 跨会话持久化：隐藏侧脑图写回设置（重启后联动/map 模式可恢复）；
+			// 选择器取消早退路径（上方 return）不写——缓存只反映真实完成的隐藏
+			if (maps.length > 0) {
+				this.settings.workspaceHidden = this.lastMapId ? { mapId: this.lastMapId } : null;
+				await this.saveData({ ...this.settings });
+			}
 			return;
 		}
 		if (mode === "map") {
@@ -1169,6 +1521,13 @@ export default class MarinMindPlugin extends Plugin {
 			for (const leaf of readers) {
 				leaf.detach();
 			}
+			// 79-3 跨会话持久化：隐藏侧阅读状态写回设置（同 doc 分支，取消路径不写）
+			if (readers.length > 0) {
+				this.settings.workspaceHidden = this.lastReaderState
+					? { reader: { ...this.lastReaderState } }
+					: null;
+				await this.saveData({ ...this.settings });
+			}
 			return;
 		}
 		// linked：缺侧从对侧右侧分裂补齐（文档居左为常态，
@@ -1178,8 +1537,10 @@ export default class MarinMindPlugin extends Plugin {
 		const reader = ws.getLeavesOfType(READER_VIEW_TYPE)[0];
 		const map = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
 		if (reader && map) {
+			// 79-4 严格布局：脑图若被拖进阅读器同组（后台标签）先强制拆出右侧
+			await this.ensureSideLeaf(reader, MINDMAP_VIEW_TYPE);
 			ws.setActiveLeaf(reader, { focus: true });
-			await this.syncLinkedMindmap();
+			await this.syncLinkedMindmap({ explicit: true }); // 79-1 切换条显式编排绕过门控
 			return;
 		}
 		if (reader) {
@@ -1232,14 +1593,34 @@ export default class MarinMindPlugin extends Plugin {
 	}
 
 	/**
+	 * 联动方向是否放行（79-1 四档开关）：双向/对应单向档放行，其余拒绝；
+	 * explicit = 显式编排（工作区命令/视图切换条/深度复习导航）直通——
+	 * 用户主动触发的布局编排不受 linkDirection 约束，只有自动跟随与
+	 * 点击定位（视图层常规事件）走门控。
+	 */
+	private linkAllows(dir: "docToMap" | "mapToDoc", explicit = false): boolean {
+		if (explicit) {
+			return true;
+		}
+		const d = this.settings.linkDirection;
+		return d === "both" || d === dir;
+	}
+
+	/**
 	 * 联动一对一同步（㊿）：激活阅读文档的目标图 → 脑图侧显示的图与之对齐。
 	 * 仅在用户显式表达联动意图（viewModeIntent === "linked"，即点过「联动」/
 	 * 研究模式）后自动跟随——并排浏览（主页开图 + 打开文档）不被打扰。
 	 * 接线点：applyViewMode linked 分支 / reader loadFromPath 尾部（联动下
 	 * 切文档自动跟随新书）/ setCollectTarget（主动切换目标图立即反映）/
 	 * 研究模式 ensureSidePane。目标图拿不到（文档加载中）静默返回。
+	 * 79-1 门控：自动调用受 settings.linkDirection 约束（off/mapToDoc 档不跟随）；
+	 * 显式编排（工作区命令/切换条）传 { explicit: true } 绕过——研究模式
+	 * 「自动定位当前书的目标图」主流程不受开关影响。
 	 */
-	public async syncLinkedMindmap(): Promise<void> {
+	public async syncLinkedMindmap(opts: { explicit?: boolean } = {}): Promise<void> {
+		if (!this.linkAllows("docToMap", opts.explicit)) {
+			return;
+		}
 		if (this.viewModeIntent !== "linked" || !this.store) {
 			return;
 		}
@@ -1273,8 +1654,12 @@ export default class MarinMindPlugin extends Plugin {
 	 * 判定用目标图匹配而非模式推导——onClose 时本 leaf 可能已出标签列表，
 	 * 推导不可靠；且文档 A + 无关图并排时不误关。模式切换的 detach 由
 	 * suppressLinkedClose 拦截。级联关闭 = 用户离开联动，viewModeIntent 置回 null。
+	 * 79-1：off 档（两窗格完全独立）停用互关。
 	 */
 	public linkedCloseMindmap(filePath: string | null): void {
+		if (this.settings.linkDirection === "off") {
+			return;
+		}
 		if (this.suppressLinkedClose || filePath == null || !this.store) {
 			return;
 		}
@@ -1293,6 +1678,9 @@ export default class MarinMindPlugin extends Plugin {
 
 	/** 联动互关（㊿）反向：脑图视图关闭时，关闭绑定到该图的阅读标签 */
 	public linkedCloseReader(mapId: string | null): void {
+		if (this.settings.linkDirection === "off") {
+			return; // 79-1 off 档：两窗格完全独立，互关停用
+		}
 		if (this.suppressLinkedClose || mapId == null || !this.store) {
 			return;
 		}
@@ -1316,7 +1704,8 @@ export default class MarinMindPlugin extends Plugin {
 		}
 		const file = await this.pickRestoredPdf();
 		if (file) {
-			await this.openInReader(file, this.lastReaderState?.page ?? undefined);
+			// 79-3 页码同走合并读取（内存优先、持久回退），重开回到隐藏前页
+			await this.openInReader(file, this.hiddenReaderState()?.page ?? undefined);
 		}
 	}
 
@@ -1340,9 +1729,21 @@ export default class MarinMindPlugin extends Plugin {
 		}
 	}
 
-	/** lastMapId 可恢复则返回（本会话曾打开过的图），否则 null */
+	/**
+	 * 隐藏阅读侧缓存读取（79-3）：内存 lastReaderState 优先，重启后回退
+	 * data.json 持久化的 workspaceHidden.reader；两侧皆无返回 null。
+	 */
+	private hiddenReaderState(): { file: string; page: number | null } | null {
+		return this.lastReaderState ?? this.settings.workspaceHidden?.reader ?? null;
+	}
+
+	/**
+	 * lastMapId 可恢复则返回：内存（本会话）优先，79-3 起重启后回退设置持久
+	 * 缓存；图已不存在（被删）时探活失败返回 null。
+	 */
 	private restoreMapId(): string | null {
-		return this.lastMapId && this.mindmaps.get(this.lastMapId) ? this.lastMapId : null;
+		const id = this.lastMapId ?? this.settings.workspaceHidden?.mapId ?? null;
+		return id && this.mindmaps.get(id) ? id : null;
 	}
 
 	/**
@@ -1389,8 +1790,9 @@ export default class MarinMindPlugin extends Plugin {
 	 * 否则弹快速选择器；取消返回 null（调用方放弃布局，不动现状）。
 	 */
 	private async pickRestoredPdf(): Promise<TFile | string | null> {
-		if (this.lastReaderState) {
-			const cached = this.lastReaderState.file;
+		// 79-3：内存缓存优先，重启后回退设置持久化的隐藏阅读侧
+		const cached = this.hiddenReaderState()?.file;
+		if (cached) {
 			if (isAbsoluteFsPath(cached)) {
 				// 库外路径仅桌面可探活复用；移动端 / 文件已失存落回选择器
 				if (!Platform.isMobile && (await externalFileExists(cached))) {
@@ -1433,8 +1835,12 @@ export default class MarinMindPlugin extends Plugin {
 	 * 联动定位（脑图→文档）：点击脑图节点把阅读器滚到该卡原文。
 	 * 已有打开同文件的阅读标签就地定位；异文件复用第一个阅读标签切换
 	 * （联动视图单一阅读窗格语义）；没有阅读标签才新开（openCardSource）。
+	 * 79-1：自动调用受 linkDirection 门控（off/docToMap 档不跳），显式编排传 explicit。
 	 */
-	async revealCardInReader(card: Card): Promise<void> {
+	async revealCardInReader(card: Card, opts: { explicit?: boolean } = {}): Promise<void> {
+		if (!this.linkAllows("mapToDoc", opts.explicit)) {
+			return;
+		}
 		const doc = card.documentId ? this.documents.get(card.documentId) : undefined;
 		if (!doc) {
 			return;
@@ -1476,8 +1882,11 @@ export default class MarinMindPlugin extends Plugin {
 		}
 	}
 
-	/** 联动定位（文档→脑图）：阅读器点高亮时让打开着的脑图平移到对应节点并闪烁 */
-	locateCardInMindmaps(cardId: string): boolean {
+	/** 联动定位（文档→脑图）：阅读器点高亮时让打开着的脑图平移到对应节点并闪烁（79-1 受门控） */
+	locateCardInMindmaps(cardId: string, opts: { explicit?: boolean } = {}): boolean {
+		if (!this.linkAllows("docToMap", opts.explicit)) {
+			return false;
+		}
 		return locateCardInActiveMindmaps(cardId);
 	}
 

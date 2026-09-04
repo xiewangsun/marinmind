@@ -162,11 +162,17 @@ export function occlusionPercent(
  * 遮挡视觉窗口（㊷）：复习正面出图对应的页归一化范围——
  * 有内容快照的卡（area/lasso/handwriting）取 rects 并集包围盒（快照图边界），
  * 其余（text/blank，走页裁剪路径）取摘录预览裁剪窗口。
+ * 84-D photo：遮挡是图内 0-1 坐标（预览弹窗编辑），展示图即整图——
+ * rects 展示框不得参与（否则复习遮挡错位），恒返回整图。
  */
 export function occlusionBounds(card: {
 	rects: DocRect[];
 	excerptRef: string | null;
+	excerptType?: string;
 }): DocRect {
+	if (card.excerptType === "photo") {
+		return { x: 0, y: 0, w: 1, h: 1 };
+	}
 	if (card.excerptRef && card.rects.length > 0) {
 		return {
 			x: Math.min(...card.rects.map((r) => r.x)),
@@ -176,6 +182,28 @@ export function occlusionBounds(card: {
 		};
 	}
 	return excerptCropRect(card.rects);
+}
+
+/**
+ * R3（W-02）：快照/照片 img 的预留宽高属性——加载前按包围盒比例占位防 CLS。
+ * 属性值只取比例（等比缩放到 400 基宽），实际尺寸由 CSS max-* 约束重算。
+ * area/lasso/handwriting 快照图按 rects 并集包围盒取比；photo 的 rects 是
+ * 页上展示框非图像几何（图像恒整图，见 occlusionBounds），无锚可取回退 4:3。
+ */
+export function snapshotImgSize(card: {
+	rects: DocRect[];
+	excerptType?: string;
+}): { width: number; height: number } {
+	if (card.excerptType !== "photo" && card.rects.length > 0) {
+		const w =
+			Math.max(...card.rects.map((r) => r.x + r.w)) - Math.min(...card.rects.map((r) => r.x));
+		const h =
+			Math.max(...card.rects.map((r) => r.y + r.h)) - Math.min(...card.rects.map((r) => r.y));
+		if (w > 0 && h > 0) {
+			return { width: 400, height: Math.max(1, Math.round((400 * h) / w)) };
+		}
+	}
+	return { width: 400, height: 300 };
 }
 
 /** 划选工具栏定位输入（75）：全部视口坐标（getBoundingClientRect 产物） */

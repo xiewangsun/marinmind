@@ -193,6 +193,42 @@ describe("卡片仓储", () => {
 		expect(updated?.updatedAt).toBeGreaterThanOrEqual(card.updatedAt);
 	});
 
+	it("durationSec 三态（84-B 语音时长）：创建落值 / undefined 不动 / null 清空", () => {
+		const created = cards.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "audio",
+			excerptRef: "assets/a.webm",
+			durationSec: 42,
+		});
+		expect(created.durationSec).toBe(42);
+		const untouched = cards.update(created.id, { note: "批注" });
+		expect(untouched?.durationSec).toBe(42); // 未指定不动
+		const cleared = cards.update(created.id, { durationSec: null });
+		expect(cleared?.durationSec).toBeUndefined(); // 显式清空（Card 层无 null——缺省即未知）
+		// 创建缺省：非 audio / 未传时长 → undefined（未知）
+		const plain = cards.create({ documentId: null, page: null, rects: [], excerptType: "text" });
+		expect(plain.durationSec).toBeUndefined();
+	});
+
+	it("rects 整体替换（84-D photo 展示框）：传数组替换 / 空数组清空 / undefined 不动", () => {
+		const card = cards.create({
+			documentId: null,
+			page: 3,
+			rects: [],
+			excerptType: "photo",
+			excerptRef: "assets/p.jpg",
+		});
+		const frame = [{ x: 0.3, y: 0.4, w: 0.2, h: 0.1 }];
+		cards.update(card.id, { note: "批注" });
+		expect(cards.get(card.id)!.rects).toEqual([]); // 未指定不动
+		cards.update(card.id, { rects: frame }); // 定位：整体替换为单一展示框
+		expect(cards.get(card.id)!.rects).toEqual(frame);
+		cards.update(card.id, { rects: [] }); // 取消定位：清空回徽标锚定
+		expect(cards.get(card.id)!.rects).toEqual([]);
+	});
+
 	it("title 三态（㊺）：undefined 不动 / 值更新 / null 清空；创建缺省为 null", () => {
 		const card = cards.create({
 			documentId: null,
@@ -295,6 +331,33 @@ describe("卡片仓储", () => {
 		expect(all).toHaveLength(3);
 		expect(all.map((c) => c.id)).toContain(orphan.id);
 		expect(all[0].id).toBe(c1.id); // 更新过的排最前；同刻创建按 id 稳定序
+	});
+
+	it("书名分组卡（81）不纳入卡片系统：listAll/listByDocument/count/recent 一律排除，get 仍可取", () => {
+		const doc = documents.upsertByPath("books/a.pdf", "书A");
+		const excerpt = cards.create({ documentId: doc.id, page: 1, rects: [], excerptType: "text", excerptText: "摘录" });
+		const group = cards.create({
+			documentId: doc.id,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "《书A》",
+			group: true,
+		});
+		expect(group.group).toBe(true); // 创建即标记
+		const manual = cards.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "手工" });
+		expect(manual.group).toBe(false); // 普通卡显式 false
+
+		// 四个卡片视角查询全部排除组卡
+		expect(cards.listAll().map((c) => c.id)).toEqual(expect.arrayContaining([excerpt.id, manual.id]));
+		expect(cards.listAll().map((c) => c.id)).not.toContain(group.id);
+		expect(cards.listByDocument(doc.id).map((c) => c.id)).toEqual([excerpt.id]);
+		expect(cards.recent(10).map((c) => c.id)).not.toContain(group.id);
+		expect(cards.count()).toBe(2); // 全库：摘录 + 手工（组卡不计）
+		expect(cards.count(doc.id)).toBe(1); // 单书同口径
+
+		// 脑图节点渲染走 get：组卡本体仍可取
+		expect(cards.get(group.id)?.excerptText).toBe("《书A》");
 	});
 });
 

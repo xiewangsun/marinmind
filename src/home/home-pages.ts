@@ -343,7 +343,8 @@ export async function renderDocumentsPage(container: HTMLElement, ctx: HomeRende
 	const searchRow = listWrap.createDiv({ cls: "marinmind-home-search-row" });
 	const search = searchRow.createEl("input", {
 		cls: "marinmind-home-search",
-		attr: { type: "text", placeholder: "搜索标题或路径…" },
+		// R3（W-04）：占位符不构成可访问名，补 aria-label
+		attr: { type: "text", placeholder: "搜索标题或路径…", "aria-label": "搜索文档（标题或路径）" },
 	});
 	search.value = ctx.docQuery;
 	// ㊸ 文件夹栏整栏收起：单钮组就地切换（panel-left 图标名经 obsidian.asar 注册表验证；
@@ -356,6 +357,8 @@ export async function renderDocumentsPage(container: HTMLElement, ctx: HomeRende
 	setIcon(folderBtn, "panel-left");
 	const syncFoldersBtn = (): void => {
 		folderBtn.classList.toggle("is-active", !plugin.settings.homeFoldersHidden);
+		// R3（W-12）：开合状态同步 aria-pressed（镜像阅读器工具行先例）
+		folderBtn.setAttribute("aria-pressed", String(!plugin.settings.homeFoldersHidden));
 	};
 	syncFoldersBtn();
 	folderBtn.addEventListener("click", () => {
@@ -431,6 +434,9 @@ export async function renderDocumentsPage(container: HTMLElement, ctx: HomeRende
 		const grid = plugin.settings.homeDocsView === "grid";
 		listBtn.classList.toggle("is-active", !grid);
 		gridBtn.classList.toggle("is-active", grid);
+		// R3（W-12）：选中态同步 aria-pressed（镜像阅读器工具行先例）
+		listBtn.setAttribute("aria-pressed", String(!grid));
+		gridBtn.setAttribute("aria-pressed", String(grid));
 	};
 	syncToggle();
 	const setDocsView = (mode: "list" | "grid"): void => {
@@ -1209,6 +1215,8 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 	setIcon(folderBtn, "panel-left");
 	const syncFoldersBtn = (): void => {
 		folderBtn.classList.toggle("is-active", !plugin.settings.homeCardsFoldersHidden);
+		// R3（W-12）：开合状态同步 aria-pressed（镜像文档页同款）
+		folderBtn.setAttribute("aria-pressed", String(!plugin.settings.homeCardsFoldersHidden));
 	};
 	syncFoldersBtn();
 	folderBtn.addEventListener("click", () => {
@@ -1257,6 +1265,8 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 	});
 	setIcon(batchBtn, "list-checks");
 	batchBtn.classList.toggle("is-active", batchSelectMode);
+	// R3（W-12）：批选模式开合状态同步 aria-pressed（整页重渲染重建按钮，创建时即终态）
+	batchBtn.setAttribute("aria-pressed", String(batchSelectMode));
 	batchBtn.addEventListener("click", () => {
 		if (batchSelectMode) {
 			clearBatchSelection(); // 关闭模式并清空选择

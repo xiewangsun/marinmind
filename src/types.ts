@@ -44,6 +44,13 @@ export interface BookDocument {
 	 * 存书文件 frontmatter `auto_flashcard: true`，false 省略整行（零写入契约）
 	 */
 	autoFlashcard: boolean;
+	/**
+	 * 上次阅读页码（80，1 基）：重开文档从此页继续（reader-view 采集回放）。
+	 * 页 1 归一为 null——未翻页的书不落行（零写入契约）；存 frontmatter
+	 * `last_page`。翻页写入不动 updatedAt（document-repo.update 保位，
+	 * 不打乱主页「最近」排序）
+	 */
+	lastPage: number | null;
 	createdAt: number;
 	updatedAt: number;
 }
@@ -102,6 +109,22 @@ export interface Card {
 	 * 存量卡字节不变（镜像 title/deck 模式）
 	 */
 	outline?: boolean;
+	/**
+	 * 书名分组卡（81，摘录自动入图的《书名》根节点）：ensureGroupCard 建的
+	 * 结构卡，仅作脑图节点锚定，不纳入卡片系统（列表/统计/选择器/复习一律
+	 * 过滤，仓储 listAll/listByDocument/count 已收口）。脑图内行为不变
+	 * （照常显示/编辑/拖拽，重命名跟随不丢标记）。零写入契约：仅 true 序列化
+	 * 机器层 `group: true` 键，缺省省略；存量识别由解析层按「同书 page null +
+	 * 文本恰为《书名》」推导（镜像 outline 模式）
+	 */
+	group?: boolean;
+	/**
+	 * 语音时长（秒，84-B）：audio 卡录音时长（四舍五入整秒）；undefined = 未知
+	 * （存量卡/非 audio）。落库以 dur 为权威展示——webm 容器无时长元数据时
+	 * `<audio>` 控件显示 NaN，标签兜底用本字段。零写入契约：仅合法数值序列化
+	 * 机器层 `dur` 键（键序 ref 后），缺省省略——存量卡字节不变（镜像 title 模式）
+	 */
+	durationSec?: number;
 	tags: string[];
 	createdAt: number;
 	updatedAt: number;
@@ -189,6 +212,27 @@ export function isLineStyle(v: unknown): v is LineStyle {
 	return typeof v === "string" && (LINE_STYLES as readonly string[]).includes(v);
 }
 
+/**
+ * 联动方向（79-1，MN4 四档联动开关）：both=双向（默认）/ docToMap=仅文档→脑图 /
+ * mapToDoc=仅脑图→文档 / off=关闭（两窗格完全独立——自动跟随、点击定位、
+ * 联动互关全部停用）。显式编排（工作区命令/切换条）不受此开关约束。
+ */
+export const LINK_DIRECTIONS = ["both", "docToMap", "mapToDoc", "off"] as const;
+export type LinkDirection = (typeof LINK_DIRECTIONS)[number];
+
+/** 联动方向的界面显示名（设置页下拉） */
+export const LINK_DIRECTION_LABELS: Record<LinkDirection, string> = {
+	both: "双向联动（默认）",
+	docToMap: "仅文档 → 脑图",
+	mapToDoc: "仅脑图 → 文档",
+	off: "关闭（两窗格独立）",
+};
+
+/** 校验外部值是否为合法联动方向（非法值按未设置处理，读取层归一默认双向） */
+export function isLinkDirection(v: unknown): v is LinkDirection {
+	return typeof v === "string" && (LINK_DIRECTIONS as readonly string[]).includes(v);
+}
+
 /** 思维导图（命名脑图，任何书的卡片可混排进同一张图） */
 export interface Mindmap {
 	id: string;
@@ -197,7 +241,9 @@ export interface Mindmap {
 	defaultBranchStyle: BranchStyle;
 	/** 绑定的文档（v8，㉗）：该书的默认脑图（摘录自动入图目标）；普通图为 null */
 	documentId: string | null;
-	/** 固定根节点（v8，㉗）：全局唯一——设定后所有新摘录直挂该节点下；节点删除由外键 SET NULL 自动解钉 */
+	/** 固定根节点（v8，㉗）：全局唯一——设定后新摘录直挂该节点下；节点删除由外键 SET NULL 自动解钉。
+	 *  80 起仅所属文档生效（auto-collect.fixedRootDocOf 推导）：图有 documentId 或钉节点
+	 *  卡片有 documentId 时限定该书摘录；主题图无归属时保留跨文档收拢 */
 	fixedRootNodeId: string | null;
 	createdAt: number;
 	updatedAt: number;

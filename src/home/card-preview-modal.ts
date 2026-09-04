@@ -3,10 +3,11 @@ import type { App } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card, DocRect } from "../types";
 import { pageWordOf } from "../storage/paths";
-import { cardPreview, EXCERPT_LABELS } from "./home-data";
+import { cardPreview, cardPreviewBlocks, EXCERPT_LABELS } from "./home-data";
 import { highlightFallbackColor } from "../reader/highlight-colors";
 import { renderExcerptVisual } from "../reader/excerpt-visual";
-import { deleteCardCascade, promptCardDeck, promptCardNote, promptCardTags } from "./card-actions";
+import { snapshotImgSize } from "../reader/rect-utils";
+import { deleteCardCascade, promptCardDeck, promptCardEdit, promptCardTags } from "./card-actions";
 import { ConfirmModal } from "../mindmap/confirm-modal";
 
 /**
@@ -18,8 +19,9 @@ import { ConfirmModal } from "../mindmap/confirm-modal";
  * 2. 原文页裁剪（text/blank 卡走此路，带少量上下文）；
  * 3. 文本兜底（附件缺失且无 rects 的 photo/audio）。
  *
- * 标题与主页列表同源（cardPreview：批注 > 摘录文字 > 形态占位）；批注存在时
- * 摘录文字另列原文块（批注=问题、摘录=答案，与复习正反面同语义）。
+ * 标题与主页列表同源（cardPreview：标题 > 批注 > 摘录文字 > 形态占位）；
+ * 正文块经 cardPreviewBlocks（85-D）拆分——批注与摘录文字各有独立展示位
+ * （批注=问题、摘录=答案，与复习正反面同语义；未被标题吸收的内容才另列）。
  * blob URL 在 onClose 统一 revoke（镜像 MediaPreviewModal）。
  */
 
@@ -63,11 +65,22 @@ export class CardPreviewModal extends Modal {
 		this.bodyEl = contentEl.createDiv({ cls: "marinmind-card-preview-body" });
 		void this.renderVisual(this.bodyEl);
 
-		// 有批注且摘录文字非空时另列原文块（标题=批注不重复展示；与复习背面同语义）
-		if (this.card.note?.trim() && this.card.excerptText?.trim()) {
+		// 正文块（85-D cardPreviewBlocks）：标题行已吸收最高优先级内容——
+		// 批注块仅在有标题时另列（title 空时 cardPreview 已用批注当标题）；
+		// 摘录块（OCR 文字归宿）在 title/note 任一存在时另列（全空时已当标题）。
+		// 批注=问题、摘录=答案，与复习背面同语义；修复"OCR 卡看不到文字 /
+		// 有批注的卡看不到批注"两类不可见问题。
+		const blocks = cardPreviewBlocks(this.card);
+		if (blocks.note) {
+			contentEl.createDiv({
+				cls: "marinmind-card-preview-note",
+				text: blocks.note,
+			});
+		}
+		if (blocks.excerpt) {
 			contentEl.createDiv({
 				cls: "marinmind-card-preview-excerpt",
-				text: this.card.excerptText.trim(),
+				text: blocks.excerpt,
 			});
 		}
 
@@ -94,9 +107,10 @@ export class CardPreviewModal extends Modal {
 		new ButtonComponent(actions).setIcon("layers").setButtonText("卡组").onClick(() => {
 			promptCardDeck(this.app, this.plugin, this.freshCard());
 		});
-		// 65 编辑批注：复习/预览发现批注要改不必回阅读器，同一单源共享
-		new ButtonComponent(actions).setIcon("pencil").setButtonText("批注").onClick(() => {
-			promptCardNote(this.app, this.plugin, this.freshCard());
+		// 65 编辑批注起步，78 统一标题/批注双字段（与脑图节点编辑器同源）——
+		// 复习/预览发现要改不必回脑图，同一单源共享
+		new ButtonComponent(actions).setIcon("pencil").setButtonText("标题/批注").onClick(() => {
+			promptCardEdit(this.app, this.plugin, this.freshCard());
 		});
 		// 71 photo 快照遮挡：预览弹窗是 photo 卡唯一遮挡编辑面（阅读器无页矩形无入口）
 		if (this.card.excerptType === "photo") {
@@ -107,6 +121,30 @@ export class CardPreviewModal extends Modal {
 				occBtn.buttonEl.toggleClass("is-active", this.occEdit);
 				this.rerenderBody();
 			});
+		}
+		// 84-C 重录语音：删旧卡（含附件）+ 立即开始全局录音（锚定原卡归属，
+		// 不在阅读器也能重录）。批注/标签/复习进度随旧卡丢弃（语音卡通常无此负担）。
+		if (this.card.excerptType === "audio") {
+			new ButtonComponent(actions)
+				.setIcon("mic")
+				.setButtonText("重录")
+				.setWarning()
+				.onClick(() => {
+					const fresh = this.freshCard();
+					new ConfirmModal(
+						this.app,
+						"重录语音",
+						"将删除当前语音卡片（含批注、标签与复习进度），并立即开始新录音。继续？",
+						() => {
+							deleteCardCascade(this.plugin, fresh);
+							this.close();
+							void this.plugin.startGlobalRecording({
+								documentId: fresh.documentId,
+								page: fresh.page,
+							});
+						},
+					).open();
+				});
 		}
 		new ButtonComponent(actions)
 			.setIcon("trash-2")
@@ -195,6 +233,10 @@ export class CardPreviewModal extends Modal {
 		const wrap = host.createDiv({ cls: "marinmind-photo-occ-editor" });
 		const img = wrap.createEl("img", { cls: "marinmind-card-preview-media" });
 		img.alt = EXCERPT_LABELS.photo;
+		// R3（W-02）：photo 图像恒整图、比例未知，4:3 兜底预留（加载后按真实比例落位）
+		const size = snapshotImgSize(card);
+		img.width = size.width;
+		img.height = size.height;
 		img.src = url;
 		img.draggable = false; // 防原生拖图劫持拖框手势
 		this.syncOccBlocks(wrap, card);

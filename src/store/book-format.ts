@@ -68,6 +68,7 @@ const KNOWN_BOOK_FM_KEYS = new Set([
 	"category",
 	"collect_map_id",
 	"auto_flashcard",
+	"last_page",
 	"file_path",
 	"created_at",
 	"updated_at",
@@ -266,6 +267,12 @@ export function parseBookMd(text: string, opts: ParseBookOptions = {}): ParsedBo
 		collectMapId: yamlUnquote(fm.get("collect_map_id") ?? "").trim() || null,
 		// 按书自动转闪卡（㊷）：缺行/false = 关，仅字面 true 开启
 		autoFlashcard: fm.get("auto_flashcard") === "true",
+		// 上次阅读页码（80）：缺行/0/负数/非数字（NaN 比较为 false）归 null——
+		// 页 1 也在写侧归一为 null 不落行，此处读侧同样容错
+		lastPage: (() => {
+			const lp = Number(fm.get("last_page"));
+			return lp > 1 ? Math.floor(lp) : null;
+		})(),
 		createdAt: Number(fm.get("created_at")) || 0,
 		updatedAt: Number(fm.get("updated_at")) || 0,
 	};
@@ -316,19 +323,21 @@ export function parseBookMd(text: string, opts: ParseBookOptions = {}): ParsedBo
 				warnings.push(`第 ${j + 1} 行：书签节内出现卡片注释，已忽略`);
 				continue;
 			}
-			parseCardComment(lines, j, page ?? null, doc.id, cards, reviews, links, warnings);
+			parseCardComment(lines, j, page ?? null, doc.id, title, cards, reviews, links, warnings);
 		}
 	}
 
 	return { claimed: kind === "book", doc, cards, reviews, bookmarks, links, extraFrontmatter, warnings };
 }
 
-/** 解析一条卡片机器注释（lines[j] 即注释行；向上收集 block id 行与 callout 正文） */
+/** 解析一条卡片机器注释（lines[j] 即注释行；向上收集 block id 行与 callout 正文。
+ *  docTitle（81）用于存量书名分组卡的推导识别） */
 function parseCardComment(
 	lines: string[],
 	j: number,
 	page: number | null,
 	docId: string,
+	docTitle: string,
 	cards: Card[],
 	reviews: ReviewState[],
 	links: CardLink[],
@@ -423,11 +432,23 @@ function parseCardComment(
 		title: typeof json.title === "string" ? json.title : null,
 		// 卡组名：损坏/缺失按未分组处理，不拖垮整卡
 		deck: typeof json.deck === "string" ? json.deck : null,
+		// 语音时长秒（84-B）：损坏/缺失/非正数不落字段（undefined = 未知），不拖垮整卡
+		...(typeof json.dur === "number" && Number.isFinite(json.dur) && json.dur > 0
+			? { durationSec: json.dur }
+			: {}),
 		// 闪卡遮挡区域（㊷）：损坏/缺失按无遮挡处理，不拖垮整卡
 		occlusions: Array.isArray(json.occ) ? (json.occ as DocRect[]) : [],
 		// 目录章节骨架卡（55）：严格 true 判定；缺省/损坏不落键（与序列化
 		// 同构——普通卡 Card 上无 outline 字段，零写入契约首尾一致）
 		...(json.outline === true ? { outline: true } : {}),
+		// 书名分组卡（81）：显式标记 or 存量推导——同书 page null 的 text 卡
+		// 且文本恰为《书名》（书文件内 page null 的 text 卡只有组卡与 EPUB
+		// 摘录两种，后者文本恰为书名括注视同组卡）。推导只在内存不标脏，
+		// 该卡下次自然写入时才落 group 键（零写入契约：读取不触发落盘）
+		...(json.group === true ||
+		(page === null && type === "text" && joined === `《${docTitle}》`)
+			? { group: true }
+			: {}),
 		tags,
 		createdAt,
 		updatedAt,
@@ -529,6 +550,9 @@ export function serializeBookMd(input: SerializeBookInput): string {
 	if (doc.collectMapId) out.push(`collect_map_id: ${yamlQuote(doc.collectMapId)}`);
 	// 按书自动转闪卡（㊷）：false 省略整行，存量库字节不变
 	if (doc.autoFlashcard) out.push("auto_flashcard: true");
+	// 上次阅读页码（80）：null（含页 1 归一）省略整行，未翻页的书字节不变；
+	// 写侧保证 lastPage 非 null 时必 >1，无需再次钳制
+	if (doc.lastPage) out.push(`last_page: ${doc.lastPage}`);
 	if (doc.filePath) out.push(`file_path: ${yamlQuote(doc.filePath)}`);
 	out.push(`created_at: ${doc.createdAt}`);
 	out.push(`updated_at: ${doc.updatedAt}`);
@@ -622,6 +646,11 @@ function serializeCard(
 	if (card.rects.length > 0) machine.rects = card.rects;
 	if (card.polygon) machine.polygon = card.polygon;
 	if (card.excerptRef) machine.ref = card.excerptRef;
+	// 语音时长秒（84-B）：仅合法数值落键（键序 ref 后，媒体语义相邻）；缺省省略——
+	// 存量卡字节不变（零写入契约，镜像 title 模式）
+	if (typeof card.durationSec === "number" && Number.isFinite(card.durationSec) && card.durationSec > 0) {
+		machine.dur = card.durationSec;
+	}
 	if (card.color) machine.color = card.color;
 	// 卡片标题（㊺）：null 省略键，存量卡字节不变（零写入契约）
 	if (card.title) machine.title = card.title;
@@ -634,6 +663,8 @@ function serializeCard(
 	if (card.occlusions.length > 0) machine.occ = card.occlusions;
 	// 目录章节骨架卡（55）：仅 true 写键，存量卡字节不变（零写入契约）
 	if (card.outline) machine.outline = true;
+	// 书名分组卡（81）：仅 true 写键（存量未标记卡读取时已推导，自然写入补齐）
+	if (card.group) machine.group = true;
 	machine.created = card.createdAt;
 	machine.updated = card.updatedAt;
 	const review = reviews.get(card.id) ?? defaultReviewState(card.id, card.createdAt);

@@ -147,6 +147,7 @@ export class MarinMindStore {
 				category: null,
 				collectMapId: null,
 				autoFlashcard: false,
+				lastPage: null, // 80 阅读位置记忆：孤儿书无阅读场景，恒 null
 				createdAt: 0,
 				updatedAt: 0,
 			},

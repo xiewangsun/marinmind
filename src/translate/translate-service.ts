@@ -1,38 +1,47 @@
 /**
- * 翻译网络服务（obsidian 耦合层）：经 requestUrl 调 Google 免费翻译接口
- * （client=gtx 免密钥、sl=auto 自动检测源语言；requestUrl 绕过 CORS，
- * 桌面/移动端均可用——国内网络需代理可达 translate.googleapis.com）。
- * URL/请求体构造与响应解析在 translate-engine 纯函数层（vitest 覆盖）。
+ * 翻译网络服务（obsidian 耦合层，83 多引擎）：按 EngineCall 的引擎描述经
+ * requestUrl 发请求（绕过 CORS，桌面/移动端均可用），构造/解析全部在
+ * translate-engine 纯函数层（vitest 覆盖）。引擎与凭据由调用方经
+ * resolveEngineCall(settings) 解析后传入；未传时缺省 Google 免密钥。
  */
 import { requestUrl } from "obsidian";
 import {
-	buildGoogleBody,
-	buildGoogleUrl,
-	parseGoogleResponse,
+	defaultEngineCall,
+	translateLangLabel,
+	type EngineCall,
 	type TranslateOutcome,
 } from "./translate-engine";
 
-/** 翻译一段文本到目标语言；网络/服务/解析失败抛带中文提示的 Error */
-export async function translateText(text: string, target: string): Promise<TranslateOutcome> {
+/**
+ * 翻译一段文本到目标语言（google 风格语言代码）；网络/服务/解析失败、
+ * 引擎不支持该目标语言时抛带中文提示的 Error。
+ */
+export async function translateText(
+	text: string,
+	target: string,
+	call?: EngineCall,
+): Promise<TranslateOutcome> {
+	const { engine, cred } = call ?? defaultEngineCall();
+	const engineTarget = engine.mapTarget(target);
+	if (engineTarget == null) {
+		// DeepL 粤语/文言文等：目标语言在弹窗/侧栏可切换——指明出路而非笼统报错
+		throw new Error(
+			`${engine.label}不支持目标语言「${translateLangLabel(target)}」，请切换目标语言或引擎`,
+		);
+	}
+	const spec = engine.buildRequest(text, engineTarget, cred);
 	let response: Awaited<ReturnType<typeof requestUrl>>;
 	try {
-		// q 放 POST body：URL 不受长度限制，长卡片文本也一次成译
-		response = await requestUrl({
-			url: buildGoogleUrl(target),
-			method: "POST",
-			headers: { "Content-Type": "application/x-www-form-urlencoded" },
-			body: buildGoogleBody(text),
-			throw: false,
-		});
+		response = await requestUrl({ ...spec, throw: false });
 	} catch (err) {
 		console.error("[MarinMind] 翻译请求失败", err);
-		throw new Error("无法连接翻译服务：请检查网络（translate.googleapis.com 国内通常需代理）");
+		throw new Error(engine.networkHint);
 	}
 	if (response.status !== 200) {
-		throw new Error(`翻译服务返回 HTTP ${response.status}，请稍后重试`);
+		throw new Error(`${engine.label}返回 HTTP ${response.status}，请稍后重试`);
 	}
 	try {
-		return parseGoogleResponse(response.json);
+		return engine.parse(response.json);
 	} catch (err) {
 		console.error("[MarinMind] 翻译响应解析失败", err);
 		throw new Error(err instanceof Error ? err.message : "翻译响应解析失败");

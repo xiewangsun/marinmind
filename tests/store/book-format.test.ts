@@ -18,6 +18,7 @@ function doc(partial: Partial<BookDocument> = {}): BookDocument {
 		category: null,
 		collectMapId: null,
 		autoFlashcard: false,
+		lastPage: null,
 		createdAt: 1700000000000,
 		updatedAt: 1700000100000,
 		...partial,
@@ -84,6 +85,79 @@ describe("book-format 序列化与解析", () => {
 		expect(parsed.bookmarks).toEqual([]);
 		expect(parsed.doc).toEqual(doc());
 		expect(parsed.warnings).toEqual([]);
+	});
+
+	it("语音时长 dur 键（84-B）：audio 卡往返还原；缺省不落键（零写入契约）", () => {
+		// audio 卡带时长：序列化含 "dur":37 且解析还原
+		const audioCard = card({
+			id: "22222222-2222-4222-8222-222222222222",
+			excerptType: "audio",
+			excerptRef: "assets/abc.webm",
+			durationSec: 37,
+		});
+		const text1 = serializeBookMd(bookInput({ cards: [audioCard] }));
+		expect(text1).toContain(`"ref":"assets/abc.webm","dur":37`);
+		const parsed1 = parseBookMd(text1, { fileName: "书籍A.md" });
+		expect(parsed1.cards[0].durationSec).toBe(37);
+		// 二次序列化字节稳定（dur 键序固定在 ref 后；解析返回数组需转 Map）
+		const text2 = serializeBookMd({
+			...bookInput(),
+			cards: parsed1.cards,
+			reviews: new Map(parsed1.reviews.map((r) => [r.cardId, r])),
+			links: parsed1.links,
+		});
+		expect(text2).toBe(text1);
+
+		// 零写入契约：无 durationSec 的存量卡不落 dur 键（字节不含）
+		const plainCard = card({
+			id: "22222222-2222-4222-8222-222222222222",
+			excerptType: "text",
+			excerptText: "普通摘录",
+		});
+		const text3 = serializeBookMd(bookInput({ cards: [plainCard] }));
+		expect(text3).not.toContain(`"dur"`);
+		const parsed3 = parseBookMd(text3, { fileName: "书籍A.md" });
+		expect(parsed3.cards[0].durationSec).toBeUndefined();
+
+		// 容错：dur 损坏（负数/字符串）不落字段，不拖垮整卡
+		const broken = text1.replace(`"dur":37`, `"dur":-5`);
+		const parsed4 = parseBookMd(broken, { fileName: "书籍A.md" });
+		expect(parsed4.cards[0].durationSec).toBeUndefined();
+		expect(parsed4.cards[0].excerptRef).toBe("assets/abc.webm");
+	});
+
+	it("photo 展示框 rects 往返（84-D）：定位后往返还原；空 rects 零写入（存量字节不变）", () => {
+		const frame = { x: 0.3, y: 0.4, w: 0.2, h: 0.1 };
+		const photoCard = card({
+			id: "33333333-3333-4333-8333-333333333333",
+			excerptType: "photo",
+			excerptRef: "assets/pic.jpg",
+			page: 3,
+			rects: [frame],
+		});
+		const text1 = serializeBookMd(bookInput({ cards: [photoCard] }));
+		expect(text1).toContain(`"rects":[{`);
+		const parsed1 = parseBookMd(text1, { fileName: "书籍A.md" });
+		expect(parsed1.cards[0].rects).toEqual([frame]);
+		// 二次序列化字节稳定（解析返回数组需转 Map）
+		const text2 = serializeBookMd({
+			...bookInput(),
+			cards: parsed1.cards,
+			reviews: new Map(parsed1.reviews.map((r) => [r.cardId, r])),
+			links: parsed1.links,
+		});
+		expect(text2).toBe(text1);
+
+		// 零写入契约：未定位的 photo 卡（rects 空）不落 rects 键——84 之前存量字节不变
+		const unlocated = card({
+			id: "33333333-3333-4333-8333-333333333333",
+			excerptType: "photo",
+			excerptRef: "assets/pic.jpg",
+			page: 3,
+		});
+		const text3 = serializeBookMd(bookInput({ cards: [unlocated] }));
+		expect(text3).not.toContain(`"rects"`);
+		expect(parseBookMd(text3, { fileName: "书籍A.md" }).cards[0].rects).toEqual([]);
 	});
 
 	it("库外绝对路径 filePath 往返（㉞ 关键回归——yamlQuote 冒号转义）", () => {
@@ -406,6 +480,47 @@ describe("book-format 序列化与解析", () => {
 		expect(parsed.extraFrontmatter).toEqual([]); // 已知字段认领
 	});
 
+	it("上次阅读页码 last_page 往返（80）：非 null 序列化在 auto_flashcard 后，null 省略整行", () => {
+		// null（默认/页 1 归一）：不输出行——未翻页的存量书序列化字节不变，零写入契约
+		const textNull = serializeBookMd(bookInput({ doc: doc({ lastPage: null }) }));
+		expect(textNull).not.toContain("last_page");
+
+		// 非 null：file_path 之前；往返还原
+		const textOn = serializeBookMd(bookInput({ doc: doc({ lastPage: 7 }) }));
+		const lines = textOn.split("\n");
+		const lpIdx = lines.findIndex((l) => l.startsWith("last_page: "));
+		expect(lpIdx).toBeGreaterThan(0);
+		expect(lines[lpIdx]).toBe("last_page: 7");
+		// 键序紧邻：auto_flashcard（缺省省行时跳过）之后、file_path 之前
+		const fpIdx = lines.findIndex((l) => l.startsWith("file_path: "));
+		expect(lpIdx).toBeLessThan(fpIdx);
+		const afIdx = lines.findIndex((l) => l.startsWith("auto_flashcard: "));
+		expect(afIdx).toBeLessThan(0); // 本输入 autoFlashcard=false 省行
+		const parsed = parseBookMd(textOn, { fileName: "书籍A.md" });
+		expect(parsed.doc.lastPage).toBe(7);
+		expect(parsed.extraFrontmatter).toEqual([]); // last_page 已知字段认领，不进未知区
+	});
+
+	it("手编非法 last_page 解析归一 null（80）：非数字/0/负数/1（页 1 语义即未翻页）", () => {
+		for (const bad of ["abc", "0", "-3", "1", "2.5"]) {
+			const text = [
+				"---",
+				"marinmind: book",
+				`id: ${doc().id}`,
+				"title: 书籍A",
+				`last_page: ${bad}`,
+				"file_path: 阅读/书籍A.pdf",
+				"created_at: 1700000000000",
+				"updated_at: 1700000100000",
+				"---",
+				"",
+			].join("\n");
+			const parsed = parseBookMd(text, { fileName: "书籍A.md" });
+			// 2.5 向下取整为 2 其余归 null（页 1 不落行，读侧同样归一）
+			expect(parsed.doc.lastPage, `last_page: ${bad}`).toBe(bad === "2.5" ? 2 : null);
+		}
+	});
+
 	it("遮挡 occlusions 机器层往返（㊷）：occ 键还原，无遮挡卡不输出该键（零写入）", () => {
 		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000001", excerptType: "text", excerptText: "无遮挡" });
 		const occluded = card({
@@ -605,6 +720,59 @@ describe("book-format 序列化与解析", () => {
 			extraFrontmatter: parsed.extraFrontmatter,
 		});
 		expect(again).toBe(text);
+	});
+
+	it("书名分组卡 group 机器层往返与存量推导（81）：outline 后 group:true 键，普通卡不输出（零写入）", () => {
+		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000017", excerptType: "text", excerptText: "普通摘录" });
+		const group = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000018",
+			excerptType: "text",
+			page: null,
+			excerptText: "《书籍A》",
+			group: true,
+		});
+		const text = serializeBookMd(bookInput({ cards: [plain, group] }));
+		// 零写入：普通卡的机器注释不含 group 键（存量卡字节不变）
+		const commentOf = (id: string) =>
+			text.split("\n").find((l) => l.startsWith("<!--mm ") && l.includes(`"id":"${id}"`))!;
+		expect(commentOf(plain.id)).not.toContain('"group"');
+		expect(commentOf(group.id)).toContain('"group":true');
+
+		const parsed = parseBookMd(text, { fileName: "书籍A.md" });
+		expect(parsed.warnings).toEqual([]);
+		expect(parsed.cards.find((c) => c.id === group.id)!.group).toBe(true);
+		expect(parsed.cards.find((c) => c.id === plain.id)!.group).toBeFalsy(); // 缺键 = 普通卡
+
+		// 存量推导：旧库组卡文件无 group 键，解析层按「page null + 文本恰为《书名》」
+		// 识别（读取只在内存，不标脏；下次自然写入补齐 group 键）
+		const legacy = text.replace('"group":true,', "");
+		const parsedLegacy = parseBookMd(legacy, { fileName: "书籍A.md" });
+		expect(parsedLegacy.cards.find((c) => c.id === group.id)!.group).toBe(true);
+		const rewritten = serializeBookMd({
+			doc: parsedLegacy.doc,
+			cards: parsedLegacy.cards,
+			reviews: new Map(parsedLegacy.reviews.map((r) => [r.cardId, r])),
+			bookmarks: parsedLegacy.bookmarks,
+			links: parsedLegacy.links,
+			extraFrontmatter: parsedLegacy.extraFrontmatter,
+		});
+		expect(rewritten).toContain('"group":true'); // 推导标记随下次写入持久化
+
+		// EPUB 型 page null 文本摘录（文本非《书名》）不误标
+		const epub = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000019",
+			excerptType: "text",
+			page: null,
+			excerptText: "跨章文字摘录",
+		});
+		const parsedEpub = parseBookMd(serializeBookMd(bookInput({ cards: [epub] })), {
+			fileName: "书籍A.md",
+		});
+		expect(parsedEpub.cards[0]!.group).toBeFalsy();
+
+		// 损坏值（非 true）不拖垮整卡——组卡形态（page null + 《书名》）由推导兜底仍识别
+		const broken = text.replace('"group":true', '"group":"yes"');
+		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === group.id)!.group).toBe(true);
 	});
 });
 

@@ -16,8 +16,11 @@ import {
  * 插件级订阅 cardBus created，不要求打开任何脑图视图。
  *
  * 插入落点决策（优先级从高到低，㊴ 起为三级）：
- * 1. 固定根节点——用户在某节点上右键「设为固定根节点」后，所有新摘录直挂该节点
- *    之下（跨文档收拢，不经文档分组）；
+ * 1. 固定根节点——用户在某节点上右键「设为固定根节点」后，新摘录直挂该节点
+ *    之下（不经文档分组）。80 起仅**所属文档**生效（fixedRootDocOf 推导）：
+ *    钉在文档 A 的图（图有 documentId=A）或钉节点卡片属 A 时只收 A 的摘录，
+ *    其他文档让位落第 2 级；钉在无归属主题图（图与钉节点卡片均无
+ *    documentId）时保留跨文档收拢；
  * 2. 按书目标图——文档 collectMapId 覆盖（用户在阅读器「脑图」按钮主动切换，
  *    每本书独立记住；目标图内同样按《书名》分组，多本书共用一图各自成组）；
  * 3. 同名默认图——一文档一张默认图（mindmaps.document_id，图名 = 文档标题），
@@ -95,13 +98,15 @@ export function ensureGroupCard(
 	if (!plan.createGroup) {
 		return plan.parentId;
 	}
-	// 书名分组根节点：page=null 的《文档名》文字卡（同文档唯一；判定见纯函数）
+	// 书名分组根节点：page=null 的《文档名》文字卡（同文档唯一；判定见纯函数）。
+	// 81 起落 group 标记——结构卡不纳入卡片系统（列表/统计/选择器/复习）
 	const groupCard = host.cards.create({
 		documentId: doc.id,
 		page: null,
 		rects: [],
 		excerptType: "text",
 		excerptText: `《${doc.title}》`,
+		group: true,
 	});
 	const gnode = host.mindmaps.addNode(
 		map.id,
@@ -117,13 +122,43 @@ export function ensureGroupCard(
  * 本书「联动展示图」判定（㊿ 文档↔脑图一对一）：固定根所在图（摘录收拢地，
  * 展示它与摘录落点同源）> ensureBookMindmap（按书覆盖 > 同名图 get-or-create）。
  * 与摘录落点保持同源——联动侧看到的正是新摘录进入的那张图。文档缺失 null。
+ * 80 固定根同样按文档门控：仅当固定根无归属（主题图）或归属本书时才指向它，
+ * 否则让位走本书目标图（与 autoAddCard 第 1 级同一判定，同源不破）。
  */
 export function linkedMapOf(host: AutoCollectHost, documentId: string): string | null {
 	const fixed = host.mindmaps.fixedRoot();
-	if (fixed) {
+	if (fixed && fixedRootAppliesTo(host, fixed, documentId)) {
 		return fixed.mapId;
 	}
 	return ensureBookMindmap(host, documentId);
+}
+
+/**
+ * 固定根归属推导（80 纯函数）：图 documentId（书默认图）→ 钉节点卡片
+ * documentId → null（无归属主题图）。返回 null = 跨文档收拢语义（用户钉的
+ * 就是"什么都挂这"）；非 null 时固定根仅对该文档的摘录生效。
+ * 钉节点卡片缺失（JOIN 失配的脏数据）按无归属处理。
+ */
+export function fixedRootDocOf(
+	host: AutoCollectHost,
+	fixed: { mapId: string; nodeId: string },
+): string | null {
+	const mapDoc = host.mindmaps.get(fixed.mapId)?.documentId;
+	if (mapDoc != null) {
+		return mapDoc;
+	}
+	const node = host.mindmaps.listNodes(fixed.mapId).find((n) => n.id === fixed.nodeId);
+	return node?.card.documentId ?? null;
+}
+
+/** 固定根是否作用于该文档（80）：无归属（主题图）或归属恰好是本书 */
+function fixedRootAppliesTo(
+	host: AutoCollectHost,
+	fixed: { mapId: string; nodeId: string },
+	documentId: string,
+): boolean {
+	const owner = fixedRootDocOf(host, fixed);
+	return owner == null || owner === documentId;
 }
 
 /**
@@ -213,9 +248,11 @@ export function autoAddCard(host: AutoCollectHost, card: Card): string | null {
 		return null;
 	}
 
-	// 1) 固定根节点优先：摘录直挂其下（含跨文档——用户钉的就是"什么都挂这"）
+	// 1) 固定根节点优先（80 起仅所属文档生效）：无归属主题图保留跨文档收拢
+	//    （用户钉的就是"什么都挂这"）；钉在文档 A 的图/钉节点卡片属 A 时只收
+	//    A 的摘录，其余文档让位落第 2 级
 	const fixed = host.mindmaps.fixedRoot();
-	if (fixed) {
+	if (fixed && fixedRootAppliesTo(host, fixed, card.documentId)) {
 		if (host.mindmaps.hasCard(fixed.mapId, card.id)) {
 			return null; // 已在固定根所在图中：无需处理
 		}
@@ -250,13 +287,15 @@ export function autoAddCard(host: AutoCollectHost, card: Card): string | null {
 	const plan = autoCollectPlacement(nodes, card, map.defaultBranchStyle);
 	let parentId: string | null = plan.parentId;
 	if (plan.createGroup) {
-		// 书名分组根节点：page=null 的《文档名》文字卡（同文档唯一；判定见纯函数）
+		// 书名分组根节点：page=null 的《文档名》文字卡（同文档唯一；判定见纯函数）。
+		// 81 起落 group 标记——结构卡不纳入卡片系统
 		const groupCard = host.cards.create({
 			documentId: card.documentId,
 			page: null,
 			rects: [],
 			excerptType: "text",
 			excerptText: `《${doc.title}》`,
+			group: true,
 		});
 		const gnode = host.mindmaps.addNode(
 			map.id,

@@ -1,7 +1,7 @@
 import type { TFile } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card, DocRect } from "../types";
-import { excerptCropRect, occlusionBounds } from "./rect-utils";
+import { excerptCropRect, occlusionBounds, snapshotImgSize } from "./rect-utils";
 import { paintCardHighlights, pixelRect } from "./region-snapshot";
 import { acquirePdf, pdfCacheKey, type PdfHandle } from "./pdf-cache";
 import { readExternalBinary } from "../storage/external-file";
@@ -37,6 +37,25 @@ export interface ExcerptVisualResult {
 }
 
 /**
+ * 是否可走原文页裁剪渲染（84-D 抽出为纯守卫）：
+ * photo 卡 rects 是页面展示框（重定位语义）而非摘录区域——绝不能当裁剪窗口
+ * 裁 PDF 页，附件读取失败的 photo 直接落文本兜底。
+ */
+export function canPageCrop(card: {
+	documentId: string | null;
+	page: number | null;
+	rects: DocRect[];
+	excerptType: string;
+}): boolean {
+	return (
+		card.documentId != null &&
+		card.page != null &&
+		card.rects.length > 0 &&
+		card.excerptType !== "photo"
+	);
+}
+
+/**
  * 渲染摘录视觉（异步三级回退，host 内追加媒体元素或裁剪画布）。
  * host 已断开（弹窗/视图关闭）时视为成功并丢弃，不触发兜底回退。
  */
@@ -52,7 +71,7 @@ export async function renderExcerptVisual(
 		}
 		// 附件读取失败（文件被移动/删除）→ 落页裁剪兜底（area/lasso/handwriting 有 rects）
 	}
-	if (card.documentId && card.page != null && card.rects.length > 0) {
+	if (canPageCrop(card)) {
 		const crop = await renderPageCrop(plugin, card, host);
 		if (crop) {
 			return { rendered: true, objectUrl: null, bounds: crop };
@@ -84,6 +103,10 @@ async function renderAttachment(
 		} else {
 			const img = host.createEl("img", { cls: "marinmind-card-preview-media" });
 			img.alt = EXCERPT_LABELS[card.excerptType];
+			// R3（W-02）：按 rects 包围盒预留宽高比——加载前占位防下方脚注跳动
+			const size = snapshotImgSize(card);
+			img.width = size.width;
+			img.height = size.height;
 			img.src = url;
 		}
 		// 快照图边界 = rects 并集包围盒（area/lasso/handwriting 裁剪即按此范围）

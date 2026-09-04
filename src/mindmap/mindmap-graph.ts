@@ -564,6 +564,31 @@ export function visibleNodes(nodes: GraphNode[]): Set<string> {
 }
 
 /**
+ * 节点祖先链上处于折叠态的节点 id（79-2 联动定位自动展开，近 → 远：直接父在前）。
+ * 与 visibleNodes 的折叠判定互为镜像——祖先链任一折叠即不可见，展开这组祖先后必可见；
+ * 节点不在集合 / 无折叠祖先 / 父悬空 / parentId 成环（visited 防御）返回空数组
+ * ——空数组 = 展开也救不回来（不在图/孤儿），调用方按"不可定位"处理。
+ */
+export function collapsedAncestorsOf(nodes: GraphNode[], nodeId: string): string[] {
+	const byId = new Map(nodes.map((n) => [n.id, n]));
+	const self = byId.get(nodeId);
+	if (!self) {
+		return [];
+	}
+	const collapsed: string[] = [];
+	const visited = new Set<string>([nodeId]);
+	let cur = self.parentId == null ? undefined : byId.get(self.parentId);
+	while (cur && !visited.has(cur.id)) {
+		visited.add(cur.id);
+		if (cur.collapsed) {
+			collapsed.push(cur.id);
+		}
+		cur = cur.parentId == null ? undefined : byId.get(cur.parentId);
+	}
+	return collapsed;
+}
+
+/**
  * 批量折叠/展开计划（51）：collapseAll=true 收集"有子节点且未折叠"的节点置 true；
  * false 收集已折叠的节点置 false。只含真正需要变化的节点，无变化返回空数组——
  * 调用方据此提示"没有可折叠/展开的节点"并避免无谓写库。

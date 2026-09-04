@@ -1,5 +1,7 @@
 import type { Card, DocRect, NormPoint } from "../types";
+import { Platform, setIcon } from "obsidian";
 import {
+	activeMindmapViews,
 	clearMindmapDropHints,
 	updateMindmapDropHint,
 } from "../mindmap/mindmap-view";
@@ -7,6 +9,8 @@ import type { MarinMindMindmapView } from "../mindmap/mindmap-view";
 import type { PageView } from "./page-view";
 import { isTinyNormRect, normRectToPercent, pointsToNormRect } from "./rect-utils";
 import { highlightFallbackColor, highlightLineStyle } from "./highlight-colors";
+import { clientFromScreen, geomOf } from "./window-hit";
+import { TouchHoldArbiter } from "./touch-arbit";
 import { LassoTracker } from "./lasso-tracker";
 
 /** 通用闪烁反馈：加 marinmind-flash 类 1.5s 后移除（跳转定位视觉锚点） */
@@ -46,6 +50,8 @@ export interface ExcerptLayerCallbacks {
 	onHighlightClick(card: Card, evt: MouseEvent): void;
 	/** 遮挡编辑：拖框完成，请求给目标卡追加一个遮挡矩形（㊷） */
 	onOcclusionDraw?(pageNumber: number, rect: DocRect): void;
+	/** 照片重定位：拖框完成，请求把目标卡展示框改为该矩形（84-D） */
+	onRelocateDraw?(pageNumber: number, rect: DocRect): void;
 	/** 点击已有遮挡块（删除该块 / 清除全部 / 预览开关菜单，㊷） */
 	onOcclusionClick?(card: Card, index: number, evt: MouseEvent): void;
 	/** 读取媒体附件（手写 PNG 回显为 <img>） */
@@ -58,6 +64,17 @@ const CARD_DRAG_THRESHOLD = 5;
 const GHOST_TEXT_LIMIT = 60;
 /** 最小套索路径像素长度（避免抖动产生无效套索） */
 const MIN_LASSO_PATH_LENGTH = 12;
+
+/** 矩形数组逐项相等（84-D：syncCard 判 photo 展示框是否变化，变了整组重摆） */
+function sameRects(a: DocRect[], b: DocRect[]): boolean {
+	return (
+		a.length === b.length &&
+		a.every(
+			(r, i) =>
+				r.x === b[i].x && r.y === b[i].y && r.w === b[i].w && r.h === b[i].h,
+		)
+	);
+}
 
 /** 无文字可显示时的形态占位（与脑图节点文案一致） */
 function shapeFallbackText(type: string | undefined): string {
@@ -109,12 +126,16 @@ export class ExcerptLayer {
 	private readonly highlightEls = new Map<string, HTMLElement[]>();
 	/** cardId → 卡片对象（点击高亮时回查） */
 	private readonly cardsById = new Map<string, Card>();
+	/** 83-F 译文/留白胶囊展开态（会话级 cardId 集合；不持久化——刷新后回到折叠） */
+	private readonly blankExpanded = new Set<string>();
 	/** cardId → 遮挡块 DOM（㊷；高亮之外的独立标记层，随卡增删重摆） */
 	private readonly occlusionEls = new Map<string, HTMLElement[]>();
 	/** 遮挡编辑目标（㊷）：非空时本页 overlay 接管指针画遮挡框（复用 area 拖框） */
 	private occlusionTarget: Card | null = null;
 	/** 文字遮罩目标（74）：非空时本页高亮/遮挡块关闭指针事件（overlay 保持穿透放行原生划选） */
 	private occlusionTextTarget: Card | null = null;
+	/** 照片重定位目标（84-D）：非空时本页 overlay 接管指针拖新展示框（复用 area 拖框） */
+	private relocateTarget: Card | null = null;
 	/** 遮挡预览（㊷）：true 时遮挡块显示为实心覆盖（模拟复习正面观感） */
 	private occlusionPreview = false;
 	/** excerptRef → blob URL（手写 <img> 回显；同 ref 复用，删除/销毁时 revoke） */
@@ -135,6 +156,23 @@ export class ExcerptLayer {
 	private ghost: HTMLElement | null = null;
 	/** 拖拽刚结束，吞噬紧随的 click（防止松手在高亮上误弹菜单） */
 	private suppressClick = false;
+	/**
+	 * 触摸按下待仲裁（79-7）：pointerType === "touch" 不立即捕获（触摸是滚动
+	 * 手势的输入源），记此待长按 500ms 升级；让位（滚动/点按）即清空。
+	 */
+	private pendingTouch: {
+		pointerId: number;
+		cardId: string;
+		startClient: { x: number; y: number };
+		el: HTMLElement;
+	} | null = null;
+	/** 触摸长按仲裁器（79-7）：armed 升级拖卡；pending 超阈/抬起/取消让位 */
+	private readonly touchArb = new TouchHoldArbiter({
+		onArmed: () => this.armTouchDrag(),
+		onSettled: () => {
+			this.pendingTouch = null;
+		},
+	});
 
 	// 绑定宿主引用，便于 destroy 解绑
 	private readonly handlers = {
@@ -142,6 +180,13 @@ export class ExcerptLayer {
 		pointermove: this.onPointerMove.bind(this),
 		pointerup: this.onPointerUp.bind(this),
 		pointercancel: this.onPointerCancel.bind(this),
+		touchmove: (evt: TouchEvent): void => {
+			// 79-7：仅拖卡激活时抑制滚动接管（阻止 pointercancel 打断拖卡）；
+			// 无拖拽零拦截——页面滚动不受影响。非被动 + 捕获注册（构造器）。
+			if (this.cardDrag) {
+				evt.preventDefault();
+			}
+		},
 		contextmenu: this.onContextMenu.bind(this),
 		clickCapture: this.onClickCapture.bind(this),
 	};
@@ -155,6 +200,12 @@ export class ExcerptLayer {
 		overlay.addEventListener("pointermove", this.handlers.pointermove);
 		overlay.addEventListener("pointerup", this.handlers.pointerup);
 		overlay.addEventListener("pointercancel", this.handlers.pointercancel);
+		// touch 事件隐式捕获到按下目标（高亮），经捕获/冒泡阶段到达 overlay——
+		// 捕获阶段注册保证先于任何冒泡处理执行 preventDefault
+		overlay.addEventListener("touchmove", this.handlers.touchmove, {
+			passive: false,
+			capture: true,
+		});
 		overlay.addEventListener("contextmenu", this.handlers.contextmenu);
 		// 捕获阶段先于高亮自身的 click 监听执行，才能可靠吞噬
 		overlay.addEventListener("click", this.handlers.clickCapture, true);
@@ -174,7 +225,12 @@ export class ExcerptLayer {
 		this.syncOcclusionEls(card);
 		// 手写摘录有精确 bbox，用 PNG 图片铺满高亮框回显（点击/拖卡复用高亮机制）
 		if (card.excerptType === "handwriting" && card.excerptRef && card.rects.length > 0) {
-			this.addHandwritingHighlight(card);
+			this.addImageCardHighlight(card, "手写摘录");
+			return;
+		}
+		// 84-D 照片展示框：定位后 rects 即页面展示框（虚线框 + 照片铺满，与手写同构）
+		if (card.excerptType === "photo" && card.excerptRef && card.rects.length > 0) {
+			this.addImageCardHighlight(card, "照片摘录");
 			return;
 		}
 		// 留白摘录渲染为可见的备注胶囊（6px 锚点矩形肉眼不可见，MN 式在页面上直接展示文字）
@@ -218,8 +274,9 @@ export class ExcerptLayer {
 		this.highlightEls.set(card.id, els);
 	}
 
-	/** 手写摘录回显：透明高亮框内嵌 <img>（PNG 按 bbox 裁剪，铺满即等比） */
-	private addHandwritingHighlight(card: Card): void {
+	/** 手写/照片摘录回显（84-D 泛化自 addHandwritingHighlight）：透明高亮框内嵌
+	 *  <img>（PNG/照片按 bbox 展示，铺满即等比；虚线框语义"此处展示该媒体"） */
+	private addImageCardHighlight(card: Card, alt: string): void {
 		const el = document.createElement("div");
 		el.classList.add("marinmind-excerpt-highlight", "marinmind-excerpt-highlight-img");
 		el.dataset.cardId = card.id;
@@ -233,7 +290,7 @@ export class ExcerptLayer {
 			this.cb.onHighlightClick(this.cardsById.get(card.id) ?? card, evt),
 		);
 		const img = el.createEl("img", { cls: "marinmind-excerpt-img" });
-		img.alt = "手写摘录";
+		img.alt = alt;
 		const ref = card.excerptRef!;
 		void this.loadMediaUrl(ref).then((url) => {
 			if (el.isConnected) {
@@ -244,7 +301,12 @@ export class ExcerptLayer {
 		this.highlightEls.set(card.id, [el]);
 	}
 
-	/** 留白摘录回显：锚点位置的备注胶囊（文字直接可见，点击弹菜单/可拖入脑图） */
+	/**
+	 * 留白摘录回显：锚点位置的备注胶囊（文字直接可见，点击弹菜单/可拖入脑图）。
+	 * 83-F 折叠/展开：胶囊 = 标签 span（折叠单行 CSS ellipsis，全文在 title 悬停）
+	 * + chevron 小钮（stopPropagation——展开收起不触发点击菜单）；展开态 = 多行
+	 * 全文（32em / 30vh 内滚动），会话级 Set 记忆、重摆/刷新回折叠。
+	 */
 	private addBlankHighlight(card: Card): void {
 		const el = document.createElement("div");
 		el.classList.add("marinmind-excerpt-highlight", "marinmind-blank-chip");
@@ -258,8 +320,28 @@ export class ExcerptLayer {
 			el.style.transform = "translateX(-100%)";
 		}
 		const label = card.note ?? card.excerptText ?? "留白";
-		el.setText(label.length > 40 ? `${label.slice(0, 40)}…` : label);
-		el.title = label;
+		const labelEl = el.createSpan({ cls: "marinmind-blank-label" });
+		labelEl.setText(label); // 截断交给 CSS ellipsis（折叠单行 / 展开多行）
+		labelEl.title = label;
+		const expanded = this.blankExpanded.has(card.id);
+		el.classList.toggle("is-expanded", expanded);
+		const fold = el.createEl("button", {
+			cls: "marinmind-blank-fold",
+			attr: { type: "button", "aria-label": expanded ? "收起全文" : "展开全文" },
+		});
+		setIcon(fold, expanded ? "chevron-up" : "chevron-down");
+		fold.addEventListener("click", (evt) => {
+			evt.stopPropagation(); // 折叠钮专属动作：不冒泡触发胶囊点击菜单
+			if (this.blankExpanded.has(card.id)) {
+				this.blankExpanded.delete(card.id);
+			} else {
+				this.blankExpanded.add(card.id);
+			}
+			const now = this.blankExpanded.has(card.id);
+			el.classList.toggle("is-expanded", now);
+			setIcon(fold, now ? "chevron-up" : "chevron-down");
+			fold.ariaLabel = now ? "收起全文" : "展开全文";
+		});
 		el.addEventListener("click", (evt) =>
 			this.cb.onHighlightClick(this.cardsById.get(card.id) ?? card, evt),
 		);
@@ -347,6 +429,13 @@ export class ExcerptLayer {
 	 */
 	syncCard(card: Card): void {
 		if (this.cardsById.has(card.id)) {
+			// 84-D photo 展示框：rects 变化（定位/取消定位）整组重摆（镜像遮挡重摆语义）
+			const cached = this.cardsById.get(card.id)!;
+			if (card.excerptType === "photo" && !sameRects(cached.rects, card.rects)) {
+				this.removeHighlight(card.id);
+				this.addHighlight(card);
+				return;
+			}
 			this.updateCardSnapshot(card);
 			const color = highlightFallbackColor(card);
 			// 线型补刷（77）：与颜色并列的第三轨（高亮菜单改线型 → cardBus changed 回环）
@@ -368,6 +457,11 @@ export class ExcerptLayer {
 	 * 遮挡块可点击弹管理菜单；遮挡编辑模式中由 CSS 关闭其指针事件（不挡画框）。
 	 */
 	private syncOcclusionEls(card: Card): void {
+		// 84-D photo 卡遮挡是图内 0-1 坐标（预览弹窗编辑），页 overlay 无从对位——
+		// 早退（顺手修：此前 photo 带 occlusions 会被当页归一化矩形画上页，隐性错位）
+		if (card.excerptType === "photo") {
+			return;
+		}
 		for (const el of this.occlusionEls.get(card.id) ?? []) {
 			el.remove();
 		}
@@ -402,6 +496,14 @@ export class ExcerptLayer {
 	/** 遮挡编辑模式开关（㊷）：只在目标卡所在页生效（页归一化矩形跨页无意义） */
 	setOcclusionTarget(card: Card | null): void {
 		this.occlusionTarget =
+			card && card.page === this.pageView.pageNumber ? card : null;
+		this.cancelDrag();
+		this.applyOverlayCapture();
+	}
+
+	/** 照片重定位模式开关（84-D）：只在目标卡所在页生效，拖框即新展示框 */
+	setRelocateTarget(card: Card | null): void {
+		this.relocateTarget =
 			card && card.page === this.pageView.pageNumber ? card : null;
 		this.cancelDrag();
 		this.applyOverlayCapture();
@@ -471,9 +573,10 @@ export class ExcerptLayer {
 		this.tool = tool;
 		this.excerptMode = tool === "area";
 		// 显式切换工具结束遮挡编辑（㊷；遮挡编辑是来自卡片菜单的瞬态模式）；
-		// 文字遮罩同为瞬态模式（74），层侧随工具切换一并退出
+		// 文字遮罩同为瞬态模式（74），照片重定位同为瞬态（84-D），层侧随工具切换一并退出
 		this.occlusionTarget = null;
 		this.occlusionTextTarget = null;
+		this.relocateTarget = null;
 		this.cancelDrag();
 		this.cancelCardDrag();
 		// 套索：按需创建/销毁（单页同时最多一个活跃套索）
@@ -516,20 +619,25 @@ export class ExcerptLayer {
 		this.lasso?.setPreviewColor(color);
 	}
 
-	/** overlay 捕获态统一计算（㊷ 抽出）：捕获型工具 或 遮挡编辑模式 都要接管指针 */
+	/** overlay 捕获态统一计算（㊷ 抽出）：捕获型工具 或 遮挡编辑/照片重定位模式 都要接管指针 */
 	private applyOverlayCapture(): void {
 		const overlay = this.pageView.overlayEl;
 		const capture =
 			this.tool === "area" ||
 			this.tool === "lasso" ||
 			this.tool === "blank" ||
-			this.occlusionTarget != null;
+			this.occlusionTarget != null ||
+			this.relocateTarget != null;
 		overlay.classList.toggle("marinmind-excerpt-on", capture);
 		overlay.classList.toggle("marinmind-hand-on", this.tool === "hand");
-		// 遮挡编辑模式单独挂类（㊿-C）：CSS 关掉高亮块指针事件——遮挡框起点落在
-		// 摘录内部也能正常拖画（此前命中高亮元素被 onPointerDown 早退，只能从
-		// 摘录外起笔）。area 工具不受影响（高亮保持可点击）
-		overlay.classList.toggle("marinmind-occlusion-on", this.occlusionTarget != null);
+		// 遮挡编辑/照片重定位模式单独挂类（㊿-C）：CSS 关掉高亮块指针事件——
+		// 框起点落在摘录/展示框内部也能正常拖画（此前命中高亮元素被 onPointerDown
+		// 早退，只能从摘录外起笔）。area 工具不受影响（高亮保持可点击）。
+		// 84-D 重定位共用此类（同为瞬态拖框模式，photo 展示框须让位起笔）
+		overlay.classList.toggle(
+			"marinmind-occlusion-on",
+			this.occlusionTarget != null || this.relocateTarget != null,
+		);
 		// 文字遮罩模式单独挂类（74）：CSS 关掉高亮与遮挡块指针事件——被目标卡
 		// 高亮（整行盒盖在文本上方）覆盖的文字才能起笔原生选区。overlay 本体
 		// 不参与 capture 计算（保持 pointer-events:none 穿透，且无 excerpt-on 的
@@ -574,6 +682,8 @@ export class ExcerptLayer {
 		overlay.removeEventListener("pointermove", this.handlers.pointermove);
 		overlay.removeEventListener("pointerup", this.handlers.pointerup);
 		overlay.removeEventListener("pointercancel", this.handlers.pointercancel);
+		// 与构造器注册对称：捕获阶段标记必须一致才能解绑
+		overlay.removeEventListener("touchmove", this.handlers.touchmove, true);
 		overlay.removeEventListener("contextmenu", this.handlers.contextmenu);
 		overlay.removeEventListener("click", this.handlers.clickCapture, true);
 		this.clearHighlights();
@@ -600,6 +710,7 @@ export class ExcerptLayer {
 		this.occlusionEls.clear();
 		this.occlusionTarget = null;
 		this.occlusionTextTarget = null;
+		this.relocateTarget = null;
 	}
 
 	/** 事件坐标 → 相对 overlay 的本地像素坐标 */
@@ -613,10 +724,10 @@ export class ExcerptLayer {
 			return;
 		}
 		this.suppressClick = false; // 清上一次拖拽残留
-		if (this.excerptMode || this.occlusionTarget) {
-			// 点在高亮块上不启动拖框（高亮自身可点击查看）；遮挡编辑模式下
-			// 高亮与遮挡块都被 CSS 关闭指针事件，不会命中（遮挡块 ㊷；高亮 ㊿-C——
-			// 遮挡框起点要能落在摘录内部）
+		if (this.excerptMode || this.occlusionTarget || this.relocateTarget) {
+			// 点在高亮块上不启动拖框（高亮自身可点击查看）；遮挡编辑/照片重定位模式
+			// 下高亮与遮挡块都被 CSS 关闭指针事件，不会命中（遮挡块 ㊷；高亮 ㊿-C——
+			// 遮挡框起点要能落在摘录内部；84-D 重定位同理由，展示框让位起笔）
 			if (evt.target !== this.pageView.overlayEl) {
 				return;
 			}
@@ -642,6 +753,18 @@ export class ExcerptLayer {
 			".marinmind-excerpt-highlight",
 		);
 		if (hl?.dataset.cardId) {
+			if (evt.pointerType === "touch") {
+				// 79-7 触摸端：不立即捕获（立即捕获 + 阈值升级会与滚动手势抢输入源），
+				// 记 pending 交长按仲裁——500ms 不动升级拖卡，超阈移动/抬起让位滚动
+				this.pendingTouch = {
+					pointerId: evt.pointerId,
+					cardId: hl.dataset.cardId,
+					startClient: { x: evt.clientX, y: evt.clientY },
+					el: hl,
+				};
+				this.touchArb.onDown(evt.clientX, evt.clientY);
+				return;
+			}
 			hl.setPointerCapture(evt.pointerId);
 			this.cardDrag = {
 				pointerId: evt.pointerId,
@@ -658,6 +781,11 @@ export class ExcerptLayer {
 			if (this.dragPreview) {
 				this.updatePreview(this.toLocal(evt));
 			}
+			return;
+		}
+		// 79-7 触摸仲裁期：交给仲裁器判滚动/升级（此时尚未捕获、无 cardDrag）
+		if (this.pendingTouch) {
+			this.touchArb.onMove(evt.clientX, evt.clientY);
 			return;
 		}
 		const d = this.cardDrag;
@@ -679,8 +807,25 @@ export class ExcerptLayer {
 			this.beginGhost(d);
 		}
 		this.moveGhost(evt.clientX, evt.clientY);
-		const view = updateMindmapDropHint(evt.clientX, evt.clientY);
-		this.ghost?.classList.toggle("is-over-mm", !!view);
+		// 79-6 跨 popout（桌面）：指针出源窗视口 → 换算命中他窗脑图；
+		// 命中后 ghost 出源窗即隐（本窗元素画不进他窗），源窗提示只清不加
+		const foreign = Platform.isDesktopApp
+			? this.hitForeignMindmap(evt.screenX, evt.screenY)
+			: null;
+		const hovered = foreign
+			? foreign.view
+			: updateMindmapDropHint(
+					evt.clientX,
+					evt.clientY,
+					this.pageView.overlayEl.ownerDocument,
+				);
+		if (foreign) {
+			clearMindmapDropHints(this.pageView.overlayEl.ownerDocument);
+		}
+		if (this.ghost) {
+			this.ghost.style.display = foreign ? "none" : "";
+		}
+		this.ghost?.classList.toggle("is-over-mm", !!hovered);
 	}
 
 	private onPointerUp(evt: PointerEvent): void {
@@ -696,6 +841,11 @@ export class ExcerptLayer {
 			if (isTinyNormRect(rect, pageW, pageH)) {
 				return;
 			}
+			// 照片重定位模式（84-D）：拖框结果即该卡的页面展示框（rects 整体替换）
+			if (this.relocateTarget) {
+				this.cb.onRelocateDraw?.(this.pageView.pageNumber, rect);
+				return;
+			}
 			// 遮挡编辑模式（㊷）：拖框结果追加给目标卡而非建新卡
 			if (this.occlusionTarget) {
 				this.cb.onOcclusionDraw?.(this.pageView.pageNumber, rect);
@@ -704,15 +854,35 @@ export class ExcerptLayer {
 			this.cb.onCreateAreaCard(this.pageView.pageNumber, rect);
 			return;
 		}
+		// 79-7 触摸仲裁期抬起：点按让位（未捕获未建拖卡，放行 click 弹菜单）
+		if (this.pendingTouch) {
+			this.touchArb.onUp();
+			return;
+		}
 		const d = this.cardDrag;
 		if (!d) {
 			return;
 		}
-		// 先取最新悬停视图，再清 ghost（ghost 移除后 dropCard 的 elementFromPoint 才准确）
-		const view: MarinMindMindmapView | null = updateMindmapDropHint(
-			evt.clientX,
-			evt.clientY,
-		);
+		// 先取最新悬停视图（跨窗命中优先，坐标换算到命中窗），再清 ghost
+		//（ghost 移除后 dropCard 的 elementFromPoint 才准确）
+		let view: MarinMindMindmapView | null = null;
+		let dropX = evt.clientX;
+		let dropY = evt.clientY;
+		if (Platform.isDesktopApp) {
+			const foreign = this.hitForeignMindmap(evt.screenX, evt.screenY);
+			if (foreign) {
+				view = foreign.view;
+				dropX = foreign.x;
+				dropY = foreign.y;
+			}
+		}
+		if (!view) {
+			view = updateMindmapDropHint(
+				evt.clientX,
+				evt.clientY,
+				this.pageView.overlayEl.ownerDocument,
+			);
+		}
 		const moved = d.moved;
 		const cardId = d.cardId;
 		this.cancelCardDrag();
@@ -723,13 +893,17 @@ export class ExcerptLayer {
 		if (view) {
 			const card = this.cardsById.get(cardId);
 			if (card) {
-				view.dropCard(card, evt.clientX, evt.clientY);
+				view.dropCard(card, dropX, dropY);
 			}
 		}
 	}
 
 	/** 系统手势/触摸滚动打断指针：拖框与拖卡都直接取消 */
 	private onPointerCancel(): void {
+		// 79-7 触摸仲裁期被系统手势接管（pending 让位）；cardDrag 已在下方统一取消
+		if (this.pendingTouch) {
+			this.touchArb.onCancel();
+		}
 		this.cancelDrag();
 		this.cancelCardDrag();
 	}
@@ -739,6 +913,12 @@ export class ExcerptLayer {
 		if (this.dragStart) {
 			evt.preventDefault();
 			this.cancelDrag();
+			return;
+		}
+		// 79-7 触摸长按期的 contextmenu = 系统长按菜单：不弹，但仲裁继续
+		//（500ms 仍会升级为拖卡——contextmenu 常先于升级触发，不能在这里取消）
+		if (this.pendingTouch) {
+			evt.preventDefault();
 			return;
 		}
 		if (this.cardDrag?.moved) {
@@ -776,6 +956,66 @@ export class ExcerptLayer {
 
 	// ---------- 拖卡入图 ----------
 
+	/**
+	 * 长按升级（79-7 onArmed）：此刻才捕获指针并进入与鼠标同构的拖卡状态机
+	 * （moved=false，首个超阈移动走 beginGhost 同一路径）。
+	 * 捕获失败（长按期间高亮被删/指针失效 InvalidPointerId，R5）放弃升级。
+	 */
+	private armTouchDrag(): void {
+		const p = this.pendingTouch;
+		if (!p) {
+			return;
+		}
+		try {
+			p.el.setPointerCapture(p.pointerId);
+		} catch (err) {
+			console.warn("[MarinMind] 触摸拖卡捕获指针失败", err);
+			this.pendingTouch = null;
+			return;
+		}
+		this.cardDrag = {
+			pointerId: p.pointerId,
+			cardId: p.cardId,
+			startClient: p.startClient,
+			el: p.el,
+			moved: false,
+		};
+		this.pendingTouch = null;
+	}
+
+	/**
+	 * 跨窗口命中（79-6 桌面端）：指针已出源窗视口时，遍历脑图视图所在的
+	 * **其他**窗口（主窗/popout 均可），把屏幕坐标换算到该窗 client 坐标并
+	 * 交给其视图做落点提示（视口矩形 + 节点命中在命中窗坐标空间内完成）。
+	 * 指针仍在源窗视口内返回 null（同窗视图走常规 client 坐标路径）；
+	 * 候选窗 = 脑图视图所在窗（无脑图的 popout 天然不参与）。
+	 */
+	private hitForeignMindmap(
+		sx: number,
+		sy: number,
+	): { view: MarinMindMindmapView; x: number; y: number } | null {
+		const srcDoc = this.pageView.overlayEl.ownerDocument;
+		const srcWin = srcDoc.defaultView;
+		if (!srcWin || clientFromScreen(geomOf(srcWin), sx, sy)) {
+			return null; // 仍在源窗视口内：常规路径
+		}
+		for (const view of activeMindmapViews()) {
+			const doc = view.contentEl.ownerDocument;
+			if (doc === srcDoc) {
+				continue; // 同窗视图由常规 client 坐标路径覆盖
+			}
+			const win = doc.defaultView;
+			if (!win) {
+				continue;
+			}
+			const local = clientFromScreen(geomOf(win), sx, sy);
+			if (local && view.updateDropHint(local.x, local.y)) {
+				return { view, x: local.x, y: local.y };
+			}
+		}
+		return null;
+	}
+
 	/** 升级为拖卡：创建跟随指针的 ghost（挂 body，跨出 leaf 仍可见） */
 	private beginGhost(d: CardDragState): void {
 		const card = this.cardsById.get(d.cardId);
@@ -810,9 +1050,11 @@ export class ExcerptLayer {
 		}
 	}
 
-	/** 结束/取消拖卡：清 ghost、body 状态类、全部脑图落点提示（幂等） */
+	/** 结束/取消拖卡：清 ghost、body 状态类、全部脑图落点提示与触摸仲裁态（幂等） */
 	private cancelCardDrag(): void {
 		this.cardDrag = null;
+		this.pendingTouch = null;
+		this.touchArb.reset();
 		this.ghost?.remove();
 		this.ghost = null;
 		document.body.classList.remove("marinmind-card-dragging");

@@ -1,5 +1,8 @@
 import type { DocRect } from "../types";
 import {
+	eraseHitStrokeIndices,
+	InkHistory,
+	pressureWidthPx,
 	renderStrokesToPNG,
 	strokesBBox,
 	type HandwriteStroke,
@@ -7,8 +10,10 @@ import {
 } from "./handwrite-geometry";
 import type { PageView } from "./page-view";
 
-/** 视觉线宽（CSS 像素）——归一化换算基准 */
+/** 视觉线宽（CSS 像素）——归一化换算基准 / 压感系数围绕它缩放 */
 const INK_WIDTH_PX = 2.5;
+/** 橡皮擦命中半径（CSS 像素，84-A）：整笔删除语义下的取笔阈值 */
+const ERASE_RADIUS_PX = 12;
 
 /**
  * 单页手写层：与 ExcerptLayer 同构（每页一个，铺满页面的透明画布）。
@@ -29,6 +34,12 @@ export class HandwriteLayer {
 	private activePointerId: number | null = null;
 	private mode = false;
 	private destroyed = false;
+	/** 橡皮擦工具态（84-A）：开启时 pointer 事件走命中删除而非落笔 */
+	private eraser = false;
+	/** 未提交笔迹的撤销栈（84-A）：commit 后整体作废 */
+	private readonly history = new InkHistory();
+	/** 落笔/擦除/清空回调（84-A）：reader 据此记录最近操作页（Ctrl+Z 目标层） */
+	onInk?: () => void;
 
 	constructor(private readonly pageView: PageView) {
 		this.root = document.createElement("div");
@@ -77,6 +88,54 @@ export class HandwriteLayer {
 		this.root.classList.toggle("marinmind-handwrite-on", on);
 	}
 
+	/** 橡皮擦开关（84-A）：仅手写模式开时生效（样式类驱动光标变化） */
+	setEraser(on: boolean): void {
+		this.eraser = on;
+		this.root.classList.toggle("marinmind-handwrite-eraser", on);
+	}
+
+	/** 是否有可撤销操作（84-A：撤销按钮态 / 快捷键目标层选择用） */
+	canUndo(): boolean {
+		return this.history.canUndo();
+	}
+
+	/**
+	 * 撤销最近一次手写操作（84-A）：落笔=移除该笔 / 擦除=按原下标插回 / 清空=整体还原。
+	 * 空栈返回 false（调用方无需反馈）。
+	 */
+	undo(): boolean {
+		const action = this.history.pop();
+		if (!action) {
+			return false;
+		}
+		if (action.kind === "draw") {
+			const idx = this.strokes.indexOf(action.stroke);
+			if (idx >= 0) {
+				this.strokes.splice(idx, 1);
+			}
+		} else if (action.kind === "erase") {
+			// index 可能因后续增删越界，钳到当前长度内
+			this.strokes.splice(Math.min(action.index, this.strokes.length), 0, action.stroke);
+		} else {
+			this.strokes = action.strokes;
+		}
+		this.current = null; // 撤销时正在画的笔不应残留（正常流程 pointerup 已清）
+		this.redraw();
+		return true;
+	}
+
+	/** 清空全部未提交笔迹（84-A：进撤销栈，可撤销恢复） */
+	clearInk(): void {
+		if (this.strokes.length === 0) {
+			return;
+		}
+		this.history.push({ kind: "clear", strokes: this.strokes });
+		this.strokes = [];
+		this.current = null;
+		this.redraw();
+		this.onInk?.();
+	}
+
 	/** 提交结果：归一化包围盒 + PNG 字节（由 reader-view 落库建卡） */
 	async commit(): Promise<{ bbox: DocRect; png: ArrayBuffer } | null> {
 		if (this.destroyed || this.strokes.length === 0) {
@@ -86,6 +145,7 @@ export class HandwriteLayer {
 		const strokes = this.strokes;
 		this.strokes = [];
 		this.current = null;
+		this.history.clear(); // 已落卡的笔迹不可撤销（84-A）
 
 		const dispW = this.pageView.displayWidth || 1;
 		const dispH = this.pageView.displayHeight || 1;
@@ -136,40 +196,40 @@ export class HandwriteLayer {
 		const h = this.canvas.height;
 		ctx.clearRect(0, 0, w, h);
 		const dpr = Math.min(2, window.devicePixelRatio || 1);
-		ctx.lineWidth = INK_WIDTH_PX * dpr;
 		for (const stroke of this.strokes) {
-			this.strokePath(ctx, stroke, w, h);
-			if (stroke.points.length === 1) {
-				this.dot(ctx, stroke.points[0], w, h, ctx.lineWidth / 2);
-			}
+			this.strokePath(ctx, stroke, w, h, dpr);
 		}
 		if (this.current && this.current !== this.strokes[this.strokes.length - 1]) {
-			this.strokePath(ctx, this.current, w, h);
+			this.strokePath(ctx, this.current, w, h, dpr);
 		}
 	}
 
+	/** 画一笔（84-A 逐段变宽：lineWidth = 两端平均压感系数 × 基准；单点画圆点） */
 	private strokePath(
 		ctx: CanvasRenderingContext2D,
 		stroke: HandwriteStroke,
 		w: number,
 		h: number,
+		dpr: number,
 	): void {
-		if (stroke.points.length === 0) {
+		const pts = stroke.points;
+		if (pts.length === 0) {
 			return;
 		}
-		ctx.beginPath();
-		stroke.points.forEach((p, i) => {
-			if (i === 0) {
-				ctx.moveTo(p.x * w, p.y * h);
-			} else {
-				ctx.lineTo(p.x * w, p.y * h);
-			}
-		});
-		if (stroke.points.length === 1) {
-			// 单点：lineTo 自身画不出线，dot 已在 redraw 中处理
-			ctx.lineTo(stroke.points[0].x * w + 0.01, stroke.points[0].y * h);
+		const base = INK_WIDTH_PX * dpr;
+		if (pts.length === 1) {
+			this.dot(ctx, pts[0], w, h, pressureWidthPx(pts[0].pressure, base) / 2);
+			return;
 		}
-		ctx.stroke();
+		for (let i = 0; i + 1 < pts.length; i++) {
+			const a = pts[i];
+			const b = pts[i + 1];
+			ctx.lineWidth = pressureWidthPx(((a.pressure ?? 0.5) + (b.pressure ?? 0.5)) / 2, base);
+			ctx.beginPath();
+			ctx.moveTo(a.x * w, a.y * h);
+			ctx.lineTo(b.x * w, b.y * h);
+			ctx.stroke();
+		}
 	}
 
 	private dot(
@@ -185,12 +245,14 @@ export class HandwriteLayer {
 		ctx.fill();
 	}
 
-	/** 事件坐标 → 归一化（0-1，相对页面容器） */
+	/** 事件坐标 → 归一化（0-1，相对页面容器）；附带原始压感（84-A） */
 	private toNorm(evt: PointerEvent): StrokePoint {
 		const box = this.root.getBoundingClientRect();
 		return {
 			x: (evt.clientX - box.left) / Math.max(1, box.width),
 			y: (evt.clientY - box.top) / Math.max(1, box.height),
+			// 鼠标恒 0.5、个别浏览器报 0——非法值在 pressureWidthPx 内统一兜底
+			pressure: evt.pressure,
 		};
 	}
 
@@ -201,17 +263,39 @@ export class HandwriteLayer {
 		evt.preventDefault();
 		this.activePointerId = evt.pointerId;
 		this.root.setPointerCapture(evt.pointerId);
+		if (this.eraser) {
+			this.eraseAt(this.toNorm(evt));
+			return;
+		}
 		this.current = { points: [this.toNorm(evt)] };
-		// 单点即时画出圆点（视觉反馈）
+		// 单点即时画出圆点（视觉反馈；半径随压感 84-A）
 		const ctx = this.ctx;
 		if (ctx) {
 			const dpr = Math.min(2, window.devicePixelRatio || 1);
-			this.dot(ctx, this.current.points[0], this.canvas.width, this.canvas.height, (INK_WIDTH_PX * dpr) / 2);
+			const p = this.current.points[0];
+			this.dot(
+				ctx,
+				p,
+				this.canvas.width,
+				this.canvas.height,
+				pressureWidthPx(p.pressure, INK_WIDTH_PX * dpr) / 2,
+			);
 		}
 	}
 
 	private onPointerMove(evt: PointerEvent): void {
-		if (!this.current || evt.pointerId !== this.activePointerId) {
+		if (evt.pointerId !== this.activePointerId) {
+			return;
+		}
+		if (this.eraser) {
+			if (!this.mode) {
+				return;
+			}
+			evt.preventDefault();
+			this.eraseAt(this.toNorm(evt)); // 拖擦：连续命中连续删除
+			return;
+		}
+		if (!this.current) {
 			return;
 		}
 		evt.preventDefault();
@@ -223,11 +307,16 @@ export class HandwriteLayer {
 			return;
 		}
 		pts.push(p);
-		// 增量画最后一段（比全量重绘省；缩放时会全量重绘兜底）
+		// 增量画最后一段（比全量重绘省；缩放时会全量重绘兜底）；宽度随该段压感（84-A）
 		const ctx = this.ctx;
 		if (ctx && last) {
 			const w = this.canvas.width;
 			const h = this.canvas.height;
+			const dpr = Math.min(2, window.devicePixelRatio || 1);
+			ctx.lineWidth = pressureWidthPx(
+				((last.pressure ?? 0.5) + (p.pressure ?? 0.5)) / 2,
+				INK_WIDTH_PX * dpr,
+			);
 			ctx.beginPath();
 			ctx.moveTo(last.x * w, last.y * h);
 			ctx.lineTo(p.x * w, p.y * h);
@@ -240,8 +329,13 @@ export class HandwriteLayer {
 			return;
 		}
 		this.activePointerId = null;
+		if (this.eraser) {
+			return; // 橡皮擦：无未完成笔迹
+		}
 		if (this.current && this.current.points.length > 0) {
 			this.strokes.push(this.current);
+			this.history.push({ kind: "draw", stroke: this.current }); // 84-A 撤销栈
+			this.onInk?.();
 		}
 		this.current = null;
 	}
@@ -252,5 +346,27 @@ export class HandwriteLayer {
 		}
 		this.activePointerId = null;
 		this.current = null; // 系统手势打断：丢弃未完成的笔迹
+	}
+
+	/** 橡皮擦一次命中（84-A）：整笔删除 + 进撤销栈（move 连续调用 = 拖擦） */
+	private eraseAt(point: StrokePoint): void {
+		const hits = eraseHitStrokeIndices(
+			this.strokes,
+			point,
+			ERASE_RADIUS_PX,
+			this.pageView.displayWidth || 1,
+			this.pageView.displayHeight || 1,
+		);
+		if (hits.length === 0) {
+			return;
+		}
+		// 从大到小 splice 保证未处理下标稳定
+		for (let i = hits.length - 1; i >= 0; i--) {
+			const index = hits[i];
+			const [stroke] = this.strokes.splice(index, 1);
+			this.history.push({ kind: "erase", index, stroke });
+		}
+		this.redraw();
+		this.onInk?.();
 	}
 }

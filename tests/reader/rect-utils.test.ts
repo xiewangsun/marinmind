@@ -10,6 +10,7 @@ import {
 	planSelectionToolbarPosition,
 	pointsToNormRect,
 	rectsRelativeToPage,
+	snapshotImgSize,
 } from "../../src/reader/rect-utils";
 
 describe("rect-utils 坐标换算", () => {
@@ -183,6 +184,15 @@ describe("遮挡摆位 occlusionPercent / occlusionBounds（㊷）", () => {
 		expect(pct(r.left)).toBeCloseTo(25, 6);
 		expect(pct(r.width)).toBeCloseTo(50, 6);
 	});
+
+	it("84-D 定位后的 photo 卡（rects=展示框非空）仍恒整图——展示框不参与遮挡摆位", () => {
+		const b = occlusionBounds({
+			excerptRef: "assets/photo2.jpg",
+			rects: [{ x: 0.3, y: 0.4, w: 0.2, h: 0.1 }],
+			excerptType: "photo",
+		});
+		expect(b).toEqual({ x: 0, y: 0, w: 1, h: 1 });
+	});
 });
 
 describe("划选工具栏定位 planSelectionToolbarPosition（75）", () => {
@@ -249,5 +259,43 @@ describe("划选工具栏定位 planSelectionToolbarPosition（75）", () => {
 			toolbarHeight: 40,
 		});
 		expect(pos).toEqual({ left: 4, top: 152 });
+	});
+});
+
+describe("snapshotImgSize 快照图预留尺寸（R3 W-02：按包围盒取比防 CLS）", () => {
+	it("rects 并集包围盒比例：等比缩放到 400 基宽", () => {
+		// 两块矩形并集：x 0.1-0.5（w 0.4）、y 0.2-0.6（h 0.4）→ 1:1
+		const size = snapshotImgSize({
+			rects: [
+				{ x: 0.1, y: 0.2, w: 0.2, h: 0.2 },
+				{ x: 0.3, y: 0.4, w: 0.2, h: 0.2 },
+			],
+			excerptType: "area",
+		});
+		expect(size).toEqual({ width: 400, height: 400 });
+	});
+
+	it("宽扁包围盒：高度按比例折算且至少 1px", () => {
+		const size = snapshotImgSize({
+			rects: [{ x: 0, y: 0.4, w: 1, h: 0.01 }],
+			excerptType: "lasso",
+		});
+		expect(size.width).toBe(400);
+		expect(size.height).toBeGreaterThanOrEqual(1);
+	});
+
+	it("photo 恒整图（rects 是页上展示框非图像几何）：回退 4:3", () => {
+		const size = snapshotImgSize({
+			rects: [{ x: 0, y: 0, w: 1, h: 0.5 }],
+			excerptType: "photo",
+		});
+		expect(size).toEqual({ width: 400, height: 300 });
+	});
+
+	it("无 rects（徽标锚定/兜底）与退化包围盒（零宽/零高）：回退 4:3", () => {
+		expect(snapshotImgSize({ rects: [] })).toEqual({ width: 400, height: 300 });
+		expect(
+			snapshotImgSize({ rects: [{ x: 0.2, y: 0.2, w: 0, h: 0.5 }], excerptType: "handwriting" }),
+		).toEqual({ width: 400, height: 300 });
 	});
 });

@@ -77,7 +77,7 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	display: flex;
 	align-items: center;
 	flex-wrap: wrap;
-	gap: 2px;
+	gap: 6px;
 	padding: 3px 8px;
 	border-bottom: 1px solid var(--background-modifier-border);
 	flex: none;
@@ -533,21 +533,63 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 }
 
 /* 留白摘录回显：不透明底色胶囊 + 彩色边框（㊹ 边框化；锚点矩形 6px 肉眼不可见，
-   直接展示备注首 40 字）——底色用主题背景色保证白纸 PDF 上的可读性 */
+   直接展示备注）——底色用主题背景色保证白纸 PDF 上的可读性；
+   83-F 结构 = 标签 span + chevron 折叠钮（截断改 CSS ellipsis，展开看全文） */
 .marinmind-excerpt-highlight.marinmind-blank-chip {
 	width: auto;
 	height: auto;
 	max-width: 16em;
-	padding: 2px 8px;
+	padding: 2px 6px 2px 8px;
 	border-radius: 6px;
 	background: var(--background-primary);
 	border: 1.5px solid var(--mm-hl-line);
 	box-shadow: var(--mm-shadow-sm); /* P0-4 令牌化 */
 	font-size: var(--font-ui-smaller);
 	line-height: 1.5;
+	display: flex;
+	align-items: flex-start;
+	gap: 2px;
+}
+
+/* 标签：折叠态单行 CSS ellipsis（83-F 替代 JS 40 字截断；全文悬停 title 看） */
+.marinmind-blank-chip .marinmind-blank-label {
+	flex: 1;
+	min-width: 0;
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+
+/* 83-F 展开态：多行全文（32em / 30vh 内滚动） */
+.marinmind-blank-chip.is-expanded {
+	max-width: min(32em, 90%);
+}
+
+.marinmind-blank-chip.is-expanded .marinmind-blank-label {
+	white-space: normal;
+	max-height: 30vh;
+	overflow-y: auto;
+}
+
+/* chevron 折叠钮：展开/收起专属动作（stopPropagation 不触发胶囊点击菜单） */
+.marinmind-blank-chip .marinmind-blank-fold {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0;
+	margin-top: 1px;
+	border: none;
+	border-radius: var(--radius-s);
+	background: transparent;
+	color: var(--text-muted);
+	box-shadow: none;
+	cursor: var(--cursor);
+	line-height: 1;
+}
+
+.marinmind-blank-chip .marinmind-blank-fold:hover {
+	background: var(--background-modifier-hover);
 }
 
 /* 套索摘录回显（㊹ 弃 clip-path 改内嵌 SVG）：只描原始轮廓，不填充；
@@ -788,7 +830,7 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 .marinmind-review-topbar {
 	display: flex;
 	align-items: center;
-	gap: 0.4em;
+	gap: 6px;
 	/* R2（E2-04）：pos 固定 6.5em + 徽标 + 导航钮合计 min 约 400px，更窄窗格
 	   会连带根容器出横向滚动条——wrap 兜底 */
 	flex-wrap: wrap;
@@ -1886,6 +1928,8 @@ body.marinmind-card-dragging {
 }
 
 /* ===== ㊺ 节点编辑器（浮动面板：点击节点编辑标题/批注） ===== */
+/* 78 起表单规则（label / input,textarea）与 .marinmind-card-edit 弹窗共用（观感单源，
+   见下方 78 区块）——容器定位仍各自专属 */
 
 /* 挂 viewport 不在 world 内——不受画布缩放影响；宽与 TS NODE_EDITOR_W 同步 */
 .marinmind-mm-editor {
@@ -1903,7 +1947,8 @@ body.marinmind-card-dragging {
 	gap: 6px;
 }
 
-.marinmind-mm-editor label {
+.marinmind-mm-editor label,
+.marinmind-card-edit label {
 	display: flex;
 	flex-direction: column;
 	gap: 3px;
@@ -1912,7 +1957,9 @@ body.marinmind-card-dragging {
 }
 
 .marinmind-mm-editor input,
-.marinmind-mm-editor textarea {
+.marinmind-mm-editor textarea,
+.marinmind-card-edit input,
+.marinmind-card-edit textarea {
 	width: 100%;
 	box-sizing: border-box;
 	font: inherit;
@@ -1925,9 +1972,34 @@ body.marinmind-card-dragging {
 	padding: 4px 6px;
 }
 
-.marinmind-mm-editor textarea {
+.marinmind-mm-editor textarea,
+.marinmind-card-edit textarea {
 	min-height: 4.5em;
 	resize: vertical;
+}
+
+/* 85-D 摘录只读块（节点编辑器/卡片编辑弹窗共用观感）：弱化底色 + 限高滚动
+   （长 OCR 文本不撑爆面板；只读不改 excerptText——OCR 纠错走阅读器覆盖流程） */
+.marinmind-mm-editor-excerpt,
+.marinmind-card-edit-excerpt {
+	padding: 0.4em 0.6em;
+	background: var(--background-secondary);
+	border-radius: var(--radius-s, 4px);
+	font-size: var(--font-ui-smaller);
+}
+
+.marinmind-mm-editor-excerpt-label,
+.marinmind-card-edit-excerpt-label {
+	color: var(--text-faint);
+	margin-bottom: 0.25em;
+}
+
+.marinmind-mm-editor-excerpt-body,
+.marinmind-card-edit-excerpt-body {
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 8em;
+	overflow-y: auto;
 }
 
 .marinmind-mm-editor-actions {
@@ -1952,6 +2024,20 @@ body.marinmind-card-dragging {
 	border-color: var(--interactive-accent);
 	color: var(--text-on-accent);
 	font-weight: 600;
+}
+
+/* ===== 78 卡片编辑弹窗（Modal：标题 + 批注双字段，与节点编辑器同语义） ===== */
+
+/* 按钮行复用 .marinmind-note-actions（Modal 内通用 flex 尾行）；表单控件观感
+   走上方与 .marinmind-mm-editor 共用的并列选择器（单源） */
+.marinmind-card-edit {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.marinmind-card-edit input {
+	flex: none; /* 单行标题不参与拉伸，批注 textarea 吸收剩余视觉重心 */
 }
 
 /* ===== 照片 / 手写 / 语音摘录 ===== */
@@ -1993,6 +2079,52 @@ body.marinmind-card-dragging {
 	cursor: crosshair;
 }
 
+/* 84-A 橡皮擦光标：区别于画笔 crosshair（工具态切换时样式类驱动） */
+.marinmind-handwrite-layer.marinmind-handwrite-on.marinmind-handwrite-eraser {
+	cursor: cell;
+}
+
+/* 84-A 手写工具条：手写模式期间悬浮底部居中（避开顶部录音条）；三钮 撤销/橡皮/清空 */
+.marinmind-handwrite-toolbar {
+	position: absolute;
+	bottom: 14px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 10;
+	display: flex;
+	gap: 6px;
+	padding: 4px 6px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	box-shadow: var(--mm-shadow-lg); /* P0-4 令牌化 */
+}
+
+.marinmind-handwrite-toolbar button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	border: none;
+	border-radius: var(--radius-s, 4px);
+	background: transparent;
+	color: var(--text-muted);
+	cursor: var(--cursor);
+}
+
+.marinmind-handwrite-toolbar button:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+/* 橡皮擦激活态（toggle） */
+.marinmind-handwrite-toolbar button.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
 /* 划选工具栏（75）：text 工具划选松开浮出于选区上方（上方优先/下方回退，
    定位纯函数 planSelectionToolbarPosition）。visibility 隐藏而非 display:none——
    定位需实测 offsetWidth/Height + 免费淡入过渡；user-select 防点击按钮清掉选区 */
@@ -2001,7 +2133,7 @@ body.marinmind-card-dragging {
 	z-index: 20;
 	display: flex;
 	align-items: center;
-	gap: 2px;
+	gap: 6px;
 	padding: 4px 6px;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
@@ -2033,8 +2165,8 @@ body.marinmind-card-dragging {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 30px;
-	height: 30px;
+	width: 28px;
+	height: 28px;
 	padding: 0;
 	border: none;
 	border-radius: var(--radius-s, 4px);
@@ -2046,6 +2178,18 @@ body.marinmind-card-dragging {
 .marinmind-selection-btn:hover {
 	background: var(--background-modifier-hover);
 	color: var(--text-normal);
+}
+
+/* 线型按钮激活态（R4 D1-02） */
+.marinmind-selection-btn.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+/* 线型按钮激活态：当前线型 accent 实底高亮（R4 D1-02） */
+.marinmind-selection-btn.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
 }
 
 /* 录音状态条：悬浮在滚动区上方居中 */
@@ -2073,6 +2217,17 @@ body.marinmind-card-dragging {
 	border-radius: 50%;
 	background: var(--text-error, #e93147);
 	animation: marinmind-rec-pulse 1.2s ease-in-out infinite;
+}
+
+/* 84-B 录音波形：右对齐滚动柱状（最新在右）；无采样数据时收起（降级纯计时） */
+.marinmind-rec-wave {
+	width: 120px;
+	height: 28px;
+	display: block;
+}
+
+.marinmind-rec-wave.is-silent {
+	display: none;
 }
 
 @keyframes marinmind-rec-pulse {
@@ -2153,6 +2308,25 @@ audio.marinmind-review-media {
 .marinmind-media-preview-note.is-empty {
 	color: var(--text-faint);
 	font-style: italic;
+}
+
+/* 85-D 摘录只读块（手写卡 OCR 文字）：与批注同观感基调 + 标签弱化 */
+.marinmind-media-preview-excerpt {
+	margin: 0.75em 0;
+	padding: 0.5em 0.75em;
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-small);
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 10em;
+	overflow-y: auto;
+}
+
+.marinmind-media-preview-excerpt-label {
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+	margin-bottom: 0.25em;
 }
 
 .marinmind-media-preview-missing {
@@ -2258,7 +2432,18 @@ audio.marinmind-card-preview-media {
 	margin-top: 0.5em;
 }
 
-/* 有批注卡片的原文块（标题=批注，摘录文字在此完整展示） */
+/* 正文块（85-D cardPreviewBlocks）：批注块（有标题时另列——此前被 cardPreview
+   吸收进标题行不可见）；摘录块见下（标题/批注任一存在时另列，OCR 文字归宿） */
+.marinmind-card-preview-note {
+	margin-top: 0.75em;
+	font-size: var(--font-ui-small);
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 10em;
+	overflow-y: auto;
+}
+
+/* 摘录文字完整展示（未吸收进标题行时） */
 .marinmind-card-preview-excerpt {
 	margin-top: 0.75em;
 	padding: 0.5em 0.75em;
@@ -2435,7 +2620,7 @@ audio.marinmind-card-preview-media {
 }
 
 .marinmind-toc-tab {
-	flex: 1; /* 两页平分宽度 */
+	flex: 1; /* 各页平分宽度（㉙ 目录/书签 + 83-E 翻译） */
 	font-size: var(--font-ui-small); /* 抽屉主字号档（配方 smaller 偏小） */
 	padding: 2px 0;
 }
@@ -2808,6 +2993,42 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	margin-top: 12px;
 }
 
+/* ===== 83-E 翻译侧栏页签（观感主体复用上方 marinmind-tr-* 配方） ===== */
+.marinmind-tt-head {
+	margin: 4px 0 2px;
+}
+
+/* 窄抽屉里的目标语言下拉：收窄字号与内边距 */
+.marinmind-tt-lang {
+	font-size: var(--font-ui-smallest);
+	padding: 1px 4px;
+	max-width: 100%;
+}
+
+/* 动作钮（存为留白/复制/重试）：抽屉内小号文字钮（与书签页 ％＋钮同族） */
+.marinmind-tt-btn {
+	flex: none;
+	padding: 2px 10px;
+	margin: 0;
+	border: none;
+	border-radius: var(--radius-s);
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smallest);
+	box-shadow: none;
+	cursor: var(--cursor);
+}
+
+.marinmind-tt-btn:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.marinmind-tt-btn.is-cta {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
 /* ===== ㉜ 脑图拖拽 XMind 化：子树跟随 / 分区提示 / 插入线 ===== */
 
 /* 插入线：3px 主题色圆角条，世界坐标定位 */
@@ -2851,6 +3072,12 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	display: flex;
 	height: 100%;
 	overflow: hidden;
+	/* 80 窄窗格自适应：本元素即主页视图 contentEl（占满 leaf、overflow:hidden、
+	   子链路 min-width:0），宽度由窗格决定不被内容撑开——作容器查询锚点，
+	   断点改测窗格宽而非窗口宽（与阅读器 split 半宽即触发，不再等窗口变窄）。
+	   inline-size 附带 contain:layout 使本元素成为 fixed 后代包含块——当前子树
+	   无 fixed（Modal 由 Obsidian 挂 body），后续加 fixed 浮层需知晓此约束 */
+	container: marinmind-home / inline-size;
 	font-size: 0.8125rem;
 	color: var(--text-normal);
 	background: var(--background-primary);
@@ -3005,6 +3232,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	flex: 1;
 	min-width: 0;
 	overflow-y: auto;
+	/* 80 防回归：单轴 auto 时另一轴 visible 会被规范提升为 auto——显式 clip
+	   杜绝窄窗格下的横向滚动条（与 overflow-y 组合合法；sticky 不受影响） */
+	overflow-x: clip;
 	padding: 24px 32px 48px;
 }
 
@@ -3260,7 +3490,7 @@ body.theme-light .marinmind-autoex-badge.is-body {
 }
 
 /* ㊸ 整栏收起：左列隐藏，右侧列表/书架占满（特异性 (0,3,0) 稳压 640px
-   媒体查询里对 folders 的横向滚动改写；右列 flex 自适应自动拉满；
+   容器查询（80 迁移）里对 folders 的横向滚动改写；右列 flex 自适应自动拉满；
    73 卡片页卡组栏并列同规则） */
 .marinmind-home-docs.is-folders-hidden .marinmind-home-folders,
 .marinmind-home-cards-body.is-folders-hidden .marinmind-home-folders {
@@ -3575,10 +3805,28 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	gap: 12px;
 }
 
-/* 中间断点：~1000px 以下 6 列会缩到 ~83px 过小，降 4 列保护 */
-@media (max-width: 1000px) {
+/* 中间断点（80 @media → @container 迁移：测窗格宽而非窗口宽——与阅读器/脑图
+   split 后主页窗格变窄即触发；全屏且 Obsidian 侧栏展开的用户也会正确触发，
+   属修复非回归）：~1000px 以下 6 列会缩到 ~83px 过小，降 4 列保护；两列体
+   同步收窄（用户反馈展开文件夹/卡组栏后内容区过窄出横向滚动——固定占位
+   208+200+24+64 不可压缩，中间档把左列与留白压掉 ~96px；侧栏维持 208px，
+   导航 label 仍可读，640 档才图标化） */
+@container marinmind-home (max-width: 1000px) {
 	.marinmind-home-doc-grid {
 		grid-template-columns: repeat(4, minmax(0, 1fr));
+	}
+
+	.marinmind-home-content {
+		padding: 20px 20px 40px;
+	}
+
+	.marinmind-home-docs,
+	.marinmind-home-cards-body {
+		gap: 16px;
+	}
+
+	.marinmind-home-folders {
+		width: 160px;
 	}
 }
 
@@ -3699,8 +3947,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	text-overflow: ellipsis;
 }
 
-/* ---- 窄屏（移动端）：侧栏收窄为图标列 ---- */
-@media (max-width: 640px) {
+/* ---- 窄窗格（80 @media → @container 迁移，原「窄屏（移动端）」语义）：
+   侧栏收窄为图标列 ---- */
+@container marinmind-home (max-width: 640px) {
 	.marinmind-home-sidebar {
 		width: 52px;
 		padding: 12px 6px 8px;
@@ -3886,4 +4135,63 @@ body.theme-light .marinmind-autoex-badge.is-body {
 
 .marinmind-home-stats-link:hover {
 	color: var(--text-normal);
+}
+
+/* ============================================================
+   R3（Vercel Web 界面规范评审）跨视图集中规则
+   详见 docs/前端设计评估.md「第三轮 R3」与 docs/Web界面规范前后对比.html
+   ============================================================ */
+
+/* W-01：原生 select 主题化。裸 select 无显式背景/文字色时，Windows 深色模式
+   渲染 UA 默认白底成刺眼白块（配方同 .marinmind-mm-style-select）。
+   覆盖：翻译弹窗语言（tr-lang）/ 取词侧栏语言（tt-lang）/ 自动摘录范围（autoex-select） */
+.marinmind-tr-lang,
+.marinmind-tt-lang,
+.marinmind-autoex-select {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+/* W-05：数字列等宽数字——翻卡/计数变化时列宽不抖（先例：rec-time / toc 页码） */
+.marinmind-review-pos,
+.marinmind-review-meta,
+.marinmind-stats-brick-value,
+.marinmind-stats-libline,
+.marinmind-stats-bar-count,
+.marinmind-home-row-meta,
+.marinmind-home-pager-info,
+.marinmind-home-cards-count {
+	font-variant-numeric: tabular-nums;
+}
+
+/* W-06：弹窗/卡内滚动区隔离滚动链——滚到头不再穿透滚动到底层视图 */
+.marinmind-review-list-body,
+.marinmind-review-excerpt,
+.marinmind-review-note,
+.marinmind-card-edit-excerpt-body,
+.marinmind-card-preview-note,
+.marinmind-card-preview-excerpt,
+.marinmind-media-preview-note,
+.marinmind-media-preview-excerpt,
+.marinmind-doc-list,
+.marinmind-autoex-list,
+.marinmind-tr-text {
+	overscroll-behavior: contain;
+}
+
+/* W-07：插件域交互钮去触屏双击缩放延迟（连点评分等；作用域配方同 P0 焦点环
+   styles.css:34）。拖拽层 touch-action:none 更严（祖先 none 与后代 manipulation
+   取交集仍为 none），不受影响 */
+body :is(button, [role="button"])[class*="marinmind"],
+body [class*="marinmind"] :is(button, [role="button"]) {
+	touch-action: manipulation;
+}
+
+/* W-13：空态短句均衡折行——防孤字尾行（渐进增强，不支持的内核自动忽略） */
+.marinmind-mm-empty,
+.marinmind-home-empty {
+	text-wrap: balance;
 }

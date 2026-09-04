@@ -156,6 +156,7 @@ export function convertLegacyDb(db: MarinMindDatabase): LegacyImportData & { war
 			category: null, // 旧库无分类列（㉟ 新增字段，导入文档一律未分类）
 			collectMapId: null, // 旧库无摘录目标覆盖列（㊴），导入一律用同名默认图
 			autoFlashcard: false, // 旧库无自动转闪卡开关（㊷），导入一律关闭
+			lastPage: null, // 旧库无阅读页码列（80），导入一律从头读起
 			createdAt: r.created_at,
 			updatedAt: r.updated_at,
 		}));
@@ -198,6 +199,20 @@ export function convertLegacyDb(db: MarinMindDatabase): LegacyImportData & { war
 			createdAt: r.created_at,
 			updatedAt: r.updated_at,
 		}));
+
+// 81 书名分组卡标记：旧库组卡（同书 page null + 文本恰为《书名》）导入即标记，
+// 与 book-format 解析层推导同源——否则导入落盘的 md 首载前仍漏进卡片视角
+const titleById = new Map(documents.map((d) => [d.id, d.title]));
+for (const c of cards) {
+	if (
+		c.page == null &&
+		c.documentId != null &&
+		c.excerptType === "text" &&
+		c.excerptText === `《${titleById.get(c.documentId) ?? ""}》`
+	) {
+		c.group = true;
+	}
+}
 
 	interface LinkRow {
 		id: string;

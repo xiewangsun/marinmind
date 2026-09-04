@@ -5,6 +5,7 @@ import {
 	buildCategoryTree,
 	buildDeckTree,
 	cardPreview,
+	cardPreviewBlocks,
 	distinctColors,
 	distinctDecks,
 	distinctTags,
@@ -438,6 +439,64 @@ describe("cardPreview 卡片预览文本（㶈 与主页列表/预览弹窗共�
 	it("㊺ 标题最高优先（trim）；空白标题让位于批注", () => {
 		expect(cardPreview(card({ title: "  标题 ", note: "问题", excerptText: "原文" }))).toBe("标题");
 		expect(cardPreview(card({ title: "   ", note: "问题", excerptText: "原文" }))).toBe("问题");
+	});
+});
+
+describe("cardPreviewBlocks 正文块拆分（85-D 批注/摘录独立展示位）", () => {
+	it("title+note+excerpt 三全：批注块与摘录块均另列（互不吸收）", () => {
+		expect(cardPreviewBlocks(card({ title: "T", note: "N", excerptText: "E" }))).toEqual({
+			note: "N",
+			excerpt: "E",
+		});
+	});
+
+	it("只有 OCR 文字（无标题无批注）：不另列（cardPreview 已用它当标题）", () => {
+		expect(cardPreviewBlocks(card({ excerptText: "E" }))).toEqual({ note: null, excerpt: null });
+	});
+
+	it("只有批注：批注不另列（已当标题），摘录无", () => {
+		expect(cardPreviewBlocks(card({ note: "N", excerptText: null }))).toEqual({
+			note: null,
+			excerpt: null,
+		});
+	});
+
+	it("标题+摘录（OCR 卡常见）：摘录另列、无批注块", () => {
+		expect(cardPreviewBlocks(card({ title: "T", excerptText: "E" }))).toEqual({
+			note: null,
+			excerpt: "E",
+		});
+	});
+
+	it("批注+摘录（无标题）：批注已被 cardPreview 当标题吸收，摘录另列", () => {
+		expect(cardPreviewBlocks(card({ note: "N", excerptText: "E" }))).toEqual({
+			note: null,
+			excerpt: "E",
+		});
+	});
+
+	it("标题+批注（无摘录）：批注另列、无摘录块", () => {
+		expect(cardPreviewBlocks(card({ title: "T", note: "N", excerptText: null }))).toEqual({
+			note: "N",
+			excerpt: null,
+		});
+	});
+
+	it("全空（纯媒体卡）：两块皆无", () => {
+		expect(cardPreviewBlocks(card({ excerptText: null }))).toEqual({ note: null, excerpt: null });
+	});
+
+	it("空白字段按空处理（trim 边界：不计入块也不吸收标题序）", () => {
+		// note 全空白 + excerpt 有值 + 无标题 → cardPreview 用 excerpt 当标题 → 不另列
+		expect(cardPreviewBlocks(card({ note: "   ", excerptText: "E" }))).toEqual({
+			note: null,
+			excerpt: null,
+		});
+		// title 正常 + note/excerpt 全空白 → 均不另列
+		expect(cardPreviewBlocks(card({ title: "T", note: " ", excerptText: " " }))).toEqual({
+			note: null,
+			excerpt: null,
+		});
 	});
 });
 

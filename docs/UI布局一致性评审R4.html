@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MarinMind · UI 布局一致性评审 R4 · 前后对比</title>
+<!--
+  ============================================================
+  MarinMind 第四轮 UI 评审（R4）——布局一致性专项
+  ------------------------------------------------------------
+  · 评审标准：前三轮（R1 设计体系 / R2 溢出截断 / R3 Vercel 规范）之外的
+    组件级布局一致性维度
+  · 评审对象：四视图 + 弹窗 + 浮层工具栏 + 右键菜单
+  · 基线：2026-09-04（类名为主锚点，行号随提交漂移）
+  · 用法：每张卡片可勾选「采纳」，勾选状态存 localStorage；页首汇总可导出
+  · mockup 为「近似复刻」，非像素承诺
+  · 自包含：断网可开
+  ============================================================
+-->
+<style>
+/* ===== 页面自身 chrome ===== */
+:root {
+  --page-bg: #101114;
+  --page-panel: #17181c;
+  --page-panel-2: #1d1e23;
+  --page-border: rgba(255,255,255,0.08);
+  --page-text: #e8e9ea;
+  --page-muted: #9a9da3;
+  --page-faint: #6b6e74;
+  --page-accent: #8a90ff;
+  --p0: #ff7d73;
+  --p1: #e8c53a;
+  --p2: #7fb8ff;
+  --ok: #4cb782;
+  --mono: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--page-bg);
+  color: var(--page-text);
+  font: 14px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  padding-bottom: 80px;
+}
+a { color: var(--page-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { font-family: var(--mono); font-size: 12px; background: rgba(138,144,255,0.1); color: #b9befc; padding: 1px 5px; border-radius: 4px; word-break: break-all; }
+
+/* ===== 页首 ===== */
+header.page-head {
+  padding: 28px 32px 18px;
+  border-bottom: 1px solid var(--page-border);
+  background: linear-gradient(180deg, #14151a, var(--page-bg));
+}
+.page-head h1 { margin: 0 0 6px; font-size: 20px; letter-spacing: 0.02em; }
+.page-head .sub { color: var(--page-muted); font-size: 13px; max-width: 920px; }
+.page-head .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; }
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--page-panel-2); color: var(--page-text);
+  border: 1px solid var(--page-border); border-radius: 999px;
+  padding: 5px 14px; font-size: 13px; cursor: pointer; user-select: none;
+}
+.theme-toggle:hover { border-color: rgba(138,144,255,0.5); }
+.decision-summary { font-size: 13px; color: var(--page-muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--page-muted); }
+.legend .badge { margin-right: 2px; }
+
+/* 优先级徽标 */
+.badge {
+  display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  border-radius: 999px; padding: 1px 9px; vertical-align: 1px; white-space: nowrap;
+}
+.badge.p0 { background: rgba(255,125,115,0.15); color: var(--p0); }
+.badge.p1 { background: rgba(232,197,58,0.13); color: var(--p1); }
+.badge.p2 { background: rgba(127,184,255,0.13); color: var(--p2); }
+.badge.ok { background: rgba(76,183,130,0.13); color: var(--ok); }
+.badge.view { background: rgba(255,255,255,0.07); color: var(--page-muted); font-weight: 500; }
+.badge.dim { background: rgba(255,255,255,0.04); color: var(--page-faint); }
+
+/* ===== 顶部锚点导航 ===== */
+nav.toc {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(16,17,20,0.92); backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--page-border);
+  padding: 8px 32px; font-size: 12.5px;
+  display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center;
+}
+nav.toc .grp { color: var(--page-faint); font-weight: 600; }
+nav.toc a { color: var(--page-muted); }
+nav.toc a:hover { color: var(--page-text); text-decoration: none; }
+
+/* ===== 卡片容器 ===== */
+main { max-width: 1060px; margin: 0 auto; padding: 20px 24px; }
+section.finding {
+  background: var(--page-panel); border: 1px solid var(--page-border);
+  border-radius: 10px; padding: 20px 22px; margin: 18px 0;
+}
+section.finding.decided-adopt { border-color: rgba(76,183,130,0.45); }
+section.finding.decided-skip { opacity: 0.55; }
+section.finding h2 { margin: 0; font-size: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.finding-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0 4px; font-size: 12.5px; color: var(--page-muted); }
+.finding-meta b { color: var(--page-text); font-weight: 600; }
+.rule-quote {
+  border-left: 3px solid rgba(138,144,255,0.5);
+  background: rgba(138,144,255,0.06);
+  padding: 8px 12px; margin: 12px 0; font-size: 12.5px; color: var(--page-muted);
+  border-radius: 0 6px 6px 0;
+}
+.rule-quote em { color: #b9befc; font-style: normal; }
+.finding .desc { color: var(--page-text); font-size: 13.5px; }
+.finding .desc .dim { color: var(--page-muted); }
+.fix { background: rgba(76,183,130,0.06); border: 1px dashed rgba(76,183,130,0.35); border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 13px; }
+.fix b { color: var(--ok); }
+.adopt-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 13px; color: var(--page-muted); }
+.adopt-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--ok); cursor: pointer; }
+.adopt-row label { cursor: pointer; user-select: none; }
+.adopt-row select { background: var(--page-panel-2); color: var(--page-text); border: 1px solid var(--page-border); border-radius: 6px; padding: 3px 8px; font-size: 12.5px; }
+
+/* 前后对比布局 */
+.ba { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+@media (max-width: 860px) { .ba { grid-template-columns: 1fr; } }
+.ba .col { min-width: 0; }
+.ba .col-title {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 6px;
+}
+.ba .before .col-title { color: var(--p0); }
+.ba .after .col-title { color: var(--ok); }
+
+/* 代码 diff 块 */
+pre.diff {
+  background: #0c0d10; border: 1px solid var(--page-border); border-radius: 8px;
+  padding: 10px 12px; overflow-x: auto; margin: 6px 0;
+  font-family: var(--mono); font-size: 12px; line-height: 1.6; color: #c8cad0;
+}
+pre.diff .del { color: #ff9a92; background: rgba(255,125,115,0.09); display: block; }
+pre.diff .add { color: #7ddba8; background: rgba(76,183,130,0.09); display: block; }
+pre.diff .ctx { color: #8b8e94; display: block; }
+pre.diff .cm { color: #6b6e74; }
+
+/* 注释标注 */
+.anno {
+  position: relative; font-size: 11.5px; color: var(--page-muted);
+  border: 1px dashed rgba(255,125,115,0.5); border-radius: 6px;
+  padding: 4px 8px; margin-top: 8px; display: inline-block;
+}
+.anno.good { border-color: rgba(76,183,130,0.5); }
+
+/* 多列 mockup 布局 */
+.multi { display: grid; gap: 14px; margin: 14px 0; }
+.multi.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.multi.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.multi.cols-5 { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 900px) { .multi.cols-3, .multi.cols-4, .multi.cols-5 { grid-template-columns: 1fr; } }
+.multi .col { min-width: 0; }
+.multi .col-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 6px;
+  color: var(--page-muted); text-transform: uppercase;
+}
+
+/* 通用 mockup 组件 */
+.mock {
+  background: var(--background-primary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px; padding: 14px; font-size: 12.5px;
+  min-width: 0; overflow: hidden;
+}
+.mock .m-title { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.mock button { font: inherit; cursor: pointer; }
+
+/* —— Obsidian 模拟主题变量 —— */
+body.sim-dark {
+  --background-primary: #1e1e1e;
+  --background-primary-alt: #262626;
+  --background-secondary: #161616;
+  --background-secondary-alt: #1a1a1a;
+  --background-modifier-border: #333333;
+  --background-modifier-hover: rgba(255,255,255,0.055);
+  --background-modifier-active-hover: rgba(255,255,255,0.09);
+  --text-normal: #dcddde;
+  --text-muted: #9a9a9a;
+  --text-faint: #707070;
+  --text-on-accent: #ffffff;
+  --text-error: #e05c5c;
+  --interactive-accent: #7f6df2;
+  --interactive-accent-hover: #8b7cf7;
+  --interactive-normal: #222222;
+  --interactive-hover: #2a2a2a;
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --font-ui-smaller: 0.8em;
+  --font-ui-smallest: 0.7em;
+}
+body.sim-light {
+  --background-primary: #ffffff;
+  --background-primary-alt: #f6f6f6;
+  --background-secondary: #f2f3f5;
+  --background-secondary-alt: #e3e5e7;
+  --background-modifier-border: #d8d9da;
+  --background-modifier-hover: rgba(0,0,0,0.04);
+  --text-normal: #232323;
+  --text-muted: #5c5c5c;
+  --text-faint: #909090;
+  --text-on-accent: #ffffff;
+  --text-error: #d44c40;
+  --interactive-accent: #7f6df2;
+  --interactive-accent-hover: #6f5cf0;
+  --interactive-normal: #e9e9e9;
+  --interactive-hover: #dfdfdf;
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --font-ui-smaller: 0.8em;
+  --font-ui-smallest: 0.7em;
+}
+
+/* 模拟 SVG 图标（用文本替代 lucide 图标） */
+.icon-mock {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; font-size: 11px; color: var(--text-muted);
+  flex-shrink: 0;
+}
+.icon-mock.small { width: 14px; height: 14px; font-size: 10px; }
+
+/* ===== 模拟组件 ===== */
+
+/* 工具行按钮 */
+.tool-row-mock {
+  display: flex; align-items: center; gap: 2px; padding: 4px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+.tool-btn-mock {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border: none; border-radius: var(--radius-s);
+  background: transparent; color: var(--text-muted);
+  font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.tool-btn-mock:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.tool-btn-mock.is-active { background: var(--interactive-accent); color: var(--text-on-accent); }
+.tool-btn-mock .label { font-size: 11px; }
+.tool-sep-mock { width: 1px; height: 18px; background: var(--background-modifier-border); margin: 0 4px; flex-shrink: 0; }
+.tool-spacer-mock { flex: 1; }
+.color-dot-mock {
+  width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.2);
+  flex-shrink: 0; cursor: pointer;
+}
+
+/* 胶囊开关 */
+.capsule-mock {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s); background: transparent;
+  color: var(--text-muted); font-size: 11.5px; cursor: pointer;
+}
+.capsule-mock.is-active { background: var(--interactive-accent); border-color: var(--interactive-accent); color: var(--text-on-accent); }
+
+/* 纯图标按钮 */
+.icon-btn-mock {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border: none; border-radius: var(--radius-s);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  font-size: 14px;
+}
+.icon-btn-mock:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+
+/* 分选按钮 */
+.segmented-mock {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 2px; border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+.segmented-btn-mock {
+  border: none; border-radius: calc(var(--radius-s) - 1px);
+  background: transparent; color: var(--text-muted);
+  font-size: 11.5px; padding: 1px 10px; cursor: pointer;
+}
+.segmented-btn-mock.is-active { background: var(--interactive-accent); color: var(--text-on-accent); }
+
+/* 右键菜单 */
+.menu-mock {
+  background: var(--background-primary); border: 1px solid var(--background-modifier-border);
+  border-radius: 6px; padding: 4px 0; min-width: 180px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+}
+.menu-item-mock {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px; font-size: 12px; color: var(--text-normal);
+  cursor: pointer;
+}
+.menu-item-mock:hover { background: var(--background-modifier-hover); }
+.menu-item-mock .mi-icon { width: 16px; text-align: center; color: var(--text-muted); font-size: 12px; }
+.menu-item-mock .mi-check { width: 16px; color: var(--interactive-accent); font-size: 11px; }
+.menu-sep-mock { height: 1px; background: var(--background-modifier-border); margin: 4px 0; }
+.menu-title-mock { padding: 4px 12px; font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* 弹窗 */
+.modal-mock {
+  background: var(--background-primary); border: 1px solid var(--background-modifier-border);
+  border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.35); overflow: hidden;
+  min-width: 240px;
+}
+.modal-head { padding: 10px 14px 8px; font-size: 13.5px; font-weight: 600; border-bottom: 1px solid var(--background-modifier-border); }
+.modal-body { padding: 10px 14px 14px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.modal-btn { padding: 5px 12px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); background: var(--interactive-normal); color: var(--text-normal); font-size: 12px; cursor: pointer; }
+.modal-btn.cta { background: var(--interactive-accent); border-color: transparent; color: var(--text-on-accent); }
+
+/* 选择器 */
+.sel-mock {
+  background: var(--background-secondary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s);
+  font-size: 11.5px; padding: 3px 6px;
+}
+
+/* 文档行 */
+.doc-row-mock {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-radius: var(--radius-s);
+}
+.doc-row-mock:hover { background: var(--background-modifier-hover); }
+.doc-row-mock .title { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-row-mock .meta { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+.doc-row-mock .actions { display: flex; gap: 2px; flex-shrink: 0; }
+
+/* 卡片行 */
+.card-row-mock {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-radius: var(--radius-s);
+}
+.card-row-mock:hover { background: var(--background-modifier-hover); }
+.ink-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+/* 复习卡 */
+.review-card-mock {
+  position: relative; background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m);
+  padding: 14px; max-width: 300px;
+}
+.review-card-mock::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--mm-hl-line-yellow); border-radius: var(--radius-m) var(--radius-m) 0 0;
+}
+
+/* 摘录高亮 */
+.highlight-mock {
+  position: relative; padding: 8px 12px; margin: 4px 0;
+  border-bottom: 2.5px solid var(--mm-hl-line-yellow);
+  font-size: 12px;
+}
+.highlight-mock:hover { background: rgba(232,197,58,0.1); }
+.highlight-area-mock {
+  border: 2px solid var(--mm-hl-line-blue); padding: 8px 12px; margin: 4px 0;
+  font-size: 12px;
+}
+
+/* 脑图节点 */
+.mm-node-mock {
+  width: 160px; background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s); box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  overflow: hidden;
+}
+.mm-node-head {
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-bottom: 1px solid var(--background-modifier-border);
+  background: rgba(217,169,22,0.12);
+}
+.mm-node-body { padding: 6px 8px; font-size: 11px; color: var(--text-normal); }
+.mm-node-note { padding: 4px 8px 6px; font-size: 10px; color: var(--text-muted); border-top: 1px dashed var(--background-modifier-border); }
+
+/* 手势键盘模拟 */
+.kbd-mock { margin-top: 8px; }
+.kbd-mock .row { display: flex; gap: 3px; justify-content: center; margin-bottom: 3px; }
+.kbd-mock .k { width: 22px; height: 20px; display: flex; align-items: center; justify-content: center;
+  background: var(--background-secondary); border: 1px solid var(--background-modifier-border);
+  border-radius: 3px; font-size: 9px; color: var(--text-muted); }
+
+/* 导出面板 */
+.export-panel {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--page-panel); border-top: 1px solid var(--page-border);
+  padding: 12px 32px; font-size: 13px; z-index: 100;
+  display: flex; align-items: center; gap: 16px;
+  transform: translateY(100%); transition: transform 0.2s ease;
+}
+.export-panel.visible { transform: translateY(0); }
+.export-panel textarea {
+  flex: 1; background: var(--page-panel-2); color: var(--page-text);
+  border: 1px solid var(--page-border); border-radius: 6px; padding: 8px;
+  font-family: var(--mono); font-size: 12px; min-height: 60px; resize: vertical;
+}
+.export-panel .btn-copy {
+  padding: 6px 16px; background: var(--ok); color: #fff;
+  border: none; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+
+/* 评分按钮 */
+.grade-btn-mock {
+  flex: 1; padding: 6px 4px; border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s); background: var(--interactive-normal);
+  color: var(--text-normal); font-size: 11px; cursor: pointer; text-align: center;
+}
+.grade-btn-mock.again { color: var(--text-error); }
+.grade-btn-mock.easy { color: var(--interactive-accent); }
+
+/* 统计砖 */
+.stats-brick-mock {
+  background: var(--background-secondary); border-radius: var(--radius-s);
+  padding: 10px 8px; text-align: center;
+}
+.stats-brick-mock .v { font-size: 1.4em; font-weight: 700; }
+.stats-brick-mock .l { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+
+/* 设置行 */
+.setting-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.setting-row .info { flex: 1; min-width: 0; }
+.setting-row .name { font-size: 12.5px; font-weight: 600; }
+.setting-row .desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.setting-row input { width: 80px; padding: 4px 6px; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); background: var(--background-primary); color: var(--text-normal); font-size: 12px; }
+</style>
+</head>
+<body class="sim-dark">
+
+<!-- ===== 页首 ===== -->
+<header class="page-head">
+  <h1>MarinMind · UI 布局一致性评审 R4</h1>
+  <div class="sub">
+    聚焦按钮层级 / 工具栏分组 / 右键菜单结构 / 弹窗表单 / 图标语言 —— 前三轮未覆盖的组件级布局维度。
+    mockup 为近似复刻，仅供决策辅助；实施后以 Obsidian 内目检为准。
+  </div>
+  <div class="toolbar">
+    <button class="theme-toggle" onclick="toggleTheme()">🌓 切换主题（深色 / 浅色）</button>
+    <button class="theme-toggle" onclick="exportAdoption()">📋 导出采纳清单</button>
+    <span class="decision-summary" id="decisionSummary">已勾选 0 / 12 项</span>
+  </div>
+  <div class="legend">
+    <span><span class="badge p0">R4-P0</span> 布局不一致 / 视觉割裂</span>
+    <span><span class="badge p1">R4-P1</span> 体验提升</span>
+    <span><span class="badge p2">R4-P2</span> 润色 / 判断</span>
+    <span><span class="badge ok">✓</span> 已达标</span>
+    <span><span class="badge dim">N/A</span> 不适用</span>
+  </div>
+</header>
+
+<!-- ===== 锚点导航 ===== -->
+<nav class="toc">
+  <span class="grp">D1 按钮层级</span>
+  <a href="#d1-01">D1-01 按钮重量</a>
+  <a href="#d1-02">D1-02 激活态</a>
+  <span class="grp">D2 工具栏分组</span>
+  <a href="#d2-01">D2-01 分隔线</a>
+  <a href="#d2-02">D2-02 间距</a>
+  <span class="grp">D3 图标语言</span>
+  <a href="#d3-01">D3-01 layers 残留</a>
+  <a href="#d3-02">D3-02 emoji 残留</a>
+  <span class="grp">D4 右键菜单</span>
+  <a href="#d4-01">D4-01 菜单分组</a>
+  <a href="#d4-02">D4-02 菜单顺序</a>
+  <span class="grp">D5 弹窗布局</span>
+  <a href="#d5-01">D5-01 标签格式</a>
+  <a href="#d5-02">D5-02 按钮排列</a>
+  <span class="grp">D6 同操作多路径</span>
+  <a href="#d6-01">D6-01 摘录路径</a>
+  <span class="grp">附录</span>
+  <a href="#pass-na">✓ 达标与 N/A</a>
+</nav>
+
+<!-- ===== 主体 ===== -->
+<main>
+
+<!-- ============================ D1-01 ============================ -->
+<section class="finding" id="d1-01" data-w="D1-01">
+  <h2><span class="badge p0">R4-P0</span> D1-01 按钮视觉重量不统一：同语义操作跨视图用不同重量</h2>
+  <div class="finding-meta">
+    <span class="badge view">脑图 header / 阅读器工具行 / 主页 / 复习</span>
+    <span>改动量：<b>~20 行 CSS</b></span>
+  </div>
+  <div class="rule-quote">
+    设计原则（R1 第五章）：<em>「花胆量在一个地方」——签名元素之外保持克制。</em>
+    按钮重量应与服务目的对齐：高频操作（工具行）用轻量 ghost 钮；关键动作（弹窗 CTA）用实底强调；开关类（自动收录）用胶囊。
+  </div>
+  <div class="desc">
+    现状六套按钮配方并存：<code>.marinmind-tool-btn</code>（reader，ghost 图标+文字）、
+    <code>.marinmind-mm-autocollect</code>（脑图，胶囊边框开关）、
+    <code>.marinmind-mm-header-btn</code>（脑图，纯图标）、
+    <code>.marinmind-home-btn</code>（主页，ghost 带边框）、
+    <code>.marinmind-review-btn</code>（复习，实底）、
+    <code>.marinmind-selection-btn</code>（选区工具栏，纯图标 30×30）。
+    <span class="dim">P2-2 已文档化激活态语义（工具态 accent 实底 / 导航态 hover 底色），但未做视觉收敛。</span>
+    核心问题：「复习」入口在三处重量不同——阅读器工具行是 ghost 钮、脑图 header 是胶囊开关、主页导航是 div 行。
+  </div>
+  <div class="multi cols-3">
+    <div class="col">
+      <div class="col-title">阅读器工具行</div>
+      <div class="mock">
+        <div class="tool-row-mock">
+          <button class="tool-btn-mock"><span class="icon-mock">☰</span><span class="label">目录</span></button>
+          <div class="tool-sep-mock"></div>
+          <button class="tool-btn-mock"><span class="icon-mock">✋</span><span class="label">手型</span></button>
+          <div class="tool-sep-mock"></div>
+          <button class="tool-btn-mock is-active"><span class="icon-mock">🖊</span><span class="label">文字</span></button>
+          <button class="tool-btn-mock"><span class="icon-mock">⬚</span><span class="label">矩形</span></button>
+          <button class="tool-btn-mock"><span class="icon-mock">◯</span><span class="label">套索</span></button>
+          <button class="tool-btn-mock"><span class="color-dot-mock" style="background:#e8c53a"></span><span class="label">高亮</span></button>
+          <button class="tool-btn-mock"><span class="icon-mock">✏</span><span class="label">手写</span></button>
+          <div class="tool-spacer-mock"></div>
+          <button class="tool-btn-mock"><span class="icon-mock">🪄</span><span class="label">AI摘录</span></button>
+          <button class="tool-btn-mock"><span class="icon-mock">🌿</span><span class="label">脑图</span></button>
+          <button class="tool-btn-mock"><span class="icon-mock">⚡</span><span class="label">闪卡</span></button>
+          <button class="tool-btn-mock is-active"><span class="icon-mock">⚔</span><span class="label">复习</span></button>
+        </div>
+        <div class="anno">.marinmind-tool-btn：ghost，图标+文字，gap:5px，padding:3px 10px</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-title">脑图 header</div>
+      <div class="mock">
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--background-modifier-border)">
+          <span style="font-weight:600;font-size:12px">《深度学习》</span>
+          <span style="font-size:11px;color:var(--text-muted)">12 节点</span>
+          <select class="sel-mock" style="margin-left:4px"><option>树形</option></select>
+          <button class="capsule-mock is-active" style="margin-left:auto"><span class="icon-mock small">🌿</span>添加到脑图</button>
+          <button class="capsule-mock"><span class="icon-mock small">📌</span>固定根</button>
+          <button class="capsule-mock"><span class="icon-mock small">⚔</span>复习</button>
+          <div class="tool-spacer-mock"></div>
+          <div class="segmented-mock">
+            <button class="segmented-btn-mock is-active">文档</button>
+            <button class="segmented-btn-mock">脑图</button>
+            <button class="segmented-btn-mock">联动</button>
+          </div>
+          <button class="icon-btn-mock" title="重命名">✏</button>
+          <button class="icon-btn-mock" title="删除">🗑</button>
+        </div>
+        <div class="anno">.marinmind-mm-autocollect：胶囊边框开关；.marinmind-mm-header-btn：纯图标 26×26</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-title">复习顶栏</div>
+      <div class="mock">
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--background-modifier-border)">
+          <button class="icon-btn-mock" title="列表">☰</button>
+          <button class="icon-btn-mock" title="上一张">‹</button>
+          <span style="font-size:11px;color:var(--text-muted);min-width:6.5em;text-align:center">3 / 24</span>
+          <button class="icon-btn-mock" title="下一张">›</button>
+          <button class="icon-btn-mock" title="撤销">↩</button>
+          <button class="icon-btn-mock" title="翻译">🌐</button>
+          <div class="tool-spacer-mock"></div>
+          <button style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:11px">⋯</button>
+          <button style="background:none;border:none;color:var(--interactive-accent);cursor:pointer;font-size:11px;display:flex;align-items:center;gap:3px">↗ 原文</button>
+        </div>
+        <div class="review-card-mock" style="margin-top:10px">
+          <div style="font-size:13px;line-height:1.6">The limits of my language mean the limits of my world.</div>
+          <div style="display:flex;gap:6px;margin-top:12px">
+            <button class="grade-btn-mock again">重来</button>
+            <button class="grade-btn-mock">困难</button>
+            <button class="grade-btn-mock">良好</button>
+            <button class="grade-btn-mock easy">简单</button>
+          </div>
+        </div>
+        <div class="anno">.marinmind-review-nav-btn：纯图标 26×26；.marinmind-review-btn：实底 flex:1</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix">
+    <b>改法</b>：不动现有配方（避免回归），仅在 CSS 中新增统一注释块，明确四类按钮的语义与选用场景：
+    <code>/* P4-1 按钮重量约定 */</code>——工具态（reader 工具行 / 选区工具栏）用 ghost；开关态（脑图 auto-collect / 固定根）用胶囊；导航态（主页侧栏 / 视图切换）用 hover 底色；强调态（弹窗 CTA / 评分按钮）用实底。
+    核心收敛点：「复习」入口三处统一用 <code>capsule-mock</code> 胶囊开关样式（脑图已用，阅读器和主页补）。
+    <b>风险</b>：中——「复习」按钮视觉变化可感知，属用户可见变更。<b>验证</b>：三视图「复习」入口观感一致。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d1-01"><label for="cb-d1-01">采纳：统一「复习」入口为胶囊开关样式</label>
+    <label>备注 <input type="text" data-note="D1-01" placeholder="可选" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ D1-02 ============================ -->
+<section class="finding" id="d1-02" data-w="D1-02">
+  <h2><span class="badge p1">R4-P1</span> D1-02 工具行按钮缺少「当前线型」视觉反馈</h2>
+  <div class="finding-meta">
+    <span class="badge view">选区工具栏（77）</span>
+    <span>改动量：<b>~5 行 TS</b></span>
+  </div>
+  <div class="desc">
+    选区工具栏的「线型」按钮（<code>selection-toolbar.ts:86</code>）通过 <code>setIcon</code> 动态切换图标（underline / strikethrough / squiggle），
+    但视觉权重与摘录/翻译/复制等其他图标按钮完全相同——用户无法一眼看出「当前线型是什么」。
+    <span class="dim">对照正例：阅读器工具行「文字/矩形/套索/高亮/手写」五工具通过 <code>is-active</code> 类实现 accent 实底高亮，一目了然。</span>
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（线型按钮无区分）</div>
+      <div class="mock">
+        <div class="tool-row-mock" style="border-radius:var(--radius-m)">
+          <span class="color-dot-mock" style="background:#e8c53a"></span>
+          <span class="color-dot-mock" style="background:#5aab5a"></span>
+          <span class="color-dot-mock" style="background:#4a90d9"></span>
+          <span class="color-dot-mock" style="background:#d9534f"></span>
+          <div class="tool-sep-mock"></div>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">🖊</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">〰</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">🌐</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">📋</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">🔖</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">🔍</span></button>
+        </div>
+        <div class="anno">▾ 线型按钮（〰）与其他按钮完全相同，看不出当前选中</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（线型按钮 accent 高亮）</div>
+      <div class="mock">
+        <div class="tool-row-mock" style="border-radius:var(--radius-m)">
+          <span class="color-dot-mock" style="background:#e8c53a"></span>
+          <span class="color-dot-mock" style="background:#5aab5a"></span>
+          <span class="color-dot-mock" style="background:#4a90d9"></span>
+          <span class="color-dot-mock" style="background:#d9534f"></span>
+          <div class="tool-sep-mock"></div>
+          <button class="tool-btn-mock is-active" style="width:30px;height:30px;padding:0"><span class="icon-mock">🖊</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">〰</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">🌐</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">📋</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">🔖</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">🔍</span></button>
+        </div>
+        <div class="anno good">▾ 当前线型按钮 accent 实底高亮，一眼可辨（与摘录工具行一致）</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix">
+    <b>改法</b>：<code>selection-toolbar.ts</code> 的 <code>syncLineStyleUI()</code> 方法中，线型按钮加 <code>classList.toggle('is-active', ...)</code>。
+    <b>风险</b>：极低（仅视觉）。<b>验证</b>：切换线型后按钮高亮状态同步。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d1-02"><label for="cb-d1-02">采纳</label>
+    <label>备注 <input type="text" data-note="D1-02" placeholder="可选" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ D2-01 ============================ -->
+<section class="finding" id="d2-01" data-w="D2-01">
+  <h2><span class="badge p0">R4-P0</span> D2-01 工具栏分组分隔线不一致：脑图 header 缺少语义分组</h2>
+  <div class="finding-meta">
+    <span class="badge view">脑图 header</span>
+    <span>改动量：<b>~5 行 CSS + ~5 行 TS</b></span>
+  </div>
+  <div class="desc">
+    阅读器工具行有明确分组：
+    <code>[目录] | [手型] | [四类摘录工具] | [AI摘录] | [脑图] | [闪卡] | [复习] | [模式条]</code>
+    ——用 <code>.marinmind-tool-sep</code> 分隔线区分「导航」与「创作」两组。
+    <br><br>
+    脑图 header 无分隔线：<code>[图名] [计数] [样式下拉] [添加到脑图] [固定根] [复习] | [模式条] [重命名] [删除]</code>
+    ——功能分组（图级操作 / 视图操作 / 管理操作）混在一起，用户难以快速定位。
+    <br><br>
+    <span class="dim">对照正例：阅读器工具行（reader-view.ts:1576-1580）用 <code>marinmind-tool-sep</code> 分隔手型与摘录工具，语义清晰。</span>
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（脑图 header 无分组）</div>
+      <div class="mock">
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--background-modifier-border);font-size:12px">
+          <span style="font-weight:600">《深度学习》</span>
+          <span style="color:var(--text-muted);font-size:11px">12 节点</span>
+          <select class="sel-mock"><option>树形</option></select>
+          <button class="capsule-mock is-active"><span class="icon-mock small">🌿</span>自动收录</button>
+          <button class="capsule-mock"><span class="icon-mock small">📌</span>固定根</button>
+          <button class="capsule-mock"><span class="icon-mock small">⚔</span>复习</button>
+          <div style="flex:1"></div>
+          <div class="segmented-mock">
+            <button class="segmented-btn-mock is-active">文档</button>
+            <button class="segmented-btn-mock">脑图</button>
+            <button class="segmented-btn-mock">联动</button>
+          </div>
+          <button class="icon-btn-mock">✏</button>
+          <button class="icon-btn-mock">🗑</button>
+        </div>
+        <div class="anno">▾ 图级操作 / 视图切换 / 管理操作混排，无视觉分隔</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（增加分组分隔）</div>
+      <div class="mock">
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--background-modifier-border);font-size:12px">
+          <span style="font-weight:600">《深度学习》</span>
+          <span style="color:var(--text-muted);font-size:11px">12 节点</span>
+          <select class="sel-mock"><option>树形</option></select>
+          <div style="width:1px;height:18px;background:var(--background-modifier-border);margin:0 4px"></div>
+          <button class="capsule-mock is-active"><span class="icon-mock small">🌿</span>自动收录</button>
+          <button class="capsule-mock"><span class="icon-mock small">📌</span>固定根</button>
+          <button class="capsule-mock"><span class="icon-mock small">⚔</span>复习</button>
+          <div style="flex:1"></div>
+          <div class="segmented-mock">
+            <button class="segmented-btn-mock is-active">文档</button>
+            <button class="segmented-btn-mock">脑图</button>
+            <button class="segmented-btn-mock">联动</button>
+          </div>
+          <div style="width:1px;height:18px;background:var(--background-modifier-border);margin:0 4px"></div>
+          <button class="icon-btn-mock" title="重命名">✏</button>
+          <button class="icon-btn-mock" title="删除">🗑</button>
+        </div>
+        <div class="anno good">▾ 新增两处分隔：样式下拉后（图级操作组）、模式条后（管理操作组）</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix">
+    <b>改法</b>：脑图 header 在样式下拉后与模式条后各加 <code>div.marinmind-tool-sep</code>（复用阅读器已有样式）。
+    <b>风险</b>：低（仅视觉分隔）。<b>验证</b>：脑图 header 分组清晰，窄窗格 wrap 后仍有序。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d2-01"><label for="cb-d2-01">采纳</label>
+    <label>备注 <input type="text" data-note="D2-01" placeholder="可选" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ D2-02 ============================ -->
+<section class="finding" id="d2-02" data-w="D2-02">
+  <h2><span class="badge p1">R4-P1</span> D2-02 工具栏 gap 值不统一：2px / 0.4em / 0.5em 混用</h2>
+  <div class="finding-meta">
+    <span class="badge view">全工具栏</span>
+    <span>改动量：<b>~10 行 CSS</b></span>
+  </div>
+  <div class="desc">
+    四工具栏 gap 值现状：
+    <ul style="margin:6px 0 0;padding-left:20px;color:var(--text-muted);font-size:12.5px">
+      <li>阅读器工具行：<code>gap:2px</code>（styles.css:80）</li>
+      <li>选区工具栏：<code>gap:2px</code>（styles.css:2136）</li>
+      <li>脑图 header：<code>gap:0.5em</code>（styles.css:1461）</li>
+      <li>复习顶栏：<code>gap:0.4em</code>（styles.css:708）</li>
+      <li>手写工具栏：<code>gap:2px</code>（styles.css:2095）</li>
+    </ul>
+    <span class="dim">rem 化后（P2-4）0.4em≈6.4px、0.5em≈8px、2px 固定——视觉上脑图 header 最松，其余四者接近但不一致。</span>
+  </div>
+  <div class="fix">
+    <b>改法</b>：统一工具栏 gap 为 <code>gap:6px</code>（rem 化后 ≈0.375em，与主页 4 网格纪律一致）。
+    <b>风险</b>：低——仅间距微调。<b>验证</b>：深浅双主题下四工具栏视觉节奏一致。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d2-02"><label for="cb-d2-02">采纳</label>
+    <label>备注 <input type="text" data-note="D2-02" placeholder="可选" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ D3-01 ============================ -->
+<section class="finding" id="d3-01" data-w="D3-01">
+  <h2><span class="badge p0">R4-P0</span> D3-01 「layers」图标语义残留：与主页「卡片」导航撞车</h2>
+  <div class="finding-meta">
+    <span class="badge view">主页 / 复习 / 脑图</span>
+    <span>改动量：<b>~3 行 TS</b></span>
+  </div>
+  <div class="rule-quote">
+    R2-1 图标统一记录：<em>「layers 语义已被主页「卡片」导航占用，复习视图用 swords 对齐」</em>。
+    但 grep 发现三处残留仍未修改。
+  </div>
+  <div class="desc">
+    <ul style="margin:6px 0 0;padding-left:20px;color:var(--page-text);font-size:12.5px">
+      <li><code>src/home/home-view.ts:17</code> 主页侧栏「卡片」导航 — <code>icon: "layers"</code>（应改为 <code>"layers"</code> 保留，因这是主页自身导航，与外部引用不冲突）</li>
+      <li><code>src/home/card-preview-modal.ts:107</code> 预览弹窗「卡组」按钮 — <code>setIcon("layers")</code>（应改为 <code>"layers"</code> 保留）</li>
+      <li><code>src/review/review-view.ts:1125</code> 复习管理菜单「设卡组」— <code>setIcon("layers")</code>（应改为 <code>"layers"</code> 保留）</li>
+      <li><code>src/mindmap/mindmap-view.ts:2736</code> 节点右键菜单闪卡入口 — <code>setIcon(isFlashcard ? "layers" : "graduation-cap")</code>（<span style="color:var(--p0)">应改为 <code>"zap"</code></span>）</li>
+    </ul>
+    <span class="dim">注：主页侧栏「卡片」的 layers 是内部导航，与「复习」入口的 swords 不冲突；但节点右键菜单的 layers 与主页撞车，应统一为 zap（闪卡语义）。</span>
+  </div>
+  <div class="fix">
+    <b>改法</b>：<code>mindmap-view.ts:2736</code> 将 <code>"layers"</code> 改为 <code>"zap"</code>（与工具行闪卡按钮一致）。主页与复习的 layers 保留（各自语境下语义自洽）。
+    <b>风险</b>：极低。<b>验证</b>：脑图节点右键菜单闪卡入口图标与工具行闪卡按钮视觉一致。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d3-01"><label for="cb-d3-01">采纳：脑图节点右键闪卡入口改 zap</label>
+    <label>备注 <input type="text" data-note="D3-01" placeholder="可选" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ D3-02 ============================ -->
+<section class="finding" id="d3-02" data-w="D3-02">
+  <h2><span class="badge p2">R4-P2</span> D3-02 emoji 残留（判断项：建议保留）</h2>
+  <div class="finding-meta">
+    <span class="badge view">全文检索</span>
+    <span>改动量：<b>如做 ~5 行</b></span>
+  </div>
+  <div class="desc">
+    全库 emoji 残留仅 1 处：
+    <ul style="margin:6px 0 0;padding-left:20px;color:var(--page-text);font-size:12.5px">
+      <li><code>src/review/context-preview.ts:72</code> — <code>📍 原文上下文 · 第 ${page} 页</code></li>
+    </ul>
+    <span class="dim">R2-1 已统一大部分 emoji→lucide，剩余两处（📖 书籍徽标、📂 库外入口）已判定保留（数据层契约/语义清晰）。此处 📍 是纯装饰定位符号，可改为 setIcon("map-pin") 或保留。</span>
+  </div>
+  <div class="fix">
+    <b>判定</b>：<span style="color:var(--ok)">建议保持现状</span>。📍 作为定位语义的视觉强化，在中文 UI 中比裸 icon 更易识别；且位置文本是动态生成（<code>${page}</code>），icon+文字混合布局需额外 CSS。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d3-02" checked disabled><label for="cb-d3-02">保持现状（建议）</label>
+  </div>
+</section>
+
+<!-- ============================ D4-01 ============================ -->
+<section class="finding" id="d4-01" data-w="D4-01">
+  <h2><span class="badge p1">R4-P1</span> D4-01 右键菜单无分组：信息密度高时难以扫读</h2>
+  <div class="finding-meta">
+    <span class="badge view">脑图节点 / 阅读器高亮 / 主页卡片</span>
+    <span>改动量：<b>~30 行 TS</b></span>
+  </div>
+  <div class="desc">
+    三视图右键菜单现状（均无分组）：
+    <ul style="margin:6px 0 0;padding-left:20px;color:var(--page-text);font-size:12.5px">
+      <li>脑图节点右键（<code>mindmap-view.ts:2664-2837</code>）：约 15 项，无分隔</li>
+      <li>阅读器高亮右键（<code>reader-view.ts:3606-3798</code>）：约 12 项，无分隔</li>
+      <li>主页卡片右键（<code>home-pages.ts:543-570</code>）：约 8 项，无分隔</li>
+    </ul>
+    <span class="dim">Obsidian Menu API 支持 <code>addSeparator()</code> 与 <code>setTitle()</code>（分组标题）。同类操作（编辑类 / 链接类 / 删除类）应分组。</span>
+  </div>
+  <div class="multi cols-3">
+    <div class="col">
+      <div class="col-title">脑图节点右键（现状）</div>
+      <div class="mock">
+        <div class="menu-mock">
+          <div class="menu-item-mock"><span class="mi-icon">↗</span>跳原文</div>
+          <div class="menu-item-mock"><span class="mi-icon">✏</span>编辑标题/批注</div>
+          <div class="menu-item-mock"><span class="mi-icon">🏷</span>打标签</div>
+          <div class="menu-item-mock"><span class="mi-icon">📚</span>设卡组</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-item-mock"><span class="mi-icon">🔗</span>创建双向链接</div>
+          <div class="menu-item-mock"><span class="mi-icon">↩</span>链接到…</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-item-mock"><span class="mi-icon">⚡</span>转闪卡</div>
+          <div class="menu-item-mock"><span class="mi-icon">⚔</span>开始复习</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-item-mock"><span class="mi-icon">🌿</span>加入子脑图</div>
+          <div class="menu-item-mock"><span class="mi-icon">📌</span>设为固定根</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-item-mock" style="color:var(--text-error)"><span class="mi-icon">🗑</span>删除节点</div>
+        </div>
+        <div class="anno">▾ 15 项无分组，编辑/链接/操作混排</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-title">建议后（分组）</div>
+      <div class="mock">
+        <div class="menu-mock">
+          <div class="menu-title-mock">定位</div>
+          <div class="menu-item-mock"><span class="mi-icon">↗</span>跳原文</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-title-mock">编辑</div>
+          <div class="menu-item-mock"><span class="mi-icon">✏</span>编辑标题/批注</div>
+          <div class="menu-item-mock"><span class="mi-icon">🏷</span>打标签</div>
+          <div class="menu-item-mock"><span class="mi-icon">📚</span>设卡组</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-title-mock">链接</div>
+          <div class="menu-item-mock"><span class="mi-icon">🔗</span>创建双向链接</div>
+          <div class="menu-item-mock"><span class="mi-icon">↩</span>链接到…</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-title-mock">复习</div>
+          <div class="menu-item-mock"><span class="mi-icon">⚡</span>转闪卡</div>
+          <div class="menu-item-mock"><span class="mi-icon">⚔</span>开始复习</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-title-mock">脑图</div>
+          <div class="menu-item-mock"><span class="mi-icon">🌿</span>加入子脑图</div>
+          <div class="menu-item-mock"><span class="mi-icon">📌</span>设为固定根</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-item-mock" style="color:var(--text-error)"><span class="mi-icon">🗑</span>删除节点</div>
+        </div>
+        <div class="anno good">▾ 五组：定位/编辑/链接/复习/脑图，删除单独（危险操作）</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-title">阅读器高亮右键（现状）</div>
+      <div class="mock">
+        <div class="menu-mock">
+          <div class="menu-item-mock"><span class="mi-icon">📖</span>查看原文</div>
+          <div class="menu-item-mock"><span class="mi-icon">✏</span>编辑批注</div>
+          <div class="menu-item-mock"><span class="mi-icon">🏷</span>打标签</div>
+          <div class="menu-item-mock"><span class="mi-icon">📚</span>设卡组</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-item-mock"><span class="mi-icon">🔗</span>创建双向链接</div>
+          <div class="menu-item-mock"><span class="mi-icon">🌐</span>翻译</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-item-mock"><span class="mi-icon">📋</span>复制文字</div>
+          <div class="menu-item-mock"><span class="mi-icon">🔖</span>添加书签</div>
+          <div class="menu-sep-mock"></div>
+          <div class="menu-item-mock"><span class="mi-icon">🗑</span>删除卡片</div>
+        </div>
+        <div class="anno">▾ 11 项无分组，编辑/链接/工具混排</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix">
+    <b>改法</b>：脑图节点右键与阅读器高亮右键各加 <code>menu.addSeparator()</code> + <code>menu.setTitle("分组名")</code>。
+    <b>风险</b>：低（仅菜单结构，不改变功能）。<b>验证</b>：右键菜单分组清晰，扫读效率提升。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d4-01"><label for="cb-d4-01">采纳：脑图节点 + 阅读器高亮右键菜单分组</label>
+    <label>备注 <input type="text" data-note="D4-01" placeholder="可选" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ D4-02 ============================ -->
+<section class="finding" id="d4-02" data-w="D4-02">
+  <h2><span class="badge p1">R4-P1</span> D4-02 同功能菜单项顺序不一致</h2>
+  <div class="finding-meta">
+    <span class="badge view">脑图 / 阅读器 / 主页</span>
+    <span>改动量：<b>~15 行 TS（仅 reorder）</b></span>
+  </div>
+  <div class="desc">
+    三视图右键菜单中「编辑标题/批注」「打标签」「设卡组」「删除」的排列顺序不同：
+    <ul style="margin:6px 0 0;padding-left:20px;color:var(--page-text);font-size:12.5px">
+      <li>脑图节点：<code>编辑 → 标签 → 卡组 → 链接 → … → 删除</code></li>
+      <li>阅读器高亮：<code>查看原文 → 编辑 → 标签 → 卡组 → … → 删除</code></li>
+      <li>主页卡片：<code>编辑 → 标签 → 卡组 → … → 删除</code></li>
+    </ul>
+    <span class="dim">「编辑」应在最前（最高频操作），「删除」应在最后（危险操作，需扫到末尾才触发）。现状基本符合，但「翻译」/「复制」等工具类操作位置不统一。</span>
+  </div>
+  <div class="fix">
+    <b>改法</b>：统一菜单项顺序为：<code>定位类 → 编辑类 → 链接类 → 工具类（翻译/复制/书签） → 复习类 → 脑图类 → 删除</code>。
+    <b>风险</b>：低（仅顺序调整）。<b>验证</b>：三视图右键菜单顺序一致。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d4-02"><label for="cb-d4-02">采纳：统一菜单项顺序</label>
+    <label>备注 <input type="text" data-note="D4-02" placeholder="可选" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ D5-01 ============================ -->
+<section class="finding" id="d5-01" data-w="D5-01">
+  <h2><span class="badge p1">R4-P1</span> D5-01 弹窗标签格式不统一</h2>
+  <div class="finding-meta">
+    <span class="badge view">各弹窗</span>
+    <span>改动量：<b>~10 行 TS</b></span>
+  </div>
+  <div class="desc">
+    各弹窗标签文案格式：
+    <ul style="margin:6px 0 0;padding-left:20px;color:var(--page-text);font-size:12.5px">
+      <li>翻译弹窗：<code>目标语言</code> / <code>原文</code> / <code>译文</code>（无冒号）</li>
+      <li>自动摘录弹窗：<code>摘录范围</code> / <code>起始页</code> / <code>结束页</code>（无冒号）</li>
+      <li>卡片编辑弹窗：<code>标题</code> / <code>批注</code>（无冒号）</li>
+      <li>设置页：<code>间隔重复 — 每批复习张数</code>（长描述）</li>
+    </ul>
+    <span class="dim">统一格式建议：标签后加冒号（<code>目标语言：</code>），或统一不加。当前混用状态造成视觉节奏不一致。</span>
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（混用）</div>
+      <div class="mock-modal">
+        <div class="modal-head">翻译</div>
+        <div class="modal-body" style="font-size:12px">
+          <div style="color:var(--text-muted);margin-bottom:4px">目标语言</div>
+          <select class="sel-mock" style="width:100%;margin-bottom:10px"><option>简体中文</option></select>
+          <div style="color:var(--text-muted);margin-bottom:4px">原文</div>
+          <div style="background:var(--background-secondary);padding:8px;border-radius:var(--radius-s);margin-bottom:10px;font-size:11.5px">The limits of my language…</div>
+          <div style="color:var(--text-muted);margin-bottom:4px">译文</div>
+          <div style="background:var(--background-secondary);padding:8px;border-radius:var(--radius-s);font-size:11.5px">我的语言的界限…</div>
+        </div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（统一冒号）</div>
+      <div class="mock-modal">
+        <div class="modal-head">翻译</div>
+        <div class="modal-body" style="font-size:12px">
+          <div style="color:var(--text-muted);margin-bottom:4px">目标语言：</div>
+          <select class="sel-mock" style="width:100%;margin-bottom:10px"><option>简体中文</option></select>
+          <div style="color:var(--text-muted);margin-bottom:4px">原文：</div>
+          <div style="background:var(--background-secondary);padding:8px;border-radius:var(--radius-s);margin-bottom:10px;font-size:11.5px">The limits of my language…</div>
+          <div style="color:var(--text-muted);margin-bottom:4px">译文：</div>
+          <div style="background:var(--background-secondary);padding:8px;border-radius:var(--radius-s);font-size:11.5px">我的语言的界限…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="fix">
+    <b>改法</b>：所有弹窗标签统一加冒号（<code>目标语言：</code>）。涉及 translate-modal、auto-excerpt-modal、card-edit-modal。
+    <b>风险</b>：极低（纯文案）。<b>验证</b>：各弹窗标签视觉节奏一致。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d5-01"><label for="cb-d5-01">采纳</label>
+    <label>备注 <input type="text" data-note="D5-01" placeholder="可选" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ D5-02 ============================ -->
+<section class="finding" id="d5-02" data-w="D5-02">
+  <h2><span class="badge p2">R4-P2</span> D5-02 弹窗按钮排列不一致（右对齐 vs 居中）</h2>
+  <div class="finding-meta">
+    <span class="badge view">各弹窗</span>
+    <span>改动量：<b>~5 行 CSS</b></span>
+  </div>
+  <div class="desc">
+    弹窗按钮排列现状：
+    <ul style="margin:6px 0 0;padding-left:20px;color:var(--page-text);font-size:12.5px">
+      <li>翻译弹窗：<code>justify-content:flex-end</code>（右对齐）</li>
+      <li>自动摘录弹窗：<code>justify-content:flex-end</code>（右对齐）</li>
+      <li>卡片编辑弹窗：<code>justify-content:flex-end</code>（右对齐）</li>
+      <li>确认弹窗：<code>justify-content:flex-end</code>（右对齐）</li>
+    </ul>
+    <span class="dim">现状已基本统一（右对齐）。但部分弹窗（如 media-preview）按钮居中。建议全量统一为右对齐（符合大部分 SaaS 惯例）。</span>
+  </div>
+  <div class="fix">
+    <b>判定</b>：<span style="color:var(--ok)">建议保持现状（右对齐）</span>。全库已基本统一，无需改动。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d5-02" checked disabled><label for="cb-d5-02">保持现状（已统一）</label>
+  </div>
+</section>
+
+<!-- ============================ D6-01 ============================ -->
+<section class="finding" id="d6-01" data-w="D6-01">
+  <h2><span class="badge p1">R4-P1</span> D6-01 同一操作多路径：按钮规格不一致</h2>
+  <div class="finding-meta">
+    <span class="badge view">摘录操作 / 复习操作</span>
+    <span>改动量：<b>~10 行 CSS</b></span>
+  </div>
+  <div class="desc">
+    同一操作在不同路径的按钮规格：
+    <ul style="margin:6px 0 0;padding-left:20px;color:var(--page-text);font-size:12.5px">
+      <li><b>摘录</b>：工具行按钮（图标+文字，ghost） vs 选区工具栏（纯图标 30×30）— <span style="color:var(--p1)">规格不一致</span></li>
+      <li><b>复习</b>：工具行按钮（图标+文字，ghost） vs 脑图 header（胶囊开关）— <span style="color:var(--p1)">规格不一致</span></li>
+      <li><b>翻译</b>：工具行按钮（图标+文字） vs 选区工具栏（纯图标）— <span style="color:var(--p1)">规格不一致</span></li>
+    </ul>
+    <span class="dim">选区工具栏因空间限制用纯图标是合理的，但应通过 CSS 变量统一图标尺寸与间距，避免视觉跳变。</span>
+  </div>
+  <div class="multi cols-3">
+    <div class="col">
+      <div class="col-title">工具行（图标+文字）</div>
+      <div class="mock">
+        <div class="tool-row-mock">
+          <button class="tool-btn-mock"><span class="icon-mock">🌐</span><span class="label">翻译</span></button>
+          <button class="tool-btn-mock"><span class="icon-mock">⚔</span><span class="label">复习</span></button>
+          <button class="tool-btn-mock"><span class="icon-mock">🖊</span><span class="label">文字</span></button>
+        </div>
+        <div class="anno">gap:5px, padding:3px 10px, font-size:12px</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-title">选区工具栏（纯图标）</div>
+      <div class="mock">
+        <div class="tool-row-mock" style="border-radius:var(--radius-m)">
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">🌐</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">🖊</span></button>
+          <button class="tool-btn-mock" style="width:30px;height:30px;padding:0"><span class="icon-mock">📋</span></button>
+        </div>
+        <div class="anno">30×30 固定尺寸，无文字，gap:2px</div>
+      </div>
+    </div>
+    <div class="col">
+      <div class="col-title">脑图 header（胶囊开关）</div>
+      <div class="mock">
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;font-size:12px">
+          <button class="capsule-mock"><span class="icon-mock small">⚔</span>复习</button>
+          <button class="capsule-mock is-active"><span class="icon-mock small">🌿</span>自动收录</button>
+        </div>
+        <div class="anno">胶囊边框，图标+文字，gap:5px</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix">
+    <b>改法</b>：选区工具栏按钮尺寸从 <code>30×30</code> 统一为 <code>28×28</code>（与工具行按钮高度一致），图标尺寸从 16px 缩为 14px。
+    <b>风险</b>：低（仅尺寸微调）。<b>验证</b>：选区工具栏与工具行视觉节奏一致。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-d6-01"><label for="cb-d6-01">采纳：选区工具栏按钮尺寸统一</label>
+    <label>备注 <input type="text" data-note="D6-01" placeholder="可选" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ 达标与 N/A ============================ -->
+<section class="finding" id="pass-na">
+  <h2><span class="badge ok">✓</span> 达标项与 N/A 项</h2>
+  <div class="desc" style="margin-top:10px">
+    <h3 style="margin:0 0 8px;font-size:14px;color:var(--ok)">✓ 已达标</h3>
+    <ul style="margin:0;padding-left:20px;color:var(--page-muted);font-size:12.5px;line-height:1.8">
+      <li><b>图标语言</b>：全库按钮已统一用 <code>setIcon()</code>，无 emoji 按钮（R2-1 已完成）</li>
+      <li><b>可访问性</b>：所有按钮有 <code>aria-label</code> + <code>title</code>，切换钮有 <code>aria-pressed</code>（R0-R3 已完成）</li>
+      <li><b>键盘可达</b>：主页可点 div 有 <code>role="button"</code> + <code>tabindex</code> + Enter/Space 触发（P0-1 已完成）</li>
+      <li><b>焦点环</b>：插件域统一 <code>:focus-visible</code> 规则（P0-1 已完成）</li>
+      <li><b>减弱动效</b>：录音/封面/定位闪烁均有 <code>@media (prefers-reduced-motion)</code> 豁免（P0-2 已完成）</li>
+      <li><b>分段控件</b>：三处共用 <code>.marinmind-segmented</code> 配方（P2-2 已完成）</li>
+      <li><b>按钮配方</b>：ghost/胶囊/实底/链接四档约定已文档化（P2-2 已完成）</li>
+    </ul>
+    <h3 style="margin:16px 0 8px;font-size:14px;color:var(--page-muted)">N/A 不适用</h3>
+    <ul style="margin:0;padding-left:20px;color:var(--page-muted);font-size:12.5px;line-height:1.8">
+      <li><b>弹窗最小宽度</b>：媒体/卡片预览弹窗 <code>min-width:min(22em, calc(100vw - 4em))</code> 已适配小屏（R2 E2-16 已完成）</li>
+      <li><b>原生 select 主题化</b>：翻译/自动摘录/侧栏 select 已加 CSS 规则（R3 W-01 已完成）</li>
+      <li><b>数字输入类型</b>：设置页数字字段已改 <code>type="number"</code>（R3 W-08 已完成）</li>
+      <li><b>录音丢弃确认</b>：已加 ConfirmModal（R3 W-10 已完成）</li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<!-- ===== 导出面板 ===== -->
+<div class="export-panel" id="exportPanel">
+  <span style="font-size:13px;color:var(--page-muted)">采纳清单：</span>
+  <textarea id="exportTextarea" readonly></textarea>
+  <button class="btn-copy" onclick="copyAdoption()">复制</button>
+</div>
+
+<script>
+// ===== 主题切换 =====
+function toggleTheme() {
+  document.body.classList.toggle('sim-dark');
+  document.body.classList.toggle('sim-light');
+}
+
+// ===== 采纳状态管理 =====
+const STORAGE_KEY = 'marinmind-r4-adoption';
+
+function loadAdoption() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+  } catch { return {}; }
+}
+
+function saveAdoption(state) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function initAdoption() {
+  const state = loadAdoption();
+  document.querySelectorAll('.adopt-row input[type="checkbox"]').forEach(cb => {
+    const id = cb.id;
+    if (state[id] !== undefined) cb.checked = state[id];
+    cb.addEventListener('change', () => {
+      state[id] = cb.checked;
+      saveAdoption(state);
+      updateSummary();
+    });
+  });
+  updateSummary();
+}
+
+function updateSummary() {
+  const checkboxes = document.querySelectorAll('.adopt-row input[type="checkbox"]:not(:disabled)');
+  const checked = document.querySelectorAll('.adopt-row input[type="checkbox"]:not(:disabled):checked');
+  document.getElementById('decisionSummary').textContent = `已勾选 ${checked.length} / ${checkboxes.length} 项`;
+}
+
+function exportAdoption() {
+  const checkboxes = document.querySelectorAll('.adopt-row input[type="checkbox"]:not(:disabled)');
+  const lines = [];
+  checkboxes.forEach(cb => {
+    const label = cb.closest('.adopt-row').querySelector('label:first-child').textContent.replace('采纳：', '').replace('采纳', '').trim();
+    const noteInput = cb.closest('.adopt-row').querySelector('input[data-note]');
+    const note = noteInput ? noteInput.value : '';
+    if (cb.checked) {
+      lines.push(`- [ ] ${label}${note ? ' # ' + note : ''}`);
+    }
+  });
+  if (lines.length === 0) {
+    alert('暂无采纳项，请先勾选卡片中的「采纳」复选框。');
+    return;
+  }
+  const textarea = document.getElementById('exportTextarea');
+  textarea.value = lines.join('\n');
+  document.getElementById('exportPanel').classList.add('visible');
+}
+
+function copyAdoption() {
+  const textarea = document.getElementById('exportTextarea');
+  textarea.select();
+  navigator.clipboard.writeText(textarea.value).then(() => {
+    const btn = document.querySelector('.btn-copy');
+    btn.textContent = '已复制!';
+    setTimeout(() => { btn.textContent = '复制'; }, 1500);
+  });
+}
+
+// ===== 初始化 =====
+initAdoption();
+</script>
+</body>
+</html>

@@ -24,6 +24,25 @@ export function cardPreview(card: Card): string {
 	return EXCERPT_LABELS[card.excerptType];
 }
 
+/**
+ * 卡片预览弹窗的正文块拆分（85-D：批注与摘录的独立展示位）：
+ * 标题行恒取 cardPreview（title > note > excerptText > 占位）——正文块只列
+ * **未被标题行吸收**的内容，避免同一段文字上下重复：
+ * - note 块：note 存在且**title 也存在**（title 空时 cardPreview 已用 note 当标题）；
+ * - excerpt 块：excerptText 存在且 title/note 至少一个存在（全空时已当标题）。
+ * OCR 文字（存 excerptText）在各编辑/预览界面"看不到"的问题由此补齐——
+ * 批注=问题、摘录=答案，与复习正反面同语义。
+ */
+export function cardPreviewBlocks(card: Card): { note: string | null; excerpt: string | null } {
+	const title = card.title?.trim() || null;
+	const note = card.note?.trim() || null;
+	const excerpt = card.excerptText?.trim() || null;
+	return {
+		note: note && title ? note : null,
+		excerpt: excerpt && (title || note) ? excerpt : null,
+	};
+}
+
 /** 分类选择的三态："all" 全部 / null 未分类 / 具体分类路径（多层以 / 分隔） */
 export type CategorySelection = string | null | "all";
 

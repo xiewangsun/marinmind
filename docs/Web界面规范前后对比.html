@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MarinMind · Web 界面规范（Vercel）第三轮评审 · 前后对比</title>
+<!--
+  ============================================================
+  MarinMind 第三轮 UI 评审（R3）前后对比图
+  ------------------------------------------------------------
+  · 评审标准：Vercel Web Interface Guidelines（16 类规则）
+  · 评审对象：v0.1.0 四视图 + 弹窗 + 设置页（基线 2026-09-04，
+    类名/选择器为主锚点，行号会随后续提交漂移）
+  · 用法：每张卡片可勾选「采纳」，勾选状态存本机浏览器
+    （localStorage），页首汇总区可复制采纳清单交给 Claude 开工
+  · mockup 为「近似复刻」：Obsidian 主题变量取默认主题近似值，
+    决策辅助用，非像素承诺；实施后以真实环境目检为准
+  · 本文件自包含：无外部资源，断网可开；演示动效尊重
+    prefers-reduced-motion
+  ============================================================
+-->
+<style>
+/* ===== 页面自身 chrome（不模拟 Obsidian） ===== */
+:root {
+  --page-bg: #101114;
+  --page-panel: #17181c;
+  --page-panel-2: #1d1e23;
+  --page-border: rgba(255, 255, 255, 0.08);
+  --page-text: #e8e9ea;
+  --page-muted: #9a9da3;
+  --page-faint: #6b6e74;
+  --page-accent: #8a90ff;
+  --p0: #ff7d73;
+  --p1: #e8c53a;
+  --p2: #7fb8ff;
+  --ok: #4cb782;
+  --mono: ui-monospace, "Cascadia Code", Consolas, "Courier New", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--page-bg);
+  color: var(--page-text);
+  font: 14px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  padding-bottom: 80px;
+}
+a { color: var(--page-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { font-family: var(--mono); font-size: 12px; background: rgba(138, 144, 255, 0.1); color: #b9befc; padding: 1px 5px; border-radius: 4px; word-break: break-all; }
+
+/* ===== 页首 ===== */
+header.page-head {
+  padding: 28px 32px 18px;
+  border-bottom: 1px solid var(--page-border);
+  background: linear-gradient(180deg, #14151a, var(--page-bg));
+}
+.page-head h1 { margin: 0 0 6px; font-size: 20px; letter-spacing: 0.02em; }
+.page-head .sub { color: var(--page-muted); font-size: 13px; max-width: 920px; }
+.page-head .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; }
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--page-panel-2); color: var(--page-text);
+  border: 1px solid var(--page-border); border-radius: 999px;
+  padding: 5px 14px; font-size: 13px; cursor: pointer; user-select: none;
+}
+.theme-toggle:hover { border-color: rgba(138, 144, 255, 0.5); }
+.decision-summary { font-size: 13px; color: var(--page-muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--page-muted); }
+.legend .badge { margin-right: 2px; }
+
+/* 优先级徽标 */
+.badge {
+  display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  border-radius: 999px; padding: 1px 9px; vertical-align: 1px; white-space: nowrap;
+}
+.badge.p0 { background: rgba(255, 125, 115, 0.15); color: var(--p0); }
+.badge.p1 { background: rgba(232, 197, 58, 0.13); color: var(--p1); }
+.badge.p2 { background: rgba(127, 184, 255, 0.13); color: var(--p2); }
+.badge.ok { background: rgba(76, 183, 130, 0.13); color: var(--ok); }
+.badge.view { background: rgba(255, 255, 255, 0.07); color: var(--page-muted); font-weight: 500; }
+
+/* ===== 顶部锚点导航 ===== */
+nav.toc {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(16, 17, 20, 0.92); backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--page-border);
+  padding: 8px 32px; font-size: 12.5px;
+  display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center;
+}
+nav.toc .grp { color: var(--page-faint); font-weight: 600; }
+nav.toc a { color: var(--page-muted); }
+nav.toc a:hover { color: var(--page-text); text-decoration: none; }
+
+/* ===== 卡片容器 ===== */
+main { max-width: 1060px; margin: 0 auto; padding: 20px 24px; }
+section.finding {
+  background: var(--page-panel); border: 1px solid var(--page-border);
+  border-radius: 10px; padding: 20px 22px; margin: 18px 0;
+}
+section.finding.decided-adopt { border-color: rgba(76, 183, 130, 0.45); }
+section.finding.decided-skip { opacity: 0.55; }
+section.finding h2 { margin: 0; font-size: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.finding-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0 4px; font-size: 12.5px; color: var(--page-muted); }
+.finding-meta b { color: var(--page-text); font-weight: 600; }
+.rule-quote {
+  border-left: 3px solid rgba(138, 144, 255, 0.5);
+  background: rgba(138, 144, 255, 0.06);
+  padding: 8px 12px; margin: 12px 0; font-size: 12.5px; color: var(--page-muted);
+  border-radius: 0 6px 6px 0;
+}
+.rule-quote em { color: #b9befc; font-style: normal; }
+.finding .desc { color: var(--page-text); font-size: 13.5px; }
+.finding .desc .dim { color: var(--page-muted); }
+.fix { background: rgba(76, 183, 130, 0.06); border: 1px dashed rgba(76, 183, 130, 0.35); border-radius: 8px; padding: 10px 14px; margin: 12px 0; font-size: 13px; }
+.fix b { color: var(--ok); }
+.adopt-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 13px; color: var(--page-muted); }
+.adopt-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--ok); cursor: pointer; }
+.adopt-row label { cursor: pointer; user-select: none; }
+.adopt-row select { background: var(--page-panel-2); color: var(--page-text); border: 1px solid var(--page-border); border-radius: 6px; padding: 3px 8px; font-size: 12.5px; }
+
+/* 前后对比布局 */
+.ba { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 14px 0; }
+@media (max-width: 860px) { .ba { grid-template-columns: 1fr; } }
+.ba .col { min-width: 0; }
+.ba .col-title {
+  font-size: 12px; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 6px;
+}
+.ba .before .col-title { color: var(--p0); }
+.ba .after .col-title { color: var(--ok); }
+
+/* 代码 diff 块 */
+pre.diff {
+  background: #0c0d10; border: 1px solid var(--page-border); border-radius: 8px;
+  padding: 10px 12px; overflow-x: auto; margin: 6px 0;
+  font-family: var(--mono); font-size: 12px; line-height: 1.6; color: #c8cad0;
+}
+pre.diff .del { color: #ff9a92; background: rgba(255, 125, 115, 0.09); display: block; }
+pre.diff .add { color: #7ddba8; background: rgba(76, 183, 130, 0.09); display: block; }
+pre.diff .ctx { color: #8b8e94; display: block; }
+pre.diff .cm { color: #6b6e74; }
+
+/* 注释标注（mockup 内的说明气泡） */
+.anno {
+  position: relative; font-size: 11.5px; color: var(--page-muted);
+  border: 1px dashed rgba(255, 125, 115, 0.5); border-radius: 6px;
+  padding: 4px 8px; margin-top: 8px; display: inline-block;
+}
+.anno.good { border-color: rgba(76, 183, 130, 0.5); }
+
+/* ====================================================================
+   模拟 Obsidian 主题变量（近似值）——body 挂 .sim-dark / .sim-light
+   ==================================================================== */
+body.sim-dark {
+  --background-primary: #1e1e1e;
+  --background-primary-alt: #262626;
+  --background-secondary: #161616;
+  --background-secondary-alt: #1a1a1a;
+  --background-modifier-border: #333333;
+  --background-modifier-hover: rgba(255, 255, 255, 0.055);
+  --text-normal: #dcddde;
+  --text-muted: #9a9a9a;
+  --text-faint: #707070;
+  --text-on-accent: #ffffff;
+  --text-error: #e05c5c;
+  --interactive-accent: #7f6df2;
+  --interactive-accent-hover: #8b7cf7;
+  --interactive-normal: #222222;
+  --interactive-hover: #2a2a2a;
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --font-ui-smaller: 0.8em;
+  --font-ui-smallest: 0.7em;
+}
+body.sim-light {
+  --background-primary: #ffffff;
+  --background-primary-alt: #f6f6f6;
+  --background-secondary: #f2f3f5;
+  --background-secondary-alt: #e3e5e7;
+  --background-modifier-border: #d8d9da;
+  --background-modifier-hover: rgba(0, 0, 0, 0.04);
+  --text-normal: #232323;
+  --text-muted: #5c5c5c;
+  --text-faint: #909090;
+  --text-on-accent: #ffffff;
+  --text-error: #d44c40;
+  --interactive-accent: #7f6df2;
+  --interactive-accent-hover: #6f5cf0;
+  --interactive-normal: #e9e9e9;
+  --interactive-hover: #dfdfdf;
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --font-ui-smaller: 0.8em;
+  --font-ui-smallest: 0.7em;
+}
+/* 摘录墨色令牌（styles.css 336-407 真值） */
+.sim-dark, .sim-light {
+  --mm-hl-line-yellow: rgba(217, 169, 22, 0.95);
+  --mm-hl-tint-yellow: rgba(232, 197, 58, 0.2);
+  --mm-hl-line-green: rgba(90, 171, 90, 0.95);
+  --mm-hl-tint-green: rgba(90, 171, 90, 0.2);
+  --mm-hl-line-blue: rgba(74, 144, 217, 0.95);
+  --mm-hl-tint-blue: rgba(74, 144, 217, 0.2);
+  --mm-hl-line-red: rgba(217, 83, 79, 0.95);
+  --mm-hl-tint-red: rgba(217, 83, 79, 0.2);
+}
+
+/* ====================================================================
+   mockup 通用件（近似复刻插件组件）
+   ==================================================================== */
+.mock {
+  background: var(--background-primary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px; padding: 16px; font-size: 13px;
+  min-width: 0; overflow: hidden;
+}
+.mock .m-title { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+.mock button { font: inherit; }
+
+/* —— 弹窗壳 —— */
+.mock-modal {
+  background: var(--background-primary); border: 1px solid var(--background-modifier-border);
+  border-radius: 10px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); padding: 0; overflow: hidden;
+}
+.mock-modal .mm-head {
+  padding: 12px 16px 0; font-size: 15px; font-weight: 600; color: var(--text-normal);
+}
+.mock-modal .mm-body { padding: 10px 16px 16px; }
+
+/* —— 主题化 select（after 形态） —— */
+.sel-themed {
+  background: var(--background-secondary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s);
+  font-size: 12.5px; padding: 3px 6px;
+}
+/* —— 模拟 Windows UA 默认 select（before 形态：深色界面上的白盒） —— */
+.sel-ua { background: #ffffff; color: #111111; border: 1px solid #767676; font-size: 12.5px; padding: 3px 6px; }
+
+/* —— 插件按钮 —— */
+.btn {
+  background: var(--interactive-normal); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s);
+  padding: 4px 12px; font-size: 12.5px; cursor: pointer;
+}
+.btn:hover { background: var(--interactive-hover); }
+.btn.cta { background: var(--interactive-accent); color: var(--text-on-accent); border-color: transparent; }
+.btn.cta:hover { background: var(--interactive-accent-hover); }
+.btn.warn { color: var(--text-error); }
+
+/* —— 翻译弹窗内容件 —— */
+.tr-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.tr-detect { color: var(--text-faint); font-size: 12px; }
+.tr-label { color: var(--text-faint); font-size: 11.5px; letter-spacing: 0.04em; margin: 8px 0 3px; }
+.tr-text {
+  background: var(--background-secondary); border-radius: var(--radius-s);
+  padding: 8px 10px; font-size: 13px; min-height: 2.4em;
+}
+.tr-text.is-loading { color: var(--text-muted); }
+.tr-text.is-error { color: var(--text-error); }
+
+/* —— 复习卡 / 统计砖 / 分页 —— */
+.review-card {
+  position: relative; background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-m);
+  padding: 18px 16px 12px; max-width: 420px;
+}
+.review-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--mm-hl-line-yellow); border-radius: var(--radius-m) var(--radius-m) 0 0;
+}
+.review-pos { color: var(--text-muted); font-size: var(--font-ui-smaller, 0.8em); text-align: center; min-width: 6.5em; }
+.review-btns { display: flex; gap: 6px; margin-top: 12px; }
+.review-btns .btn { flex: 1; text-align: center; }
+.stats-bricks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.stats-brick { background: var(--background-secondary); border-radius: var(--radius-s); padding: 10px 8px; text-align: center; }
+.stats-brick .v { font-size: 1.5em; font-weight: 700; }
+.stats-brick .l { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.pager { display: flex; align-items: center; gap: 10px; }
+.pager-info { color: var(--text-muted); font-size: 12.5px; }
+
+/* —— 设置页 Setting 行 —— */
+.setting-row { display: flex; align-items: center; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--background-modifier-border); }
+.setting-row .info { flex: 1; min-width: 0; }
+.setting-row .name { font-weight: 600; font-size: 13.5px; }
+.setting-row .desc { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+.setting-row input[type="text"], .setting-row input[type="number"] {
+  width: 140px; background: var(--background-secondary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s);
+  padding: 4px 8px; font-size: 13px;
+}
+.desc-error { color: var(--text-error) !important; }
+/* Notice 浮层模拟 */
+.mock-notice {
+  position: absolute; right: 14px; bottom: 14px;
+  background: var(--background-secondary); color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border); border-radius: 8px;
+  padding: 8px 14px; font-size: 12.5px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.pos-rel { position: relative; }
+
+/* —— 手机键盘示意 —— */
+.kbd-mock { border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-secondary); padding: 6px; }
+.kbd-mock .row { display: flex; gap: 3px; margin: 3px 0; justify-content: center; }
+.kbd-mock .k {
+  background: var(--background-primary-alt); border-radius: 4px; color: var(--text-muted);
+  font-size: 10px; padding: 4px 0; flex: 1; text-align: center; user-select: none;
+}
+
+/* —— 录音条 —— */
+.rec-bar {
+  display: inline-flex; align-items: center; gap: 10px;
+  background: var(--background-secondary); border: 1px solid var(--background-modifier-border);
+  border-radius: 999px; padding: 6px 14px;
+}
+.rec-dot { width: 8px; height: 8px; border-radius: 50%; background: #e93147; }
+.rec-time { font-variant-numeric: tabular-nums; font-size: 12.5px; }
+
+/* —— 热力图 —— */
+.heatmap { display: grid; grid-template-columns: repeat(13, 12px); gap: 3px; }
+.heatmap .c { width: 12px; height: 12px; border-radius: 2.5px; background: var(--background-primary-alt); }
+.heatmap .c.lv1 { background: rgba(76, 183, 130, 0.28); }
+.heatmap .c.lv2 { background: rgba(76, 183, 130, 0.5); }
+.heatmap .c.lv3 { background: rgba(76, 183, 130, 0.72); }
+.heatmap .c.lv4 { background: rgba(76, 183, 130, 0.95); }
+
+/* —— overscroll 演示 —— */
+.os-outer { height: 150px; overflow-y: auto; border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 10px; }
+.os-outer .filler { color: var(--text-faint); font-size: 12px; }
+.os-inner { height: 80px; overflow-y: auto; border: 1px dashed var(--interactive-accent); border-radius: 6px; padding: 8px; margin: 8px 0; background: var(--background-secondary); }
+.os-inner.contain { overscroll-behavior: contain; }
+
+/* —— CLS 演示 —— */
+.cls-stage { border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 10px; }
+.cls-media {
+  width: 72%; margin: 0 auto; border-radius: var(--radius-s);
+  background: linear-gradient(135deg, #4a90d9 0%, #d9a915 100%);
+  transition: height 0.25s ease;
+}
+.cls-stage.loading .cls-media { height: 4em; background: var(--background-primary-alt); }
+.cls-stage.loaded .cls-media { height: 13em; }
+.cls-btnrow { margin-top: 8px; }
+.cls-foot { color: var(--text-faint); font-size: 12px; margin-top: 6px; transition: transform 0.25s ease; }
+.cls-stage.loading .cls-foot { transform: translateY(-9em); }
+.cls-stage.loaded .cls-foot { transform: translateY(0); }
+.cls-stage.ratio .cls-media { aspect-ratio: 4 / 3; height: auto; }
+.cls-stage.ratio.loading .cls-media { height: auto; }
+.cls-stage.ratio.loading .cls-foot,
+.cls-stage.ratio.loaded .cls-foot { transform: translateY(0); } /* 纵横比预留：脚注永不位移 */
+
+/* —— aria-live 演示 —— */
+.sr-caption {
+  background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 11.5px;
+  border-radius: 6px; padding: 3px 10px; margin-top: 8px; display: inline-block;
+}
+.sr-caption:empty { display: none; }
+
+/* —— 拼写红线示意 —— */
+.squiggle { text-decoration: underline wavy #e05c5c 1px; text-underline-offset: 3px; }
+
+/* —— 决策汇总（页首） —— */
+#adopt-list {
+  background: #0c0d10; border: 1px solid var(--page-border); border-radius: 8px;
+  padding: 10px 12px; font-family: var(--mono); font-size: 12px; color: #c8cad0;
+  white-space: pre-wrap; margin-top: 8px; max-height: 220px; overflow-y: auto;
+}
+
+/* —— 折叠清单 —— */
+details.pass-na { margin: 18px 0; }
+details.pass-na summary { cursor: pointer; color: var(--page-muted); font-size: 13.5px; user-select: none; }
+details.pass-na[open] summary { margin-bottom: 8px; }
+.check-list { background: var(--page-panel); border: 1px solid var(--page-border); border-radius: 10px; padding: 14px 18px; font-size: 13px; }
+.check-list ul { margin: 6px 0; padding-left: 20px; }
+.check-list li { margin: 3px 0; color: var(--page-text); }
+.check-list li .dim { color: var(--page-muted); }
+.check-list h4 { margin: 12px 0 4px; font-size: 13px; color: var(--ok); }
+.check-list h4.na { color: var(--page-faint); }
+
+/* 动效尊重减弱设置 */
+@media (prefers-reduced-motion: reduce) {
+  .cls-media, .cls-foot { transition: none; }
+}
+</style>
+</head>
+<body class="sim-dark">
+
+<header class="page-head">
+  <h1>MarinMind · Web 界面规范（Vercel）第三轮评审 <span class="badge p1">R3</span></h1>
+  <div class="sub">
+    评审标准：<b>Vercel Web Interface Guidelines</b>（可访问性 / 焦点 / 表单 / 动效 / 排版微细节 / 触摸 / 媒体加载 / 异步反馈），与第一轮 Anthropic frontend-design（视觉体系）、第二轮 R2（溢出截断）互补。
+    基线 <b>2026-09-04</b>；行号为辅锚点（会漂移），<b>类名/选择器为主锚点</b>。报告正文见 <code>docs/前端设计评估.md</code> 第三轮 R3 章节。
+    本轮只评审不改码——勾选「采纳」后再另起实施批次。
+  </div>
+  <div class="toolbar">
+    <button class="theme-toggle" id="themeBtn" type="button">🌓 切换模拟主题：<b id="themeName">深色</b></button>
+    <span class="decision-summary" id="decisionSummary">已采纳 0 / 18 项</span>
+  </div>
+  <details style="margin-top:10px">
+    <summary style="cursor:pointer;color:var(--page-muted);font-size:13px">📋 展开采纳清单（复制给 Claude 即可开工）</summary>
+    <div id="adopt-list">（尚未勾选任何项）</div>
+  </details>
+  <div class="legend">
+    <span><span class="badge p0">W-P0</span> 视觉可感知缺陷</span>
+    <span><span class="badge p1">W-P1</span> 体验 / 可达性提升</span>
+    <span><span class="badge p2">W-P2</span> 润色 / 判断项</span>
+    <span>mockup 为近似复刻（Obsidian 变量取默认主题近似值），仅作决策辅助</span>
+  </div>
+</header>
+
+<nav class="toc">
+  <span class="grp">P0</span>
+  <a href="#w01">W-01 select 白盒</a>
+  <a href="#w02">W-02 图片布局跳动</a>
+  <span class="grp">P1</span>
+  <a href="#w03">W-03 aria-live</a>
+  <a href="#w04">W-04 表单可访问名</a>
+  <a href="#w05">W-05 数字等宽</a>
+  <a href="#w06">W-06 滚动链</a>
+  <a href="#w07">W-07 触摸延迟</a>
+  <a href="#w08">W-08 数字输入类型</a>
+  <span class="grp">P2</span>
+  <a href="#w09">W-09 省略号</a>
+  <a href="#w10">W-10 丢弃确认</a>
+  <a href="#w11">W-11 弃改提示</a>
+  <a href="#w12">W-12 aria-pressed</a>
+  <a href="#w13">W-13 文本平衡</a>
+  <a href="#w14">W-14 输入辅助属性</a>
+  <a href="#w15">W-15 热力图播报</a>
+  <a href="#w16">W-16 内联校验</a>
+  <a href="#w17">W-17 Intl 取舍</a>
+  <a href="#w18">W-18 手势替代</a>
+  <span class="grp">附录</span>
+  <a href="#pass-na">✓ 达标与 N/A</a>
+</nav>
+
+<main>
+
+<!-- ============================ W-01 ============================ -->
+<section class="finding" id="w01" data-w="W-01">
+  <h2><span class="badge p0">W-P0</span> W-01 原生 select 未主题化：深色主题下的「白盒」</h2>
+  <div class="finding-meta">
+    <span class="badge view">翻译弹窗 / 阅读器侧栏 / AI 摘录弹窗</span>
+    <span>改动量：<b>~15 行 CSS + 0 行 TS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Dark Mode &amp; Theming）：<em>Native <code>&lt;select&gt;</code>: explicit background-color and color (Windows dark mode)</em>——未显式着色的 select 在 Windows 深色模式下渲染为系统默认白底黑字。</div>
+  <div class="desc">
+    全插件 4 处裸 <code>createEl("select")</code>，其中 3 处深色主题下是白盒：
+    <code>translate-modal.ts:59</code>（<code>.marinmind-tr-lang</code>，styles.css <b>无任何规则</b>）、
+    <code>reader-view.ts:2015</code>（<code>.marinmind-tt-lang</code>，styles.css:2990 仅字号/内边距）、
+    <code>auto-excerpt-modal.ts:85</code>（<code>.marinmind-autoex-select</code>，零规则）。
+    <span class="dim">对照正例：脑图头部样式下拉（<code>.marinmind-mm-style-select</code>，styles.css:1798）背景/边框齐全；主页四筛选下拉走 Obsidian <code>DropdownComponent</code>（<code>.dropdown</code> 全局类）自动跟随主题。</span>
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（深色主题 · Windows）</div>
+      <div class="mock-modal">
+        <div class="mm-head">翻译</div>
+        <div class="mm-body">
+          <div class="tr-head">
+            <select class="sel-ua" aria-label="（无可访问名）"><option>简体中文</option><option>English</option><option>日本語</option></select>
+            <span class="tr-detect">源语言：英语</span>
+          </div>
+          <div class="tr-label">原文</div>
+          <div class="tr-text">The limits of my language mean the limits of my world.</div>
+          <div class="tr-label">译文</div>
+          <div class="tr-text">我的语言的界限意味着我的世界的界限。</div>
+        </div>
+      </div>
+      <div class="anno">▾ 目标语言下拉：白底黑字的「白盒」，与深色界面割裂</div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（统一 select 配方）</div>
+      <div class="mock-modal">
+        <div class="mm-head">翻译</div>
+        <div class="mm-body">
+          <div class="tr-head">
+            <select class="sel-themed" aria-label="目标语言"><option>简体中文</option><option>English</option><option>日本語</option></select>
+            <span class="tr-detect">源语言：英语</span>
+          </div>
+          <div class="tr-label">原文</div>
+          <div class="tr-text">The limits of my language mean the limits of my world.</div>
+          <div class="tr-label">译文</div>
+          <div class="tr-text">我的语言的界限意味着我的世界的界限。</div>
+        </div>
+      </div>
+      <div class="anno good">▾ 背景色 / 文字色 / 边框显式声明，跟随主题（下拉可点开验证）</div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：styles.css 新增一条共用规则（三处类名并列），镜像 <code>.marinmind-mm-style-select</code> 配方——<code>background: var(--background-secondary); color: var(--text-normal); border: 1px solid var(--background-modifier-border)</code>；TS 零改动。<b>风险</b>：极低（纯 CSS）。<b>验证</b>：深浅双主题打开翻译弹窗 / 阅读器翻译侧栏 / AI 摘录弹窗，下拉不再白盒。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w01"><label for="cb-w01">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-01" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-02 ============================ -->
+<section class="finding" id="w02" data-w="W-02">
+  <h2><span class="badge p0">W-P0</span> W-02 预览 / 复习图无纵横比预留：加载完成瞬间布局跳动（CLS）</h2>
+  <div class="finding-meta">
+    <span class="badge view">卡片预览弹窗 / 复习卡 / 媒体弹窗</span>
+    <span>改动量：<b>~20 行 TS + ~4 行 CSS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Images）：<em><code>&lt;img&gt;</code> needs explicit width and height (prevents CLS)</em>——无尺寸声明的图片加载完成后撑开容器，下方内容整体下移。</div>
+  <div class="desc">
+    摘录图（区域/套索裁剪、照片、手写）经 blob URL 异步回填：<code>card-preview-modal.ts:233</code>、<code>review-view.ts:663</code>、<code>excerpt-visual.ts:104</code>、<code>media-preview-modal.ts:96</code>。
+    CSS（<code>.marinmind-review-media</code>，styles.css:2258）只保留 <code>min-height:4em</code> 占位、上限 24em——图片到达瞬间从 4em 撑到实际高度，<b>下方批注块 / 按钮行整体下移</b>。
+    <span class="dim">对照正例：主页封面容器 <code>aspect-ratio:3/4</code>（styles.css:3847）+ 阅读器摘录图容器百分比定宽高，均已防跳。</span>
+    <br><b>数据在手</b>：区域/套索卡的 <code>card.rects</code> 包围盒就是裁剪窗口，纵横比在加载前已知，可换算成 <code>width/height</code> 属性让浏览器预留空间（无需等图片解码）。
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（点击重放加载过程）</div>
+      <div class="cls-stage loading" id="clsBefore">
+        <div style="font-weight:600;margin-bottom:8px">区域摘录 · 第 12 页</div>
+        <div class="cls-media"></div>
+        <div class="cls-foot">批注：这个定义要背 ▾ 加载完成前只有 4em，图一到整块下推</div>
+        <div class="cls-btnrow"><button class="btn" type="button" data-cls="clsBefore">▶ 重放</button></div>
+      </div>
+      <div class="anno">▾ 图片到达瞬间：容器 4em → 13em，批注与按钮被推下去</div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（rects 纵横比预留）</div>
+      <div class="cls-stage ratio loading" id="clsAfter">
+        <div style="font-weight:600;margin-bottom:8px">区域摘录 · 第 12 页</div>
+        <div class="cls-media"></div>
+        <div class="cls-foot">批注：这个定义要背 ▾ 高度从一开始就正确，图到达只换内容</div>
+        <div class="cls-btnrow"><button class="btn" type="button" data-cls="clsAfter">▶ 重放</button></div>
+      </div>
+      <div class="anno good">▾ <code>img.width/height</code> 取 <code>rects</code> 包围盒比例 → 浏览器自动预留（无 rects 的照片卡用快照固有比例）</div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：出图处（excerpt-visual 共享管线 + 媒体弹窗）按 <code>card.rects</code> 包围盒给 <code>img</code> 设 width/height 属性（object-fit:contain 已有）；photo 快照在落库时已知尺寸可存比。<b>风险</b>：低（视觉行为变化 = 不再跳动）。<b>验证</b>：区域/套索/照片/手写四形态卡在预览弹窗与复习卡各开一次，图到达无下推。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w02"><label for="cb-w02">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-02" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-03 ============================ -->
+<section class="finding" id="w03" data-w="W-03">
+  <h2><span class="badge p1">W-P1</span> W-03 异步结果区无 aria-live：读屏用户听不到「翻译完成 / 识别完成」</h2>
+  <div class="finding-meta">
+    <span class="badge view">翻译弹窗 / 阅读器翻译侧栏 / AI 摘录</span>
+    <span>改动量：<b>~6 行 TS（每处 1 行属性）</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Accessibility）：<em>Async updates (toasts, validation) need <code>aria-live="polite"</code></em>——异步更新完成后应向辅助技术播报。</div>
+  <div class="desc">
+    全插件自有异步结果区均无 <code>aria-live</code>（grep 零命中）：
+    <code>translate-modal.ts:82</code> 译文区（翻译中… → 译文/错误）与 <code>:73</code> 源语言检测、
+    <code>reader-view.ts:2037</code> 侧栏译文区、AI 摘录预览计数（<code>auto-excerpt-modal.ts:239</code>）。
+    <span class="dim">说明：Obsidian <code>Notice</code> 组件自身不带 aria-live 属平台限制（自绘 toast 收益低），本项只覆盖插件自有 DOM 区域。</span>
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（读屏视角）</div>
+      <div class="mock">
+        <div class="tr-label">译文</div>
+        <div class="tr-text is-loading" id="lvSrcBefore">翻译中…</div>
+        <button class="btn" type="button" style="margin-top:8px" data-live="before">模拟：翻译完成</button>
+        <div class="sr-caption" id="srBefore"></div>
+        <div class="anno">▾ 读屏用户：焦点不在译文区，结果到达后<b>无任何播报</b>（上图字幕为空）</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（aria-live="polite"）</div>
+      <div class="mock">
+        <div class="tr-label">译文</div>
+        <div class="tr-text is-loading" id="lvSrcAfter" aria-live="polite">翻译中…</div>
+        <button class="btn" type="button" style="margin-top:8px" data-live="after">模拟：翻译完成</button>
+        <div class="sr-caption" id="srAfter"></div>
+        <div class="anno good">▾ 区域内容变化即播报（右侧演示区是真实 aria-live，可开读屏验证）</div>
+      </div>
+    </div>
+  </div>
+  <pre class="diff"><span class="ctx">// translate-modal.ts onOpen()</span>
+<span class="del">- this.resultEl = this.contentEl.createDiv({ cls: "marinmind-tr-text marinmind-tr-result" });</span>
+<span class="add">+ this.resultEl = this.contentEl.createDiv({ cls: "marinmind-tr-text marinmind-tr-result",</span>
+<span class="add">+   attr: { "aria-live": "polite" } }); // 异步译文/错误到达时向读屏播报</span></pre>
+  <div class="fix"><b>改法</b>：三处结果容器 + 检测行创建时挂 <code>aria-live="polite"</code>（loading 态文案本身也会被播报一次，可接受）。<b>风险</b>：极低。<b>验证</b>：NVDA 开启下翻译完成听播报；无读屏环境目检无变化。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w03"><label for="cb-w03">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-03" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-04 ============================ -->
+<section class="finding" id="w04" data-w="W-04">
+  <h2><span class="badge p1">W-P1</span> W-04 表单控件缺可访问名：语言下拉 / 页码输入 / 搜索框</h2>
+  <div class="finding-meta">
+    <span class="badge view">翻译 / AI 摘录 / 主页搜索</span>
+    <span>改动量：<b>~10 行 TS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Forms / Accessibility）：<em>Form controls need <code>&lt;label&gt;</code> or <code>aria-label</code></em>——placeholder 不构成可访问名。</div>
+  <div class="desc">
+    五处控件读屏只报「组合框」/「编辑框」而无名称：
+    <code>translate-modal.ts:59</code> 与 <code>reader-view.ts:2015</code> 目标语言 select、
+    <code>auto-excerpt-modal.ts:89-90</code> 页码范围 from/to（旁边的 span「范围」不是 label）、
+    <code>home-pages.ts:344</code> 文档搜索框、<code>note-edit-modal.ts:33</code> 通用输入弹窗 textarea（弹窗标题未关联）。
+    <span class="dim">对照正例：card-edit-modal（label 包裹 input）与脑图节点编辑器同构，均达标。</span>
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（读屏焦点路径）</div>
+      <div class="mock">
+        <div class="tr-head">
+          <select class="sel-themed"><option>简体中文</option></select>
+          <input type="text" style="background:var(--background-secondary);color:var(--text-normal);border:1px solid var(--background-modifier-border);border-radius:4px;padding:3px 6px;width:110px" placeholder="搜索标题或路径…">
+        </div>
+        <div class="anno">▾ Tab 进入时读屏播报「组合框」「编辑框 搜索标题或路径…」——placeholder 在部分读屏下不读或被当值</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（aria-label）</div>
+      <div class="mock">
+        <div class="tr-head">
+          <select class="sel-themed" aria-label="目标语言"><option>简体中文</option></select>
+          <input type="text" aria-label="搜索文档" placeholder="搜索标题或路径…" style="background:var(--background-secondary);color:var(--text-normal);border:1px solid var(--background-modifier-border);border-radius:4px;padding:3px 6px;width:110px">
+        </div>
+        <div class="anno good">▾ 播报「目标语言 组合框」「搜索文档 编辑框」——名称先行</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：各控件 <code>attr: { "aria-label": "…" }</code> 一行补齐；from/to 可用「起始页 / 结束页」。<b>风险</b>：零。<b>验证</b>：读屏 Tab 遍历五处均报名；目检无变化。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w04"><label for="cb-w04">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-04" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-05 ============================ -->
+<section class="finding" id="w05" data-w="W-05">
+  <h2><span class="badge p1">W-P1</span> W-05 数字列缺 tabular-nums：换卡 / 翻页时数字宽度抖动</h2>
+  <div class="finding-meta">
+    <span class="badge view">复习 / 统计面板 / 主页</span>
+    <span>改动量：<b>~10 行 CSS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Typography）：<em>font-variant-numeric: tabular-nums for number columns/comparisons</em>——比例数字宽度不一，滚动变化的数字列会横向抖动。</div>
+  <div class="desc">
+    现仅 2 处已用（录音计时 styles.css:2232、目录页码 :2782）。高频变化数字列均未用：
+    复习进度 <code>.marinmind-review-pos</code>「第 i / N 张」（styles.css:968，每张卡变一次，min-width 只稳布局、字内仍抖）、
+    统计砖数值 <code>.marinmind-stats-brick-value</code>（:4011）与到期分布计数、
+    主页分页 <code>.marinmind-home-pager-info</code> / 卡片计数 <code>.marinmind-home-cards-count</code> / 行 meta「N 卡」 / 侧栏导航计数、
+    文档管理「N 卡」。
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（比例数字 · 点击模拟翻卡）</div>
+      <div class="mock" style="text-align:center">
+        <div class="review-pos" id="tnBefore" style="font-size:15px">第 1 / 120 张</div>
+        <button class="btn" type="button" data-tn>▶ 下一张</button>
+        <div class="anno">▾ 1→7→11：窄数字后整体右移再回来，「第 / 张」间距呼吸</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（tabular-nums）</div>
+      <div class="mock" style="text-align:center">
+        <div class="review-pos" id="tnAfter" style="font-size:15px;font-variant-numeric:tabular-nums">第 1 / 120 张</div>
+        <button class="btn" type="button" data-tn>▶ 下一张</button>
+        <div class="anno good">▾ 等宽数字：两侧文字稳定不动</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：上列选择器各加 <code>font-variant-numeric: tabular-nums</code>（约 8-10 处规则）。<b>风险</b>：零（纯数字排版）。<b>验证</b>：复习连按 → 观察进度行；统计面板开合对比。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w05"><label for="cb-w05">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-05" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-06 ============================ -->
+<section class="finding" id="w06" data-w="W-06">
+  <h2><span class="badge p1">W-P1</span> W-06 弹窗内滚动链未截断：滚到头带动背景滚动</h2>
+  <div class="finding-meta">
+    <span class="badge view">翻译 / AI 摘录 / 复习溯源 / 目录侧栏</span>
+    <span>改动量：<b>~8 行 CSS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Touch &amp; Interaction）：<em>overscroll-behavior: contain in modals/drawers/sheets</em>——弹窗内滚动到边界后应停住，不穿透带动底层。</div>
+  <div class="desc">
+    全插件 <code>overscroll-behavior</code> 零命中。已有卡内滚动（R2 加的限高滚动）都是穿透点：翻译原文/译文 160px 限高（styles.css 翻译分区）、AI 摘录预览列表 320px 限高、复习摘录/批注卡内滚动（<code>max-height:min(46vh,30em)</code>）、媒体弹窗批注 10em、目录侧栏长列表。
+    在弹窗内滚到底继续滚，<b>背景主视图跟着滚</b>——复习场景里背景是正在定位的原文页，被带走的观感明显。
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（在内框滚到底继续滚 → 外层被带走）</div>
+      <div class="os-outer" id="osOuter1">
+        <div class="filler">▲ 背景主视图（可滚动）……</div>
+        <div class="os-inner">
+          <div>译文区 1</div><div>译文区 2</div><div>译文区 3</div><div>译文区 4</div><div>译文区 5（底）</div>
+        </div>
+        <div class="filler">背景主视图继续……<br>背景主视图继续……<br>背景主视图继续……<br>背景主视图继续……<br>背景主视图继续……<br>背景主视图继续……</div>
+      </div>
+      <div class="anno">▾ 在虚线内框里滚轮滚到底，继续滚会推动外层背景</div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（contain：滚动止步于内框）</div>
+      <div class="os-outer" id="osOuter2">
+        <div class="filler">▲ 背景主视图（可滚动）……</div>
+        <div class="os-inner contain">
+          <div>译文区 1</div><div>译文区 2</div><div>译文区 3</div><div>译文区 4</div><div>译文区 5（底）</div>
+        </div>
+        <div class="filler">背景主视图继续……<br>背景主视图继续……<br>背景主视图继续……<br>背景主视图继续……<br>背景主视图继续……<br>背景主视图继续……</div>
+      </div>
+      <div class="anno good">▾ 内框到底即止，背景不动（左右演示均为真实滚动行为，可亲手滚）</div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：既有 <code>overflow-y:auto</code> 的弹窗内滚动容器统一加 <code>overscroll-behavior: contain</code>（约 6-8 处规则；R2 加的限高滚动是主收益点）。<b>风险</b>：极低。<b>验证</b>：翻译弹窗译文区 / AI 摘录列表 / 长摘录复习卡内滚到底继续滚，背景不动。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w06"><label for="cb-w06">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-06" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-07 ============================ -->
+<section class="finding" id="w07" data-w="W-07">
+  <h2><span class="badge p1">W-P1</span> W-07 按钮无 touch-action: manipulation：触摸端连点有双击缩放延迟</h2>
+  <div class="finding-meta">
+    <span class="badge view">全插件按钮</span>
+    <span>改动量：<b>1 条 CSS 规则</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Touch &amp; Interaction）：<em>touch-action: manipulation (prevents double-tap zoom delay)</em>——未声明的按钮在触摸端等待双击缩放判定，连点评分 / 翻卡有可感延迟。</div>
+  <div class="desc">
+    全插件按钮未声明 <code>touch-action</code>（grep 仅拖拽层的 <code>touch-action:none</code>，那是正确的）。
+    平板 / 触屏笔记本上复习四档连评、分页连点会吃到 300ms 双击缩放判定延迟（Obsidian 桌面端视口通常已禁缩放，移动端与部分 WebView 环境仍存在）。
+  </div>
+  <pre class="diff"><span class="ctx">// styles.css 全局令牌分区（:focus-visible 规则旁）新增：</span>
+<span class="add">+ /* 触摸端按钮免双击缩放判定（拖拽层另有 touch-action:none 不受影响） */</span>
+<span class="add">+ body .marinmind- :is(button, [role="button"]) { touch-action: manipulation; }</span></pre>
+  <div class="fix"><b>改法</b>：插件域一条规则（镜像 P0-1 焦点环的选择器结构）。<b>风险</b>：极低（不改拖拽层）。<b>验证</b>：触屏设备连点复习四档无缩放闪烁；桌面无变化。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w07"><label for="cb-w07">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-07" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-08 ============================ -->
+<section class="finding" id="w08" data-w="W-08">
+  <h2><span class="badge p1">W-P1</span> W-08 设置页数字字段用文本输入：移动端不出数字键盘</h2>
+  <div class="finding-meta">
+    <span class="badge view">设置页</span>
+    <span>改动量：<b>~6 行 TS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Forms）：<em>Use correct type (email, tel, url, number) and inputmode</em>——数字语义字段应声明，移动端据此调出数字键盘。</div>
+  <div class="desc">
+    <code>settings-tab.ts:371</code>「每批复习张数」与 <code>:386</code>「每日新卡上限」用 <code>addText</code>（type=text）。
+    移动端 / 平板改这两个值要面对全键盘；且类型声明即免费的输入约束辅助。
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（type=text）</div>
+      <div class="mock">
+        <div class="setting-row">
+          <div class="info"><div class="name">每批复习张数</div><div class="desc">每次拉取的到期复习卡上限（5-200，默认 20）。</div></div>
+          <input type="text" value="20">
+        </div>
+        <div class="kbd-mock" style="margin-top:8px;max-width:230px">
+          <div class="row"><span class="k">q</span><span class="k">w</span><span class="k">e</span><span class="k">r</span><span class="k">t</span><span class="k">y</span><span class="k">u</span><span class="k">i</span><span class="k">o</span><span class="k">p</span></div>
+          <div class="row"><span class="k">a</span><span class="k">s</span><span class="k">d</span><span class="k">f</span><span class="k">g</span><span class="k">h</span><span class="k">j</span><span class="k">k</span><span class="k">l</span></div>
+          <div class="row"><span class="k">⇧</span><span class="k">z</span><span class="k">x</span><span class="k">c</span><span class="k">v</span><span class="k">b</span><span class="k">n</span><span class="k">m</span><span class="k">⌫</span></div>
+        </div>
+        <div class="anno">▾ 移动端弹全键盘，输入「20」要跨两排</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（inputmode=numeric）</div>
+      <div class="mock">
+        <div class="setting-row">
+          <div class="info"><div class="name">每批复习张数</div><div class="desc">每次拉取的到期复习卡上限（5-200，默认 20）。</div></div>
+          <input type="number" min="5" max="200" inputmode="numeric" value="20">
+        </div>
+        <div class="kbd-mock" style="margin-top:8px;max-width:230px">
+          <div class="row"><span class="k">1</span><span class="k">2</span><span class="k">3</span><span class="k">4</span><span class="k">5</span><span class="k">6</span><span class="k">7</span><span class="k">8</span><span class="k">9</span><span class="k">0</span></div>
+          <div class="row"><span class="k">-</span><span class="k">/</span><span class="k">：</span><span class="k">；</span><span class="k">（</span><span class="k">）</span><span class="k">¥</span><span class="k">@</span><span class="k">…</span></div>
+        </div>
+        <div class="anno good">▾ 数字键盘直达；type=number 自带步进与范围提示</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：<code>text.inputEl.type = "number"</code>（或 inputmode）+ min/max 属性；onChange 校验逻辑保持不变。<b>风险</b>：低（number 输入的空值/非法值处理需过一遍现有 <code>Number(value)</code> 校验——非数字返回 NaN 已被拦）。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w08"><label for="cb-w08">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-08" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-09 ============================ -->
+<section class="finding" id="w09" data-w="W-09">
+  <h2><span class="badge p2">W-P2</span> W-09 直点省略号残留一处：「…」规范的全库最后缺口</h2>
+  <div class="finding-meta">
+    <span class="badge view">阅读器（留白备注）</span>
+    <span>改动量：<b>1 字符</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Typography）：<em>… not ...</em>——省略号用单字符「…」，不用三个句点。</div>
+  <div class="desc"><code>reader-view.ts:3024</code> 留白备注占位文案是全库唯一残留（其余文案已在历轮规范为「…」）。</div>
+  <pre class="diff"><span class="del">- placeholder: "输入留白备注文字...",</span>
+<span class="add">+ placeholder: "输入留白备注文字…",</span></pre>
+  <div class="fix"><b>改法</b>：如上。<b>风险</b>：零。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w09"><label for="cb-w09">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-09" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-10 ============================ -->
+<section class="finding" id="w10" data-w="W-10">
+  <h2><span class="badge p2">W-P2</span> W-10 录音「丢弃」无确认：一键不可逆删录</h2>
+  <div class="finding-meta">
+    <span class="badge view">录音条（阅读器 / 全局）</span>
+    <span>改动量：<b>~10 行 TS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Navigation &amp; State）：<em>Destructive actions need confirmation modal or undo window—never immediate</em>——不可逆操作要么确认要么可撤销。</div>
+  <div class="desc">
+    <code>recording-bar.ts:34</code>「丢弃」直接删录音，与同屏「保存并建卡」相邻、无任何拦截。
+    <span class="dim">对照正例：重录语音 / 删卡 / 批删都走 ConfirmModal。判断点：录音通常几十秒、误触概率低——若嫌确认打断，可改为「撤销」式（丢弃后 3 秒内可恢复）更顺，但工程量更大。</span>
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状</div>
+      <div class="mock" style="text-align:center;padding:24px">
+        <div class="rec-bar"><span class="rec-dot"></span><span class="rec-time">00:42</span><button class="btn" type="button">保存并建卡</button><button class="btn warn" type="button">丢弃</button></div>
+        <div class="anno">▾ 点「丢弃」即消失，42 秒录音不可恢复</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（ConfirmModal 拦截）</div>
+      <div class="mock" style="text-align:center;padding:24px">
+        <div class="rec-bar"><span class="rec-dot"></span><span class="rec-time">00:42</span><button class="btn" type="button">保存并建卡</button><button class="btn warn" type="button">丢弃</button></div>
+        <div class="mock-modal" style="max-width:280px;margin:14px auto 0;text-align:left">
+          <div class="mm-head" style="font-size:13.5px">丢弃录音？</div>
+          <div class="mm-body" style="font-size:12.5px;color:var(--text-muted);padding-top:6px">已录制的 00:42 将被删除且无法恢复。<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn" type="button">取消</button><button class="btn warn" type="button">丢弃</button></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：onDiscard 回调处套 <code>ConfirmModal</code>（录制中先停流再确认，或确认后才停——实施时定）。<b>风险</b>：低。<b>验证</b>：录音条点丢弃出确认；取消后录音继续。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w10"><label for="cb-w10">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-10" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-11 ============================ -->
+<section class="finding" id="w11" data-w="W-11">
+  <h2><span class="badge p2">W-P2</span> W-11 Esc 弃改无提示（判断项：建议维持现状）</h2>
+  <div class="finding-meta">
+    <span class="badge view">卡片编辑 / 批注弹窗 / 节点编辑器</span>
+    <span>改动量：<b>如做 ~30 行</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Forms）：<em>Warn before navigation with unsaved changes</em>——有未保存输入时离开应提示。</div>
+  <div class="desc">
+    三个编辑面（<code>card-edit-modal.ts</code>、<code>note-edit-modal.ts</code>、脑图节点编辑器）Esc / 背景点击直接丢未保存文本。
+    <b>建议维持现状</b>：Obsidian 全生态 Modal 均如此（平台惯例）；三处已有 Ctrl+Enter 保存与明确焦点引导，加确认反而打断「随手关掉」的快捷流；输入内容通常是短批注，损失可承受。如实记录取舍。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w11"><label for="cb-w11">采纳此项（给 Esc 加未保存提示）</label>
+    <label>备注 <input type="text" data-note="W-11" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-12 ============================ -->
+<section class="finding" id="w12" data-w="W-12">
+  <h2><span class="badge p2">W-P2</span> W-12 is-active 开关未同步 aria-pressed：读屏不知开关态</h2>
+  <div class="finding-meta">
+    <span class="badge view">主页切换钮 / 分段控件</span>
+    <span>改动量：<b>~10 行 TS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Hover &amp; Interactive States / Accessibility）：交互态应语义化——开关类控件用 <code>aria-pressed</code> 暴露按压态。</div>
+  <div class="desc">
+    主页三处视图切换钮（文件夹栏 / 列表-窗格 / 批量选择，<code>home-pages.ts:352/370/375/1205/1254</code>）与划选分段等只切 <code>is-active</code> 类。
+    <span class="dim">对照正例：阅读器闪卡开关（reader-view.ts:1734）与脑图自动收录 / 固定根（mindmap-view.ts:480/483）都正确同步了 aria-pressed——推广即可。</span>
+  </div>
+  <pre class="diff"><span class="ctx">// home-pages.ts syncFoldersBtn() 等 sync 回调：</span>
+<span class="del">- folderBtn.classList.toggle("is-active", !plugin.settings.homeFoldersHidden);</span>
+<span class="add">+ const on = !plugin.settings.homeFoldersHidden;</span>
+<span class="add">+ folderBtn.classList.toggle("is-active", on);</span>
+<span class="add">+ folderBtn.setAttribute("aria-pressed", String(on)); // 读屏播报开/关态</span></pre>
+  <div class="fix"><b>改法</b>：各 sync 回调补一行 aria-pressed（约 5 处）。<b>风险</b>：零。<b>验证</b>：读屏聚焦切换钮播报「已按下 / 未按下」；目检无变化。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w12"><label for="cb-w12">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-12" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-13 ============================ -->
+<section class="finding" id="w13" data-w="W-13">
+  <h2><span class="badge p2">W-P2</span> W-13 空态 / 提示文案无 text-wrap: balance：两行提示的孤行失衡</h2>
+  <div class="finding-meta">
+    <span class="badge view">主页 / 复习 / 脑图空态</span>
+    <span>改动量：<b>~6 行 CSS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Typography）：<em>text-wrap: balance on headings (prevents widows)</em>——短提示折两行时避免「一行满一行孤字」。</div>
+  <div class="desc">
+    全库 <code>text-wrap</code> 零命中。居中空态提示（emptyHint 系列、<code>.marinmind-review-message</code>、<code>.marinmind-mm-empty</code> 等）在窄窗格下常见尾行一两个字悬空。
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（默认 wrap）</div>
+      <div class="mock" style="max-width:300px;text-align:center;color:var(--text-muted)">当前筛选条件下没有卡片。试试放宽条件，或直接复习全部到期内容。</div>
+      <div class="anno">▾ 窄宽度下尾行孤字「内容。」</div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（balance）</div>
+      <div class="mock" style="max-width:300px;text-align:center;color:var(--text-muted);text-wrap:balance">当前筛选条件下没有卡片。试试放宽条件，或直接复习全部到期内容。</div>
+      <div class="anno good">▾ 两行长度均衡（本页为真实渲染，拖窄窗口可复验）</div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：空态提示类选择器加 <code>text-wrap: balance</code>（约 4-6 处；Electron Chromium 114+ 支持）。<b>风险</b>：零。<b>验证</b>：窄窗格下空态两行均衡。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w13"><label for="cb-w13">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-13" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-14 ============================ -->
+<section class="finding" id="w14" data-w="W-14">
+  <h2><span class="badge p2">W-P2</span> W-14 凭据 / 路径输入缺 autocomplete=off 与 spellcheck=false</h2>
+  <div class="finding-meta">
+    <span class="badge view">设置页</span>
+    <span>改动量：<b>~10 行 TS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Forms）：<em>autocomplete="off" on non-auth fields（防密码管理器误弹）/ Disable spellcheck on codes, usernames</em>。</div>
+  <div class="desc">
+    翻译凭据 5 个输入（百度 APP ID/密钥、有道 ID/密钥、DeepL Key，<code>settings-tab.ts:309-353</code>）与数据目录 / 备份目录路径输入未关闭 spellcheck / autocomplete：
+    路径 <code>D:\MarinMindData</code> 会被拼写检查画红线；密钥类输入可能触发浏览器密码保存弹窗。
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状</div>
+      <div class="mock">
+        <div class="setting-row" style="border:none;padding:4px 0">
+          <div class="info"><div class="name">数据目录</div><div class="desc">存放 md 笔记与媒体附件。</div></div>
+          <input type="text" value="D:\MarinMindData" style="width:180px">
+        </div>
+        <div class="anno">▾ 路径被拼写检查标红：<span class="squiggle">MarinMindData</span>（Wavy 红线示意）</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后</div>
+      <div class="mock">
+        <div class="setting-row" style="border:none;padding:4px 0">
+          <div class="info"><div class="name">数据目录</div><div class="desc">存放 md 笔记与媒体附件。</div></div>
+          <input type="text" value="D:\MarinMindData" spellcheck="false" autocomplete="off" style="width:180px">
+        </div>
+        <div class="anno good">▾ spellcheck=false + autocomplete=off：无红线、无密码管理器误弹</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：<code>text.inputEl.spellcheck = false</code> / <code>inputEl.autocomplete = "off"</code>（7 处输入）。<b>风险</b>：零。<b>验证</b>：设置页路径输入无红线；凭据输入不弹密码保存。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w14"><label for="cb-w14">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-14" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-15 ============================ -->
+<section class="finding" id="w15" data-w="W-15">
+  <h2><span class="badge p2">W-P2</span> W-15 热力图格子仅 title 提示：键盘 / 读屏不可达</h2>
+  <div class="finding-meta">
+    <span class="badge view">复习统计面板</span>
+    <span>改动量：<b>~4 行 TS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Accessibility）：数据承载元素需可访问——title 悬停对键盘与读屏用户不可见。</div>
+  <div class="desc">
+    <code>review-stats-modal.ts:58-63</code> 热力图 91 格的「日期 · 复习 N 张」只写在 <code>title</code>。
+    加 <code>aria-label</code> 同文案即补齐（格子本就不可聚焦，读屏浏览模式可扫读）。
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（仅 title，鼠标悬停可见）</div>
+      <div class="mock">
+        <div class="heatmap" id="hmBefore"></div>
+        <div class="anno">▾ 鼠标悬停出提示；键盘 Tab 与读屏均无内容</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（aria-label 同文案）</div>
+      <div class="mock">
+        <div class="heatmap" id="hmAfter"></div>
+        <div class="anno good">▾ 每格带「8月26日 · 复习 12 张」可访问名（真实渲染，可开读屏扫读）</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：格子创建时 <code>attr: { "aria-label": … }</code>（复用现有 title 文案变量）。<b>风险</b>：零。<b>验证</b>：读屏扫读热力图逐格报数。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w15"><label for="cb-w15">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-15" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-16 ============================ -->
+<section class="finding" id="w16" data-w="W-16">
+  <h2><span class="badge p2">W-P2</span> W-16 设置校验错误用 Notice：应内联在字段旁</h2>
+  <div class="finding-meta">
+    <span class="badge view">设置页</span>
+    <span>改动量：<b>~15 行 TS</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Forms）：<em>Errors inline next to fields</em>——错误提示应紧邻出错字段，而非全局浮层。</div>
+  <div class="desc">
+    「每批复习张数 / 每日新卡上限」非法值弹 Notice（<code>settings-tab.ts:375/390</code>），错误出现在屏幕角落、与字段无关联。
+    <span class="dim">对照正例：同页数据目录校验就是内联红字（descEl 变色，settings-tab.ts:122-125）——把既有模式推广到这两处即可。</span>
+  </div>
+  <div class="ba">
+    <div class="col before">
+      <div class="col-title">现状（Notice 角落浮层）</div>
+      <div class="mock pos-rel" style="min-height:120px">
+        <div class="setting-row" style="border:none;padding:4px 0">
+          <div class="info"><div class="name">每批复习张数</div><div class="desc">每次拉取的到期复习卡上限（5-200，默认 20）。</div></div>
+          <input type="text" value="3">
+        </div>
+        <div class="mock-notice">每批复习张数需为 5-200 的整数</div>
+        <div class="anno">▾ 错误浮在右下角，输入「3」处无标记</div>
+      </div>
+    </div>
+    <div class="col after">
+      <div class="col-title">建议后（内联红字，镜像数据目录模式）</div>
+      <div class="mock">
+        <div class="setting-row" style="border:none;padding:4px 0">
+          <div class="info"><div class="name">每批复习张数</div><div class="desc desc-error">需为 5-200 的整数（当前：3）</div></div>
+          <input type="number" min="5" max="200" value="3" style="border-color:var(--text-error)">
+        </div>
+        <div class="anno good">▾ 错误紧贴字段 + 输入框描红；恢复合法值即复原</div>
+      </div>
+    </div>
+  </div>
+  <div class="fix"><b>改法</b>：镜像 dataDir 校验分支（descEl 红字 + 边框描红 + 合法值复原）。<b>风险</b>：低。<b>验证</b>：输入越界值看内联红字；改回合法值复原。</div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w16"><label for="cb-w16">采纳此项</label>
+    <label>备注 <input type="text" data-note="W-16" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-17 ============================ -->
+<section class="finding" id="w17" data-w="W-17">
+  <h2><span class="badge p2">W-P2</span> W-17 时间 / 数字格式化未走 Intl（判断项：建议维持现状）</h2>
+  <div class="finding-meta">
+    <span class="badge view">主页</span>
+    <span>改动量：<b>如做 ~40 行 + 测试迁移</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Locale &amp; i18n）：<em>Dates/times: use Intl.DateTimeFormat not hardcoded formats</em>。</div>
+  <div class="desc">
+    <code>home-data.ts:380 formatRelativeTime</code> 是手写中文相对时间（刚刚 / N 分钟前 / 昨天 / M月D日），有完整测试覆盖。
+    <b>建议维持现状</b>：规则本意是防「MM/DD/YYYY」式硬编码错本地化；本插件是中文单语言 UI，且「昨天无论差几小时」等业务规则 Intl.RelativeTimeFormat 不表达；强行 Intl 化是收益为零的重写。记录取舍即可。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w17"><label for="cb-w17">采纳此项（改为 Intl 实现）</label>
+    <label>备注 <input type="text" data-note="W-17" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ W-18 ============================ -->
+<section class="finding" id="w18" data-w="W-18">
+  <h2><span class="badge p2">W-P2</span> W-18 手势操作缺键盘替代（交叉指针，不在本轮实施）</h2>
+  <div class="finding-meta">
+    <span class="badge view">复习遮挡 / 阅读器摘录</span>
+    <span>改动量：<b>功能项，另立项</b></span>
+  </div>
+  <div class="rule-quote">规则出处（Touch &amp; Interaction）：<em>Drag/swipe/pinch/path gestures need tap/click and keyboard alternatives unless essential</em>。</div>
+  <div class="desc">
+    两处手势无键盘路径：复习遮挡块点击揭开（<code>review-view.ts:577</code>，div click；「显示全部遮挡」按钮部分覆盖此需求）、阅读器拖框摘录。
+    <b>归《后续优化方向.md》管</b>（节点级键盘操作 85 批已落地；手势级替代仍缺，功能增强另立项），本轮只记指针不重复立账。
+  </div>
+  <div class="adopt-row">
+    <input type="checkbox" id="cb-w18"><label for="cb-w18">采纳此项（遮挡块补键盘揭开，如 Tab+Enter）</label>
+    <label>备注 <input type="text" data-note="W-18" placeholder="可选：决策备注" size="30" style="background:var(--page-panel-2);color:var(--page-text);border:1px solid var(--page-border);border-radius:6px;padding:3px 8px;font-size:12.5px"></label>
+  </div>
+</section>
+
+<!-- ============================ 附录 ============================ -->
+<details class="pass-na" id="pass-na">
+  <summary>附录：✓ 已达标清单（28 项）与 N/A 清单（评审覆盖面证明）</summary>
+  <div class="check-list">
+    <h4>✓ 已达标（历轮 P0-P3 / R2 已修或本就正确，本轮不动）</h4>
+    <ul>
+      <li>键盘焦点环 <code>:focus-visible</code> 全局覆盖；主页可点 div 补 role/tabindex/Enter/Space（P0-1）</li>
+      <li><code>prefers-reduced-motion</code> 豁免（录音红点/封面呼吸置停、定位闪烁转静态描边，P0-2）</li>
+      <li>图标钮 aria-label + title：阅读器工具行 / 划选工具栏 / 复习导航条 / 脑图头部 / 色板 <b>全齐（全库样板）</b></li>
+      <li><code>aria-pressed</code>：闪卡开关 / 自动收录 / 固定根已正确同步（W-12 是推广其到主页切换钮）</li>
+      <li>危险操作确认：删卡 / 批量删 / 重录 / 删除脑图全走 ConfirmModal（W-10 是补录音丢弃这个缺口）</li>
+      <li>弯引号「“”」与省略号「…」文案规范（W-09 是全库最后 1 处残留）</li>
+      <li><code>transition: all</code> 零命中；13 处 transition 全 ≤0.15s 克制</li>
+      <li>hover 态 41 处广泛覆盖（含 is-clickable 行/瓷片）</li>
+      <li>截断三件套 + <code>min-width:0</code>（R2 全覆盖，本轮复核未发现新破口）</li>
+      <li>主页封面 <code>aspect-ratio:3/4</code> + <code>alt=""</code> + 并发≤3 回填（CLS 已防）；阅读器摘录图容器百分比定宽高</li>
+      <li>翻译弹窗错误态带「重试」按钮；错误文案含原因（网络 / 长度上限）</li>
+      <li>空态文案均带行动引导（「点『打开文档』加入第一本书」等）</li>
+      <li>表单 label 包裹控件：卡片编辑弹窗 / 节点编辑器 / AI 摘录勾选项（W-04 是补另 5 处缺口）</li>
+      <li>autoFocus 用法克制：仅弹窗主输入一处聚焦（「desktop only, single primary input」符合）</li>
+      <li>IME 不打断：主页搜索局部刷新不重建输入框</li>
+      <li>批选行 <code>role="checkbox"</code> + 内嵌框 <code>aria-hidden</code> 防重复报读；分页禁用态 <code>aria-disabled</code></li>
+      <li>大列表：卡片页 50/页分页 + 树归并，无 &gt;50 行裸 <code>.map()</code>（虚拟化暂不需要）</li>
+      <li>拖拽层 <code>touch-action:none</code> 正确（阻止触摸滚动唯一可靠手段）；划选 <code>::selection</code> 视觉反馈</li>
+      <li>audio 控件原生键盘可用；媒体弹窗 img 有 alt</li>
+      <li>深浅主题三层机制（宿主变量 / 主页 Linear 双覆盖 / 阴影五档分浅色减弱）</li>
+    </ul>
+    <h4 class="na">N/A（Obsidian 插件语境不适用，防规则生搬硬套）</h4>
+    <ul>
+      <li class="dim">URL 反映状态 / 深链接（无 URL 路由；视图状态已走 Obsidian workspace state）</li>
+      <li class="dim">meta theme-color / color-scheme（宿主管辖）</li>
+      <li class="dim">hydration 安全（无 SSR）；preconnect / 字体 preload（零外部资源）</li>
+      <li class="dim">gif→video、自动播放循环媒体豁免（无此类媒体）</li>
+      <li class="dim">Accept-Language 语言检测（中文单语言 UI 定位）</li>
+      <li class="dim">文案 Title Case / 主动语态 / 「&amp;」缩写（英文导向规则，中文 UI 不适用）</li>
+      <li class="dim">Notice 组件的 aria-live（Obsidian 平台限制；W-03 只覆盖插件自有区域）</li>
+      <li class="dim">beforeunload 未保存提示（桌面工作区无页面导航；W-11 记录了 Modal 层判断项）</li>
+    </ul>
+  </div>
+</details>
+
+<div style="max-width:1060px;margin:0 auto;padding:0 24px;color:var(--page-faint);font-size:12px">
+  <p>评审方法：16 类规则 ×（styles.css 4126 行全量 + 4 视图 + 12 弹窗 + 设置页）逐条对照；机械模式 grep（aria-*/tabular-nums/touch-action/overscroll/img 属性/select 主题化/省略号）+ 弹窗文件直读。生成于 2026-09-04，指南原文取自 vercel-labs/web-interface-guidelines@main。</p>
+</div>
+
+</main>
+
+<script>
+/* ===== 主题切换（模拟 Obsidian body.theme-dark / theme-light） ===== */
+(function () {
+  var btn = document.getElementById("themeBtn");
+  var name = document.getElementById("themeName");
+  btn.addEventListener("click", function () {
+    var dark = document.body.classList.toggle("sim-dark");
+    document.body.classList.toggle("sim-light", !dark);
+    name.textContent = dark ? "深色" : "浅色";
+  });
+})();
+
+/* ===== 决策勾选（localStorage 持久化 + 汇总 + 采纳清单） ===== */
+(function () {
+  var KEY = "mm-web-review-decisions";
+  var notes = {};
+  var adopted = {};
+  try {
+    var saved = JSON.parse(localStorage.getItem(KEY) || "{}");
+    notes = saved.notes || {};
+    adopted = saved.adopted || {};
+  } catch (e) { /* 隐私模式等无 localStorage 时静默降级 */ }
+
+  var sections = document.querySelectorAll("section.finding");
+  var summary = document.getElementById("decisionSummary");
+  var listEl = document.getElementById("adopt-list");
+
+  function render() {
+    var n = 0;
+    sections.forEach(function (sec) {
+      var w = sec.getAttribute("data-w");
+      var cb = sec.querySelector('input[type="checkbox"]');
+      var on = !!adopted[w];
+      cb.checked = on;
+      sec.classList.toggle("decided-adopt", on);
+      n += on ? 1 : 0;
+    });
+    summary.textContent = "已采纳 " + n + " / " + sections.length + " 项";
+    var lines = [];
+    if (n === 0) {
+      listEl.textContent = "（尚未勾选任何项）";
+    } else {
+      lines.push("# R3 采纳清单（复制以下内容交给 Claude 即可开工）");
+      lines.push("");
+      sections.forEach(function (sec) {
+        var w = sec.getAttribute("data-w");
+        if (!adopted[w]) return;
+        var title = sec.querySelector("h2").textContent.replace(/\s+/g, " ").trim();
+        lines.push("- [ ] " + w + " " + title.replace(/^W-P\d\s*/, ""));
+        if (notes[w]) lines.push("  - 备注：" + notes[w]);
+      });
+      listEl.textContent = lines.join("\n");
+    }
+  }
+
+  sections.forEach(function (sec) {
+    var w = sec.getAttribute("data-w");
+    var cb = sec.querySelector('input[type="checkbox"]');
+    var note = sec.querySelector('input[data-note]');
+    if (note && notes[w]) note.value = notes[w];
+    cb.addEventListener("change", function () {
+      adopted[w] = cb.checked;
+      try { localStorage.setItem(KEY, JSON.stringify({ adopted: adopted, notes: notes })); } catch (e) {}
+      render();
+    });
+    if (note) note.addEventListener("input", function () {
+      notes[w] = note.value;
+      try { localStorage.setItem(KEY, JSON.stringify({ adopted: adopted, notes: notes })); } catch (e) {}
+      render();
+    });
+  });
+  render();
+})();
+
+/* ===== W-02 CLS 重放演示 ===== */
+(function () {
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.querySelectorAll("[data-cls]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var stage = document.getElementById(btn.getAttribute("data-cls"));
+      stage.classList.remove("loaded");
+      stage.classList.add("loading");
+      setTimeout(function () {
+        stage.classList.remove("loading");
+        stage.classList.add("loaded");
+      }, reduce ? 400 : 900);
+    });
+  });
+})();
+
+/* ===== W-03 aria-live 演示 ===== */
+(function () {
+  document.querySelectorAll("[data-live]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var after = btn.getAttribute("data-live") === "after";
+      var src = document.getElementById(after ? "lvSrcAfter" : "lvSrcBefore");
+      var cap = document.getElementById(after ? "srAfter" : "srBefore");
+      src.classList.add("is-loading");
+      src.textContent = "翻译中…";
+      cap.textContent = "";
+      setTimeout(function () {
+        src.classList.remove("is-loading");
+        src.textContent = "我的语言的界限意味着我的世界的界限。";
+        /* after 侧是真实 aria-live 区域：读屏会在此刻自动播报；
+           before 侧无属性，读屏静默——字幕只作可视化对照 */
+        if (after) cap.textContent = "🔊 读屏播报：我的语言的界限意味着我的世界的界限。";
+        else cap.textContent = "🔇 读屏：无播报（区域无 aria-live）";
+      }, 1200);
+    });
+  });
+})();
+
+/* ===== W-05 tabular-nums 演示 ===== */
+(function () {
+  var seq = [1, 2, 3, 7, 11, 101, 111, 7, 2, 1];
+  var idx = 0;
+  document.querySelectorAll("[data-tn]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      idx = (idx + 1) % seq.length;
+      var v = seq[idx];
+      document.getElementById("tnBefore").textContent = "第 " + v + " / 120张";
+      document.getElementById("tnAfter").textContent = "第 " + v + " / 120张";
+    });
+  });
+})();
+
+/* ===== W-15 热力图演示（伪数据） ===== */
+(function () {
+  var levels = [0,1,2,3,4];
+  var seed = 7;
+  function rnd() { seed = (seed * 9301 + 49297) % 233280; return seed / 233280; } // 确定性伪随机
+  var before = document.getElementById("hmBefore");
+  var after = document.getElementById("hmAfter");
+  for (var i = 0; i < 52; i++) {
+    var lv = levels[Math.floor(rnd() * levels.length)];
+    var b = document.createElement("div");
+    b.className = "c" + (lv ? " lv" + lv : "");
+    if (lv) b.title = "复习 " + (lv * 3 + Math.floor(rnd() * 4)) + " 张";
+    else b.title = "";
+    before.appendChild(b);
+    var a = document.createElement("div");
+    a.className = b.className;
+    a.title = b.title;
+    if (lv) a.setAttribute("aria-label", b.title);
+    after.appendChild(a);
+  }
+})();
+</script>
+</body>
+</html>

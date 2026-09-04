@@ -3,11 +3,12 @@ import { Notice } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card } from "../types";
 import { CATEGORY_MAX_LENGTH, normalizeCategory } from "./home-data";
+import { CardEditModal } from "./card-edit-modal";
 import { DeckAssignModal } from "./deck-assign-modal";
 import { TextPromptModal } from "../reader/note-edit-modal";
 
 /**
- * 卡片管理动作（打标签 / 设卡组 / 编辑批注 / 删除）：复习视图 ⋯ 菜单与卡片预览弹窗
+ * 卡片管理动作（打标签 / 设卡组 / 编辑标题批注 / 删除）：复习视图 ⋯ 菜单与卡片预览弹窗
  * **单源共享**——两个 UI 壳各自薄封装，行为不会分叉。
  * 写库走 cards.update / cards.delete，回显与联动清理由 cardBus 事件回环
  * （复习会话剔除、主页列表刷新、跨标签高亮同步）统一承接。
@@ -89,22 +90,12 @@ export function promptCardDeck(app: App, plugin: MarinMindPlugin, card: Card): v
 }
 
 /**
- * 编辑批注（65）：复习界面发现批注要改不必回阅读器——多行 textarea，
- * 预填当前批注；TextPromptModal 已 trim 空串转 null（null = 清空批注）。
+ * 编辑标题/批注（65 批注起步，78 统一为双字段）：复习/预览/阅读器发现要改不必回
+ * 脑图——CardEditModal 与脑图节点编辑器同源语义（trim 空串→null、同值不写库），
+ * 标题为 ㊺ MN3 一卡一对象一标题（各显示链最高优先）。
  */
-export function promptCardNote(app: App, plugin: MarinMindPlugin, card: Card): void {
-	new TextPromptModal(
-		app,
-		{
-			title: "编辑批注",
-			placeholder: "输入批注（复习正面的问题）",
-			initialText: card.note ?? "",
-			multiline: true,
-		},
-		(text) => {
-			plugin.cards.update(card.id, { note: text });
-		},
-	).open();
+export function promptCardEdit(app: App, plugin: MarinMindPlugin, card: Card): void {
+	new CardEditModal(app, plugin, card).open();
 }
 
 /**

@@ -1,9 +1,26 @@
 import type { Plugin } from "obsidian";
 import { DEFAULT_BACKUP_DIR, DEFAULT_DATA_DIR } from "../constants";
-import { DEFAULT_TRANSLATE_TARGET } from "../translate/translate-engine";
+import { DEFAULT_OCR_LANGS, isOcrLangs } from "../ocr/ocr-text";
+import {
+	DEFAULT_TRANSLATE_TARGET,
+	isTranslateEngineId,
+	type TranslateEngineId,
+} from "../translate/translate-engine";
 import { isHighlightColor, type HighlightColorValue } from "../reader/highlight-colors";
-import { isLineStyle, type LineStyle } from "../types";
+import { isLinkDirection, isLineStyle, type LineStyle, type LinkDirection } from "../types";
 import { isAbsoluteFsPath, normalizeFsDir, normalizeVaultDir } from "../storage/paths";
+
+/**
+ * 隐藏侧缓存（79-3）：单窗格模式切走（detach）的一侧状态，随 data.json
+ * 持久化跨会话保留——重启后切回联动/对侧模式可恢复。读取时内存缓存
+ * （main.lastReaderState/lastMapId）优先，此处为重启后的回退源。
+ */
+export interface WorkspaceHiddenState {
+	/** 被隐藏的阅读窗格：文档路径（vault 相对/库外绝对）+ 页码 */
+	reader?: { file: string; page: number | null };
+	/** 被隐藏的脑图 id */
+	mapId?: string;
+}
 
 /** 四类摘录工具的当前色系键（㊹ MN3 式：点击已激活的工具按钮循环切色） */
 export type ExcerptColorTool = "text" | "area" | "lasso" | "blank";
@@ -23,6 +40,38 @@ export interface MarinMindSettings {
 	backupDir: string;
 	/** 翻译目标语言代码（㉔ 高亮菜单「翻译」的默认值；弹窗内切换会写回），见 TRANSLATE_LANGUAGES */
 	translateTarget: string;
+	/**
+	 * 翻译引擎（83 备选引擎）："google"（默认，免密钥）/ "baidu"（国内直连，
+	 * 需 appid+密钥）/ "youdao"（85-B 国内直连，需应用ID+密钥）/ "deepl"
+	 * （需 Auth-Key）；凭据见下方字段，明文存 data.json（Obsidian 插件通行
+	 * 做法，设置页 desc 有提示）。
+	 */
+	translateEngine: TranslateEngineId;
+	translateBaiduAppid: string;
+	translateBaiduSecret: string;
+	translateYoudaoAppid: string;
+	translateYoudaoAppSecret: string;
+	translateDeeplKey: string;
+	/**
+	 * OCR 识别语言组合（83 语言可选）：OCR_LANGUAGES 表内值（"+" 连接 tesseract
+	 * 语言串，默认中英混排）；切换后首次识别联网下载对应语言包。
+	 */
+	ocrLangs: string;
+	/**
+	 * 拖框即识（83，默认关）：区域摘录工具框选松开即自动 OCR（免去二次点菜单）。
+	 * 默认关的原因：首次触发会静默联网下载引擎（10-20MB）+ 连续摘录被逐框识别等待打断。
+	 */
+	ocrOnAreaExcerpt: boolean;
+	/**
+	 * 识别后自动翻译（83，默认关）：OCR 识别成功后自动翻译识别文字并存为原文
+	 * 下方留白卡（目标语言与引擎跟随翻译设置）；翻译失败不影响识别结果。
+	 */
+	ocrAutoTranslate: boolean;
+	/**
+	 * 照片入库压缩（84-E，默认开）：超 300KB 的照片入库前缩放到最长边 2560px
+	 * 并转 WebP（q0.85 肉眼无损）；GIF/SVG 与小图原样保留。关闭则原图存档。
+	 */
+	photoCompress: boolean;
 	/** 摘录自动入图总开关（㉗，默认开）：新摘录自动加入脑图——固定根节点优先，否则该书的默认脑图 */
 	autoAddToMindmap: boolean;
 	/**
@@ -66,12 +115,34 @@ export interface MarinMindSettings {
 	 * 划选工具栏线型钮与设置页下拉双入口写回，仅影响新建卡（存量卡走高亮菜单单改）
 	 */
 	excerptLineStyle: LineStyle;
+	/**
+	 * 联动方向（79-1，默认双向）：文档↔脑图联动的门控档位——双向 / 仅文档→脑图 /
+	 * 仅脑图→文档 / 关闭（两窗格完全独立：自动跟随、点击定位、联动互关全停）。
+	 * 显式编排（工作区命令/视图切换条）不受此开关约束。
+	 */
+	linkDirection: LinkDirection;
+	/**
+	 * 隐藏侧缓存（79-3，默认 null = 无隐藏记录）：单窗格模式切走的一侧状态。
+	 * 由 applyViewMode 隐藏分支在 detach 后写回（选择器取消路径不写），
+	 * 形状守卫见 loadSettings——损坏子字段弃用，不入脏值。
+	 */
+	workspaceHidden: WorkspaceHiddenState | null;
 }
 
 export const DEFAULT_SETTINGS: MarinMindSettings = {
 	dataDir: DEFAULT_DATA_DIR,
 	backupDir: DEFAULT_BACKUP_DIR,
 	translateTarget: DEFAULT_TRANSLATE_TARGET,
+	translateEngine: "google",
+	translateBaiduAppid: "",
+	translateBaiduSecret: "",
+	translateYoudaoAppid: "",
+	translateYoudaoAppSecret: "",
+	translateDeeplKey: "",
+	ocrLangs: DEFAULT_OCR_LANGS,
+	ocrOnAreaExcerpt: false,
+	ocrAutoTranslate: false,
+	photoCompress: true,
 	autoAddToMindmap: true,
 	homeTheme: "dark",
 	homeDocsView: "list",
@@ -82,6 +153,8 @@ export const DEFAULT_SETTINGS: MarinMindSettings = {
 	reviewBatchSize: 20,
 	selectionToolbar: true,
 	excerptLineStyle: "underline",
+	linkDirection: "both",
+	workspaceHidden: null,
 };
 
 /**
@@ -128,7 +201,78 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 	)
 		? merged.excerptLineStyle
 		: "underline";
+	// 79-1 联动方向：非法值回默认双向（镜像线型守卫）
+	merged.linkDirection = isLinkDirection((raw as { linkDirection?: unknown } | null)?.linkDirection)
+		? merged.linkDirection
+		: "both";
+	// 83 OCR 三标量：语言表外值回默认中英混排、布尔脏值回默认关（镜像既有守卫风格）
+	merged.ocrLangs = isOcrLangs((raw as { ocrLangs?: unknown } | null)?.ocrLangs)
+		? merged.ocrLangs
+		: DEFAULT_OCR_LANGS;
+	const rawOcrFlags = raw as { ocrOnAreaExcerpt?: unknown; ocrAutoTranslate?: unknown } | null;
+	merged.ocrOnAreaExcerpt =
+		typeof rawOcrFlags?.ocrOnAreaExcerpt === "boolean" ? merged.ocrOnAreaExcerpt : false;
+	merged.ocrAutoTranslate =
+		typeof rawOcrFlags?.ocrAutoTranslate === "boolean" ? merged.ocrAutoTranslate : false;
+	// 84-E 照片压缩：非布尔脏值回默认开（镜像 ocrOnAreaExcerpt 写法，默认值不同）
+	merged.photoCompress =
+		typeof (raw as { photoCompress?: unknown } | null)?.photoCompress === "boolean"
+			? (raw as { photoCompress: boolean }).photoCompress
+			: true;
+	// 83 翻译引擎标量（85-B 增有道两凭据）：引擎脏值回 Google；凭据非字符串/
+	// 空白归空串（trim 防首尾空白进签名）
+	merged.translateEngine = isTranslateEngineId(
+		(raw as { translateEngine?: unknown } | null)?.translateEngine,
+	)
+		? merged.translateEngine
+		: "google";
+	const rawCred = raw as
+		| {
+				translateBaiduAppid?: unknown;
+				translateBaiduSecret?: unknown;
+				translateYoudaoAppid?: unknown;
+				translateYoudaoAppSecret?: unknown;
+				translateDeeplKey?: unknown;
+		  }
+		| null;
+	const trimStr = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+	merged.translateBaiduAppid = trimStr(rawCred?.translateBaiduAppid);
+	merged.translateBaiduSecret = trimStr(rawCred?.translateBaiduSecret);
+	merged.translateYoudaoAppid = trimStr(rawCred?.translateYoudaoAppid);
+	merged.translateYoudaoAppSecret = trimStr(rawCred?.translateYoudaoAppSecret);
+	merged.translateDeeplKey = trimStr(rawCred?.translateDeeplKey);
+	// 79-3 隐藏侧缓存：嵌套对象形状守卫（file 非空 string、page number|null、
+	// mapId 非空 string），损坏子字段弃用、全空整体置 null
+	merged.workspaceHidden = sanitizeWorkspaceHidden(
+		(raw as { workspaceHidden?: unknown } | null)?.workspaceHidden,
+	);
 	return merged;
+}
+
+/**
+ * 隐藏侧缓存形状守卫（79-3 纯函数）：reader.file 必须非空 string、page 收窄
+ * number|null（非法归 null）、mapId 必须非空 string——任一损坏只弃对应子字段，
+ * 结果无任何键则返回 null（手编 data.json / 旧版本字段污染防御）。
+ */
+function sanitizeWorkspaceHidden(value: unknown): WorkspaceHiddenState | null {
+	if (typeof value !== "object" || value === null) {
+		return null;
+	}
+	const raw = value as { reader?: unknown; mapId?: unknown };
+	const out: WorkspaceHiddenState = {};
+	if (typeof raw.reader === "object" && raw.reader !== null) {
+		const r = raw.reader as { file?: unknown; page?: unknown };
+		if (typeof r.file === "string" && r.file.length > 0) {
+			out.reader = {
+				file: r.file,
+				page: typeof r.page === "number" ? r.page : null,
+			};
+		}
+	}
+	if (typeof raw.mapId === "string" && raw.mapId.length > 0) {
+		out.mapId = raw.mapId;
+	}
+	return Object.keys(out).length > 0 ? out : null;
 }
 
 /** 目录输入校验结果 */
