@@ -17,6 +17,7 @@ import {
 	buildCategoryTree,
 	buildDeckTree,
 	cardPreview,
+	cardRowSummary,
 	CATEGORY_MAX_LENGTH,
 	distinctColors,
 	distinctTags,
@@ -163,6 +164,12 @@ function renderCardRows(
 		titleLine.createSpan({ cls: "marinmind-home-ink-dot" }).dataset.color =
 			highlightFallbackColor(card);
 		titleLine.createDiv({ cls: "marinmind-home-row-title", text: cardPreview(card) });
+		// 91 批摘要第二行：标题行未吸收的字段（批注 > 摘录文字，OCR 卡正文首屏可见），
+		// 最多两行截断；全被吸收不渲染（不空占位）
+		const summary = cardRowSummary(card);
+		if (summary) {
+			main.createDiv({ cls: "marinmind-home-row-summary", text: summary });
+		}
 		main.createDiv({
 			cls: "marinmind-home-row-sub",
 			text: `${cardSource(plugin, card)} · ${formatRelativeTime(card.updatedAt, ts)}`,
@@ -254,7 +261,8 @@ export function renderOverviewPage(container: HTMLElement, ctx: HomeRenderCtx): 
 	// 快捷操作
 	const quick = wrap.createDiv({ cls: "marinmind-home-quick" });
 	actionButton(quick, "打开文档", "file-plus", () => plugin.openPdfPicker());
-	actionButton(quick, "开始复习", "swords", () => void plugin.openReview());
+	// 90 批 MN3 对照：复习=学习语义 graduation-cap（原 swords，与阅读器/脑图入口对齐）
+	actionButton(quick, "开始复习", "graduation-cap", () => void plugin.openReview());
 	actionButton(quick, "新建脑图", "git-fork", () => plugin.openMindmapPicker());
 
 	// 最近卡片

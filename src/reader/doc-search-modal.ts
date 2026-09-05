@@ -1,7 +1,7 @@
 import { Modal } from "obsidian";
 import type { App } from "obsidian";
 import type { DocSearchHit, PdfSearchLine } from "./doc-search";
-import { searchTexts, TOTAL_HIT_CAP } from "./doc-search";
+import { highlightSnippet, searchTexts, TOTAL_HIT_CAP } from "./doc-search";
 
 /** 输入防抖（毫秒）：扫描比节点搜索重（PDF 逐页 worker 往返），停顿再起 */
 const DEBOUNCE_MS = 250;
@@ -48,9 +48,10 @@ export interface DocSearchHost {
 
 /**
  * 文档内搜索弹窗（89-D，MN3 搜索入口对齐）：三形态（PDF 逐页 / EPUB 逐章 /
- * MD 单页块）全量扫描，进度行 + 渐进追加结果；250ms 防抖 + 代际令牌（改词/
- * 关闭即作废在途扫描）；↑↓/Enter 键盘导航；点选 → 宿主 reveal 跳页滚行闪烁。
- * 匹配/聚行/摘要在 doc-search.ts（纯逻辑可测）。
+ * MD 单页块）全量扫描，进度行 + 收齐后一次性渲染（91 批去流式：扫描期只更
+ * 进度文案，不逐页上屏）；250ms 防抖 + 代际令牌（改词/关闭即作废在途扫描）；
+ * ↑↓/Enter 键盘导航；点选 → 宿主 reveal 跳页滚行闪烁。
+ * 匹配/聚行/摘要/高亮在 doc-search.ts（纯逻辑可测）。
  */
 export class DocSearchModal extends Modal {
 	private readonly host: DocSearchHost;
@@ -145,6 +146,7 @@ export class DocSearchModal extends Modal {
 			this.countEl.setText("");
 			return;
 		}
+		this.renderResults(); // 91 批一次性整表上屏（替换"搜索中…"占位）
 		this.countEl.setText(
 			truncated
 				? `已达上限，仅显示前 ${this.hits.length} 条`
@@ -152,7 +154,7 @@ export class DocSearchModal extends Modal {
 		);
 	}
 
-	/** PDF：逐页 buildTextLayer（带文本缓存）→ 聚行匹配，命中渐进上屏 */
+	/** PDF：逐页 buildTextLayer（带文本缓存）→ 聚行匹配，命中先入列（91 批收齐后一次性渲染） */
 	private async scanPdf(gen: number, q: string): Promise<boolean> {
 		const total = this.host.docSearchPdfPageCount();
 		for (let page = 1; page <= total; page++) {
@@ -165,12 +167,12 @@ export class DocSearchModal extends Modal {
 			}
 			if (lines && lines.length > 0) {
 				const { hits } = searchTexts(page, lines.map((l) => l.text), q);
-				this.appendHits(hits);
+				this.hits.push(...hits);
 			}
 			if (this.hits.length >= TOTAL_HIT_CAP) {
 				return true;
 			}
-			this.countEl.setText(`已找到 ${this.hits.length} 条 · 第 ${page}/${total} 页`);
+			this.countEl.setText(`搜索中 · 第 ${page}/${total} 页…`);
 			if (page % PDF_YIELD_PAGES === 0) {
 				await new Promise<void>((r) => window.setTimeout(r, 0));
 				if (gen !== this.gen) {
@@ -191,12 +193,12 @@ export class DocSearchModal extends Modal {
 			const blocks = this.host.docSearchEpubBlocks(chapter);
 			if (blocks.length > 0) {
 				const { hits } = searchTexts(chapter, blocks, q);
-				this.appendHits(hits);
+				this.hits.push(...hits);
 			}
 			if (this.hits.length >= TOTAL_HIT_CAP) {
 				return true;
 			}
-			this.countEl.setText(`已找到 ${this.hits.length} 条 · 第 ${chapter}/${total} 章`);
+			this.countEl.setText(`搜索中 · 第 ${chapter}/${total} 章…`);
 			if (chapter % EPUB_YIELD_CHAPTERS === 0) {
 				await new Promise<void>((r) => window.setTimeout(r, 0));
 				if (gen !== this.gen) {
@@ -211,28 +213,26 @@ export class DocSearchModal extends Modal {
 	private scanMd(q: string): void {
 		const blocks = this.host.docSearchMdBlocks();
 		const { hits } = searchTexts(1, blocks, q);
-		this.appendHits(hits);
+		this.hits.push(...hits);
 	}
 
-	/** 命中渐进追加（扫描中即可见可点）；首轮命中替换"搜索中…"占位 */
-	private appendHits(hits: readonly DocSearchHit[]): void {
-		if (hits.length === 0) {
-			return;
-		}
-		if (this.hits.length === 0) {
-			this.listEl.empty();
-		}
-		for (const hit of hits) {
+	/**
+	 * 一次性渲染全部命中（91 批去流式）：扫描期只更进度行，结束后整表上屏；
+	 * 首项默认选中。行结构 = 徽标置顶行（item 直接子级）+ 摘要两行截断块
+	 * （不再借用 picker-title 单行省略配方），命中词经 highlightSnippet 高亮。
+	 */
+	private renderResults(): void {
+		this.listEl.empty();
+		this.hits.forEach((hit, index) => {
 			const item = this.listEl.createDiv({
-				cls: `marinmind-search-modal-item${this.hits.length === 0 ? " is-selected" : ""}`,
+				cls: `marinmind-search-modal-item${index === 0 ? " is-selected" : ""}`,
 			});
-			const name = item.createDiv({ cls: "marinmind-picker-name" });
-			name.createSpan({
+			item.createDiv({
 				cls: "marinmind-search-modal-badge",
 				text: this.host.docSearchHitLabel(hit),
 			});
-			name.createSpan({ cls: "marinmind-picker-title", text: hit.snippet });
-			const index = this.hits.length;
+			const snip = item.createDiv({ cls: "marinmind-search-modal-snippet" });
+			snip.innerHTML = highlightSnippet(this.query, hit.snippet); // 安全 HTML 单源（已转义+mark）
 			item.addEventListener("click", () => this.pick(index));
 			item.addEventListener("mouseenter", () => {
 				if (this.selected !== index) {
@@ -240,9 +240,7 @@ export class DocSearchModal extends Modal {
 					this.refreshSelection();
 				}
 			});
-			this.hits.push(hit);
-		}
-		this.listEl.scrollTop = this.listEl.scrollHeight; // 扫描中跟随追加（用户上滚后仍强吸底可接受：结果单调增长）
+		});
 	}
 
 	private renderPlaceholder(text: string): void {

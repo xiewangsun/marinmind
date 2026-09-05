@@ -1,6 +1,7 @@
 import { TFile, ItemView, Menu, Notice, Platform, debounce, setIcon } from "obsidian";
 import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
+import { resolveIcon, setIconSafe } from "../ui/icon-resolve";
 import { imageExtOf, pickImageFiles, preparePhotoBytes } from "../attachments/media-import";
 import { promptCardEdit } from "../home/card-actions";
 import { MindmapPickerModal } from "../mindmap/mindmap-picker-modal";
@@ -124,8 +125,13 @@ interface CharBox {
 /**
  * 阅读器工具行定义：手型（只读平移）+ 选择（纯文本选择，㉖）+ MarginNote 四类摘录工具。
  * icon 均已对照 Obsidian 图标注册表（obsidian.asar "name":[[ 模式）验证有效——
- * 无效名不报错但渲染空白按钮。
+ * 无效名不报错但渲染空白按钮。90 批起不确定的新名走 resolveIcon 兜底链
+ * （ui/icon-resolve，getIcon 判空降级），矩形摘录 box-select 为首个消费者。
  */
+/** 90 批 MN3 对照：「加入脑图」语义图标——network 节点连线图（git-fork 像版本控制）；
+ * 低版本 Obsidian 缺名时依次降级 share-2 → git-fork */
+const ADD_TO_MINDMAP_ICON = resolveIcon(["network", "share-2", "git-fork"]);
+
 const TOOLBAR_TOOLS: ReadonlyArray<{
 	tool: ReaderTool;
 	icon: string;
@@ -135,7 +141,8 @@ const TOOLBAR_TOOLS: ReadonlyArray<{
 	{ tool: "hand", icon: "hand", title: "手型", hint: "只读浏览，拖拽平移页面" },
 	{ tool: "select", icon: "text-cursor-input", title: "选择", hint: "划选文字以复制（不生成卡片）" },
 	{ tool: "text", icon: "highlighter", title: "文字", hint: "划选文字生成卡片（默认）" },
-	{ tool: "area", icon: "square", title: "矩形", hint: "拖拽框选规则区域" },
+	// 90 批 MN3 对照：矩形摘录=虚线选框（box-select）；square-dashed/square 为缺名兜底
+	{ tool: "area", icon: resolveIcon(["box-select", "square-dashed", "square"]), title: "矩形", hint: "拖拽框选规则区域" },
 	{ tool: "lasso", icon: "lasso", title: "套索", hint: "自由圈选不规则区域" },
 	{ tool: "blank", icon: "sticky-note", title: "留白", hint: "点击页面空白处添加备注" },
 ];
@@ -292,8 +299,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	private epubSession: EpubSession | null = null;
 	/** ㊻-B md 文档文本（loadFromPath 读入，renderMdIntoPage 消费后即弃） */
 	private mdText: string | null = null;
-	/** PDF 专属头部按钮（㊻-B md 文档隐藏：手写/放大/缩小/适应宽度） */
-	private pdfOnlyActions: HTMLElement[] = [];
+	/** 90 批文件名标题元素（原生标题行隐藏后并入工具行行首；随工具行重建） */
+	private readerTitleEl: HTMLElement | null = null;
 	/** 侧栏当前分页（㉙ 目录/书签 + 83-E 翻译；视图生命周期内保持，重渲染不丢） */
 	private tocTab: "outline" | "bookmarks" | "translate" = "outline";
 	/** 83-E 翻译页签：最近划选快照（null = 空态提示；换文档时 cleanup 清空） */
@@ -354,17 +361,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			plugin.cardBus.onCardRemoved((cardId, last) => this.handleCardRemoved(cardId, last)),
 		);
 
-		// 工具栏（标签页头部）：手写 / 插图 / 录音（摘录入口，89 精简后仅保留这组）。
-		// 缩放并入工具行「⋯」菜单 + Ctrl+滚轮（构造器下方注册）；四类摘录工具 +
-		// 手型/选择在视图内工具行（loadFileInto 构建），见 TOOLBAR_TOOLS
-		const handwriteBtn = this.addAction("pencil-line", "手写批注模式", () => {
-			this.setHandwriteMode(!this.handwriteMode);
-		});
-		this.handwriteBtn = handwriteBtn;
-		this.addAction("image-plus", "插入图片摘录（亦可粘贴 / 拖入）", () => this.pickImages());
-		this.addAction("mic", "录音摘录", () => void this.toggleRecording());
-		// ㊻-B 手写为 PDF 专属（md 固定栏宽、无手写层）——收引用供 md 文档隐藏
-		this.pdfOnlyActions = [handwriteBtn];
+		// 90 批顶栏合一：原头部 addAction 三枚（手写/插图/录音）迁入视图内工具行与
+		// ⋯ 菜单（buildToolRow / openToolOverflowMenu）——原生标题行已由 CSS 隐藏，
+		// 工具行成为唯一顶栏。四类摘录工具 + 手型/选择在 TOOLBAR_TOOLS
 
 		this.rerenderSoon = debounce(() => this.handleResize(), 200, true);
 		this.commitOffscreenSoon = debounce(() => this.commitOffscreenInk(), 400, true);
@@ -515,6 +514,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 					oldPath !== file.path
 				) {
 					this.currentFilePath = file.path;
+					// 90 批：工具行行首文件名标题跟随
+					this.readerTitleEl?.querySelector(".marinmind-reader-title-text")?.setText(
+						file.basename,
+					);
 				}
 			}),
 		);
@@ -565,6 +568,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	followExternalRename(oldPath: string, newPath: string): void {
 		if (this.currentFilePath === oldPath) {
 			this.currentFilePath = newPath;
+			// 90 批：工具行行首文件名标题跟随（仅换文本节点，不动图标）
+			this.readerTitleEl?.querySelector(".marinmind-reader-title-text")?.setText(
+				fsBasename(newPath),
+			);
 		}
 	}
 
@@ -582,8 +589,11 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		this.pendingFile = null;
 		if (pending) {
 			await this.openPath(pending);
+			return;
 		}
-		// 无 pending（空 leaf）：保持空态，等待 setViewState/openInReader 携带 file
+		// 无 pending（空 leaf）：保持空态，等待 setViewState/openInReader 携带 file。
+		// 90 批原生标题行已隐藏，无标题可看——渲染最小空态提示防全白
+		this.showTip("MarinMind 阅读器：等待打开文档");
 	}
 
 	/**
@@ -632,9 +642,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		}
 
 		// ㊻-B/㊼ 文档分流（核心版）：md/epub 无位图/无懒渲染/固定栏宽；
-		// docKind 三态统一驱动后续全部分支（工具降级/目录/书签）
+		// docKind 三态统一驱动后续全部分支（工具降级/目录/书签）。
+		// 90 批：原头部按钮显隐（syncHeaderActions）随 addAction 迁移废除——
+		// 手写按钮改为 buildToolRow 创建时就地按 isReflowDoc 判定（换文档必经重建）
 		this.docKind = docKindOf(filePath);
-		this.syncHeaderActions(this.isReflowDoc);
 		if (this.docKind === "md" && this.plugin.dataRootRelPath(filePath) !== null) {
 			// 数据根防御：MarinMind/ 内 md 是插件笔记数据（选择器已排除，此处兜底
 			// openInReader 直开等旁路入口）——双认领会撞书文件路径 + 事件双重路由
@@ -883,13 +894,6 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			if (echo.some((c) => this.needsRegionSnapshot(c))) {
 				this.pagesNeedingBackfill.add(n);
 			}
-		}
-	}
-
-	/** 头部按钮按文档形态显隐（㊻-B：md 隐藏 PDF 专属的手写/缩放按钮；㊼ epub 同 md） */
-	private syncHeaderActions(isReflow: boolean): void {
-		for (const el of this.pdfOnlyActions) {
-			el.style.display = isReflow ? "none" : "";
 		}
 	}
 
@@ -1572,11 +1576,12 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	}
 
 	/**
-	 * 构建工具行（89 MN3 式精简）：单行 icon-only——目录 + 四类摘录工具 + 复习 +
-	 * 视图模式条 + ⋯。图标即按钮（title/aria-label 悬停提示与读屏兜底，图标名
-	 * 均已对照 obsidian.asar 注册表验证，见 TOOLBAR_TOOLS 注释）；手型/选择/
-	 * AI 摘录/缩放/脑图目标/闪卡折叠进 ⋯ 溢出菜单（openToolOverflowMenu，
-	 * 图标+文字+状态勾选）。分隔线分语义组（导航 / 摘录 / 复习）。
+	 * 构建工具行（89 MN3 式精简；90 批起为唯一顶栏）：文件名标题 + 单行 icon-only
+	 * ——目录 + 四类摘录工具 + 手写（PDF 专属）+ 复习 + 视图循环钮 + ⋯。图标即按钮
+	 * （title/aria-label 悬停提示与读屏兜底，图标名均已对照 obsidian.asar 注册表
+	 * 验证或走 setIconSafe 兜底链，见 TOOLBAR_TOOLS 注释）；手型/选择/AI 摘录/缩放/
+	 * 插入图片·录音/脑图目标/闪卡折叠进 ⋯ 溢出菜单（openToolOverflowMenu，
+	 * 图标+文字+状态勾选）。分隔线分语义组（标题 / 导航 / 摘录 / 复习）。
 	 */
 	private buildToolRow(): void {
 		this.toolBtns.clear();
@@ -1585,6 +1590,15 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		this.viewModeOff = null;
 		const row = document.createElement("div");
 		row.className = "marinmind-tool-row";
+		// 90 批文件名标题：原生标题行隐藏后行首展示（book-open 小图标 + 文件名）
+		const title = row.createEl("span", { cls: "marinmind-reader-title" });
+		setIcon(title, "book-open");
+		title.createEl("span", {
+			cls: "marinmind-reader-title-text",
+			text: this.getDisplayText(),
+		});
+		this.readerTitleEl = title;
+		row.createEl("div", { cls: "marinmind-tool-sep" });
 		// 目录/书签侧栏开关（㉓）：导航类，独立于摘录工具组
 		this.tocBtn = row.createEl("button", {
 			cls: "marinmind-tool-btn",
@@ -1620,6 +1634,26 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			this.toolBtns.set(def.tool, btn);
 			this.syncToolColorUI(def.tool);
 		}
+		// 90 批手写批注迁入工具行（原头部 addAction）：PDF 专属——md/epub 无手写层，
+		// 按钮连前置逻辑都不建（is-active 由 setHandwriteMode 2669 行同步；换文档
+		// 重建工具行时按当前 handwriteMode 现值恢复点亮）
+		if (!this.isReflowDoc) {
+			this.handwriteBtn = row.createEl("button", {
+				cls: "marinmind-tool-btn",
+				attr: {
+					type: "button",
+					"aria-label": "手写批注模式",
+					title: "手写批注模式",
+				},
+			});
+			setIconSafe(this.handwriteBtn, "pencil", "pencil-line");
+			this.handwriteBtn.classList.toggle("is-active", this.handwriteMode);
+			this.handwriteBtn.addEventListener("click", () => {
+				this.setHandwriteMode(!this.handwriteMode);
+			});
+		} else {
+			this.handwriteBtn = null;
+		}
 		// 89 AI 摘录 / 摘录目标脑图（㊴）/ 自动转闪卡（㊷）折叠进 ⋯ 菜单——
 		// 菜单项每次打开现读状态（目标图名/开关勾选），无需行内按钮同步
 		row.createEl("div", { cls: "marinmind-tool-sep" });
@@ -1632,9 +1666,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				title: "复习本书到期闪卡（进入后可切全部书籍）",
 			},
 		});
-		// P2-1：复习图标统一 swords（原 layers 语义已被主页「卡片」导航占用，
-		// 与脑图 header「复习」/ 主页入口三处对齐——可感知变更，理由见评估报告 E-19）
-		setIcon(reviewBtn, "swords");
+		// 90 批 MN3 对照：复习=学习语义 graduation-cap（原 swords 像对战；与脑图
+		// header/节点编辑器/主页入口四处对齐，语义沿革见评估报告 E-19 与 P2-1 表）
+		setIcon(reviewBtn, "graduation-cap");
 		// ㊷ 阅读器入口默认只复习当前书（复习界面徽标可切全部书籍）
 		reviewBtn.addEventListener("click", () =>
 			void this.plugin.openReview(this.docId ?? undefined),
@@ -1661,7 +1695,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			attr: {
 				type: "button",
 				"aria-label": "更多工具",
-				title: "更多工具（手型 / 选择 / AI 摘录 / 缩放 / 摘录目标脑图 / 自动转闪卡）",
+				title: "更多工具（手型 / 选择 / 插入图片·录音 / AI 摘录 / 缩放 / 摘录目标脑图 / 自动转闪卡）",
 			},
 		});
 		setIcon(this.overflowBtn, "more-horizontal");
@@ -1671,9 +1705,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	}
 
 	/**
-	 * ⋯ 溢出菜单（89）：手型/选择（勾选反映当前工具）、AI 摘录与缩放（PDF 专属）、
-	 * 摘录目标脑图（title 带当前目标图名，开二段菜单）、自动转闪卡（勾选态）。
-	 * Menu 即开即建，状态每次打开现读，无需持久同步。
+	 * ⋯ 溢出菜单（89；90 批新增「插入」组）：手型/选择（勾选反映当前工具）、
+	 * 插入图片·录音摘录（原头部 addAction 迁入，勾选反映录音中）、AI 摘录与缩放
+	 * （PDF 专属）、摘录目标脑图（title 带当前目标图名，开二段菜单）、自动转闪卡
+	 * （勾选态）。Menu 即开即建，状态每次打开现读，无需持久同步。
 	 */
 	private openToolOverflowMenu(evt: MouseEvent): void {
 		const menu = new Menu();
@@ -1690,6 +1725,21 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 					.onClick(() => this.setReaderTool(def.tool)),
 			);
 		}
+		// 90 批插入组：图片/录音摘录（原头部 addAction 迁入；录音勾选态现读）
+		menu.addSeparator();
+		menu.addItem((mi) =>
+			mi
+				.setTitle("插入图片摘录…")
+				.setIcon("image-plus")
+				.onClick(() => this.pickImages()),
+		);
+		menu.addItem((mi) =>
+			mi
+				.setTitle(this.isRecording ? "结束录音" : "录音摘录")
+				.setIcon("mic")
+				.setChecked(this.isRecording)
+				.onClick(() => void this.toggleRecording()),
+		);
 		// AI 一键摘录（㉓）与缩放：PDF 专属（㊻-B md/epub 无版面几何/固定栏宽）
 		if (!this.isReflowDoc) {
 			menu.addSeparator();
@@ -1725,7 +1775,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			menu.addItem((mi) =>
 				mi
 					.setTitle(`摘录目标脑图：${where}`)
-					.setIcon("git-fork")
+					.setIcon(ADD_TO_MINDMAP_ICON)
 					.onClick(() => this.openMapTargetMenu(evt)),
 			);
 			menu.addItem((mi) =>
@@ -3982,7 +4032,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		}
 		// 脑图组
 		menu.addItem((item) =>
-			item.setTitle("加入思维导图…").setIcon("git-fork").onClick(() => this.addToMindmap(card)),
+			item.setTitle("加入思维导图…").setIcon(ADD_TO_MINDMAP_ICON).onClick(() => this.addToMindmap(card)),
 		);
 		// 危险操作
 		menu.addSeparator();
@@ -4513,6 +4563,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		this.pan = null; // 平移中切文档/关视图：立即终止
 		this.contentEl.classList.remove("marinmind-panning");
 		this.toolBtns.clear(); // 工具行随 contentEl.empty 一并移除，引用同步清理
+		// 90 批工具行迁移件：文件名标题与手写按钮随工具行一并移除，引用同步清理
+		this.readerTitleEl = null;
+		this.handwriteBtn = null;
 		// 目录侧栏（㉓）：面板随 contentEl.empty 移除，引用与大纲数据同步清理
 		this.tocPanel = null;
 		this.tocBtn = null;

@@ -62,6 +62,14 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 
 /* ===== PDF 阅读视图 ===== */
 
+/* ---- 顶栏合一（90 批）：隐藏 Obsidian 原生视图标题行，插件工具栏成为唯一顶栏。
+   标题（文件名/图名）并入工具行左侧；tab 栏标题走 getDisplayText 不受影响。
+   代价（用户已确认）：失去标题行右键菜单/拖拽把手/右上角更多选项入口 */
+.workspace-leaf-content[data-type="marinmind-reader"] .view-header,
+.workspace-leaf-content[data-type="marinmind-mindmap"] .view-header {
+	display: none;
+}
+
 /* 视图根容器：撑满 view-content，滚动交给内层容器；
    position:relative 供目录侧栏（㉓）作 absolute 覆盖层的定位锚 */
 .marinmind-reader {
@@ -72,11 +80,14 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	flex-direction: column;
 }
 
-/* ---- 阅读器工具行（89 MN3 式单行 icon-only：目录 + 四摘录 + 复习 + 模式条 + ⋯） ---- */
+/* ---- 阅读器工具行（89 MN3 式单行 icon-only；90 批起为唯一顶栏：文件名标题 + 目录 + 四摘录 + 手写 + 复习 + 搜索 + 视图循环钮 + ⋯） ---- */
+/* 91 批单行不换行（用户确认）：书名为可压缩项（收缩截断），极窄时右缘按钮被裁 */
 .marinmind-tool-row {
 	display: flex;
 	align-items: center;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
+	min-width: 0;
+	overflow: hidden;
 	gap: 6px;
 	padding: 3px 8px;
 	border-bottom: 1px solid var(--background-modifier-border);
@@ -88,6 +99,7 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	align-items: center;
 	justify-content: center;
 	gap: 5px;
+	flex: none; /* 91 批：按钮不可压缩——空间不足由书名截断承担 */
 	padding: 4px 8px;
 	margin: 0;
 	border: none;
@@ -125,10 +137,10 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 }
 
 /* ---- 分段控件共享配方（P2-2 三合一，E-22）：胶囊分段 + accent 实底激活 ----
-   消费方：三视图模式条（view-mode-bar）/ 阅读器目录·书签分页（toc-tabs）/
-   复习溯源上下文（review-ctx-bar）——各自叠加 marinmind-segmented 类消费，
-   布局差异留在各自视图类。主页视图切换钮（home-view-toggle）刻意不消费
-   本配方：主页分区隔离（见其注释互指）。 */
+   消费方：阅读器目录·书签分页（toc-tabs）/ 复习溯源上下文（review-ctx-bar）
+   ——各自叠加 marinmind-segmented 类消费，布局差异留在各自视图类。
+   主页视图切换钮（home-view-toggle）刻意不消费本配方：主页分区隔离（见其注释互指）。
+   （90 批起三视图模式条改为单 icon 循环按钮，退出本配方消费方名单） */
 .marinmind-segmented {
 	display: inline-flex;
 	align-items: center;
@@ -161,9 +173,38 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	color: var(--text-on-accent);
 }
 
-/* 三态视图模式切换条 [文档|脑图|联动]（⑰）：阅读器工具行与脑图头部共用；
-   形态由 .marinmind-segmented 配方承担，此处只留工具行右推布局 */
-.marinmind-view-mode {
+/* 阅读器文件名标题（90 批）：原生标题行隐藏后并入工具行行首。
+   形态镜像 .marinmind-mm-title（600 字重 + ellipsis），配 book-open 小图标。
+   91 批改可收缩（flex 0 1 auto + min-width:0）——空间压缩先截书名不换行 */
+.marinmind-reader-title {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: var(--font-medium, 600);
+	color: var(--text-normal);
+	max-width: 18em;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	flex: 0 1 auto;
+}
+
+.marinmind-reader-title .marinmind-reader-title-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.marinmind-reader-title svg {
+	width: 14px;
+	height: 14px;
+	color: var(--text-muted);
+	flex: none;
+}
+
+/* 三态视图循环按钮（90 批 MN3 式单 icon 化）：icon 随当前视图变化，
+   左键循环 doc→map→linked、右键直选；形态由 .marinmind-tool-btn 承担 */
+.marinmind-view-mode-btn {
 	flex: none;
 }
 
@@ -819,6 +860,35 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 999px;
 	padding: 0 0.5em;
+}
+
+/* 91 批文档内搜索结果行重排：徽标独占置顶行 + 摘要两行截断 + mark 高亮。
+   子级选择器作用域——脑图搜索的 badge 在 picker-name 内不是 item 直接子级，不受影响 */
+.marinmind-search-modal-item > .marinmind-search-modal-badge {
+	display: inline-block;
+	margin-bottom: 0.2em;
+}
+
+.marinmind-search-modal-snippet {
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	word-break: break-word;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+}
+
+/* 命中词高亮：主题高亮底色，选中行文字转 accent 时保持可读 */
+.marinmind-search-modal-snippet mark {
+	background: var(--text-highlight-bg);
+	color: inherit;
+	padding: 0;
+	border-radius: 2px;
+}
+
+.marinmind-search-modal-item.is-selected .marinmind-search-modal-snippet {
+	color: var(--text-accent); /* 镜像脑图搜索 picker-title 选中配色 */
 }
 
 .marinmind-search-modal-empty {
@@ -1526,23 +1596,33 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	padding: 0.4em 0.8em;
 	border-bottom: 1px solid var(--background-modifier-border);
 	flex: none;
-	/* R2（E2-03）：三枚 nowrap 胶囊钮 + 下拉 + 模式条最小内容宽约 600px+，split
-	   半宽窗格下右侧控件被 overflow:hidden 裁到不可达——wrap 落次行（镜像阅读器
-	   工具行先例），宽窗格一行放下零变化 */
-	flex-wrap: wrap;
+	/* 91 批单行不换行（用户确认，反转 R2 E2-03 刻意换行取舍）：图名与节点数
+	   为可压缩项（收缩截断），极窄窗格下右缘控件可能被裁——分屏半宽常规窗口
+	   （内容宽 ≥ 约 400px）按钮全集仍完整可见 */
+	flex-wrap: nowrap;
+	min-width: 0;
+	overflow: hidden;
 }
 
+/* 91 批改可收缩（flex 0 1 auto + min-width:0）：空间压缩首级截图名 */
 .marinmind-mm-title {
 	font-weight: 600;
 	max-width: 18em;
+	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	flex: 0 1 auto;
 }
 
+/* 91 批次级压缩项：节点数收缩截断（优于把按钮挤出可视区） */
 .marinmind-mm-count {
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* header 内弹性空隙：把视图模式切换条与操作按钮推到右端 */
@@ -1946,9 +2026,9 @@ body.marinmind-card-dragging {
 
 /* ===== 51 批量折叠 / 撤销布局（视图头部动作钮） ===== */
 
-/* Obsidian 无内置 view-action 禁用样式，本插件头部钮专用（半透明 + 不吃指针）；
-   点击回调另有守卫兜底，此处只管观感 */
-.view-action.is-disabled {
+/* 工具行钮禁用态（90 批折叠钮从原生 view-action 迁入 tool-btn 后适用）：
+   半透明 + 不吃指针；点击回调另有守卫兜底，此处只管观感 */
+.marinmind-tool-btn.is-disabled {
 	opacity: 0.45;
 	pointer-events: none;
 }
@@ -2389,11 +2469,30 @@ audio.marinmind-review-media {
 	padding-left: 0.55em;
 }
 
-.marinmind-card-preview-meta {
+/* 徽标行（91 批重排，替代原 meta 单行）：形态胶囊在前 + 出处随后 */
+.marinmind-card-preview-badges {
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+	min-width: 0;
+	margin-bottom: 0.75em;
+}
+
+/* 形态胶囊（与 search-modal-badge 同配方） */
+.marinmind-card-preview-type {
+	flex-shrink: 0;
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
-	margin-bottom: 0.75em;
-	/* R2（E2-14）：长书名单行省略——块级三件套，此前折行数行推高弹窗头部 */
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	padding: 0 0.5em;
+}
+
+/* 出处（《书名》· 第 N 页）：长书名单行省略（R2 E2-14 配方延续） */
+.marinmind-card-preview-src {
+	min-width: 0;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -2458,10 +2557,23 @@ audio.marinmind-card-preview-media {
 	margin-top: 0.5em;
 }
 
-/* 正文块（85-D cardPreviewBlocks）：批注块（有标题时另列——此前被 cardPreview
-   吸收进标题行不可见）；摘录块见下（标题/批注任一存在时另列，OCR 文字归宿） */
-.marinmind-card-preview-note {
+/* 正文分区（91 批带标签分区）：容器统一 secondary 底 + 圆角 + 内边距，
+   note/excerpt 内容块只保留排版（pre-wrap/限高滚动），背景移到分区层 */
+.marinmind-card-preview-section {
 	margin-top: 0.75em;
+	padding: 0.5em 0.75em;
+	background: var(--background-secondary);
+	border-radius: var(--radius-s);
+}
+
+.marinmind-card-preview-section-label {
+	margin-bottom: 0.25em;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+}
+
+/* 批注块（有标题时另列——此前被 cardPreview 吸收进标题行不可见） */
+.marinmind-card-preview-note {
 	font-size: var(--font-ui-small);
 	white-space: pre-wrap;
 	word-break: break-word;
@@ -2469,17 +2581,38 @@ audio.marinmind-card-preview-media {
 	overflow-y: auto;
 }
 
-/* 摘录文字完整展示（未吸收进标题行时） */
+/* 摘录文字完整展示（未吸收进标题行时；OCR 文字归宿） */
 .marinmind-card-preview-excerpt {
-	margin-top: 0.75em;
-	padding: 0.5em 0.75em;
-	background: var(--background-secondary);
-	border-radius: var(--radius-s);
 	font-size: var(--font-ui-small);
 	white-space: pre-wrap;
 	word-break: break-word;
 	max-height: 10em;
 	overflow-y: auto;
+}
+
+/* 元信息行（91 批）：卡组徽标 + 标签 chips + 相对时间 */
+.marinmind-card-preview-info {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.4em 0.6em;
+	margin-top: 0.75em;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.marinmind-card-preview-tag {
+	color: var(--text-accent);
+}
+
+/* 操作区（91 批 MN3 式收敛）：右对齐 + 顶部分隔线（不动共用 note-actions） */
+.marinmind-card-preview-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5em;
+	margin-top: 1em;
+	padding-top: 0.6em;
+	border-top: 1px solid var(--background-modifier-border);
 }
 
 /* ---------- 跳转原文定位闪烁（⑨-A） ---------- */
@@ -3478,6 +3611,18 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+
+/* 91 批卡片行摘要第二行：标题未吸收字段（批注/摘录文字）两行截断——
+   OCR 长文字正文首屏可见，区别于 sub 行的出处信息 */
+.marinmind-home-row-summary {
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	word-break: break-word;
 }
 
 .marinmind-home-row-meta {

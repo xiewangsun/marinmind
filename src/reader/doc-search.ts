@@ -104,6 +104,45 @@ export function buildSnippet(text: string, start: number, hitLength: number, rad
 	);
 }
 
+/** HTML 转义（91 批高亮拼装用）：匹配在原文上做，分段转义防查询词含 &/引号被转义后错位 */
+function escapeHtml(text: string): string {
+	return text
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
+}
+
+/**
+ * 命中摘要高亮（91 批）：摘要中全部命中词（大小写不敏感、非重叠）包 <mark>。
+ * 安全 HTML 单源：先在**原文**上 indexOf 定位（查询词含正则元字符/实体字符
+ * 不错位——若先整体转义再匹配，查询词含 & 会错配 &amp; 里的 amp），再按段
+ * 转义拼装。返回值只能直接赋 innerHTML，不得再转义。
+ */
+export function highlightSnippet(query: string, snippet: string): string {
+	const q = query.trim().toLowerCase();
+	if (!q) {
+		return escapeHtml(snippet);
+	}
+	const hay = snippet.toLowerCase();
+	let out = "";
+	let from = 0;
+	for (;;) {
+		const at = hay.indexOf(q, from);
+		if (at < 0) {
+			break;
+		}
+		out +=
+			escapeHtml(snippet.slice(from, at)) +
+			"<mark>" +
+			escapeHtml(snippet.slice(at, at + q.length)) +
+			"</mark>";
+		from = at + q.length; // 非重叠推进（"aaa" 搜 "aa" 只标首个，防嵌套 mark）
+	}
+	return out + escapeHtml(snippet.slice(from));
+}
+
 /**
  * 搜一页（章/文档）的文本集合：texts 为聚行文本（PDF）或块文本（EPUB/MD），
  * 每段所有命中各成一条 hit（cap 截断），返回按扫描顺序排列的命中。

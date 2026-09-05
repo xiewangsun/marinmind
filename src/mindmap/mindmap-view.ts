@@ -12,6 +12,7 @@ import { NodeSearchModal } from "./node-search-modal";
 import { deleteCardCascade } from "../home/card-actions";
 import { buildCardCopyText } from "../links/card-links";
 import { createViewModeBar } from "../ui/view-mode-bar";
+import { setIconSafe } from "../ui/icon-resolve";
 import { isHiddenVaultDir, isAbsoluteFsPath, fsBasename, pageWordOf, docExtOf } from "../storage/paths";
 import { readExternalBinary } from "../storage/external-file";
 import { acquirePdf, pdfCacheKey } from "../reader/pdf-cache";
@@ -270,17 +271,10 @@ export class MarinMindMindmapView extends ItemView {
 		super(leaf);
 		this.plugin = plugin;
 
-		// 工具栏（89-B 精简为 4 枚高频入口）：添加已有卡片 / 新建文字卡片 /
-		// 折叠全部 / 导出。自动布局/目录建框架/撤销/重做/刷新折叠进视图内 ⋯ 菜单
-		// （撤销重做 Ctrl+Z/Ctrl+Shift+Z 快捷键不受影响，见 onKeydown）
-		this.addAction("list-plus", "添加卡片", () => this.openCardPicker());
-		this.addAction("plus", "新建文字卡片", () => this.createTextCard());
-		this.addAction("download", "导出（大纲 / OPML / 图片）", (evt) => this.openExportMenu(evt));
-		this.collapseBtnEl = this.addAction(
-			"chevrons-down-up",
-			"折叠全部",
-			() => this.bulkCollapse(true),
-		);
+		// 90 批顶栏合一：原头部 addAction 四枚（添加卡片/新建文字卡片/导出/折叠全部）
+		// 迁入视图内 header 与 ⋯ 菜单（buildSkeleton / openHeaderOverflowMenu）——
+		// 原生标题行已由 CSS 隐藏，header 成为唯一顶栏。自动布局/目录建框架/
+		// 撤销/重做/刷新同在 ⋯ 菜单（撤销重做 Ctrl+Z/Ctrl+Shift+Z 快捷键不受影响）
 		// keydown 解绑兜底：popout 迁移等路径若漏调 onClose 的显式解绑，卸载时兜底清理
 		this.register(() => this.unbindKeydown());
 	}
@@ -732,9 +726,10 @@ export class MarinMindMindmapView extends ItemView {
 		this.contentEl.empty();
 		this.contentEl.classList.add("marinmind-mindmap");
 
-		// header（89-B MN3 式单行 icon-only）：图名 + 节点数 + 添加到脑图 + 复习 +
-		// 视图模式条 + ⋯。分支样式/固定根/重命名/删除/自动布局/目录建框架/撤销/
-		// 重做/刷新折叠进 ⋯ 溢出菜单（openHeaderOverflowMenu 四组）
+		// header（89-B MN3 式单行 icon-only；90 批起为唯一顶栏）：图名 + 节点数 +
+		// 添加到脑图 + 复习 + 搜索 + 折叠全部 + 视图循环钮 + ⋯。添加卡片/新建文字
+		// 卡片/导出/分支样式/固定根/重命名/删除/自动布局/目录建框架/撤销/重做/刷新
+		// 折叠进 ⋯ 溢出菜单（openHeaderOverflowMenu 五组）
 		const header = this.contentEl.createDiv({ cls: "marinmind-mm-header" });
 		this.titleSpan = header.createSpan({ cls: "marinmind-mm-title" });
 		this.titleSpan.textContent = "未打开脑图";
@@ -754,8 +749,9 @@ export class MarinMindMindmapView extends ItemView {
 				title: "开关：新摘录自动添加到脑图",
 			},
 		});
-		// P2-1 图标语言统一：emoji → lucide（zap 留给闪卡语义，入图取脑图家族 git-fork）
-		setIcon(this.autoAddBtn, "git-fork");
+		// 90 批 MN3 对照：入图=节点连线图 network（原 git-fork 像版本控制；zap 留给
+		// 闪卡语义）；低版本 Obsidian 缺名时依次降级 share-2 → git-fork
+		setIconSafe(this.autoAddBtn, "network", "share-2", "git-fork");
 		this.autoAddBtn.addEventListener("click", () => void this.toggleAutoAdd());
 		// 复习入口（㉑，MN4 学习集「复习」按钮）：打开/复用复习窗格并开始到期会话
 		const reviewBtn = header.createEl("button", {
@@ -766,7 +762,9 @@ export class MarinMindMindmapView extends ItemView {
 				title: "开始复习（到期闪卡）",
 			},
 		});
-		setIcon(reviewBtn, "swords");
+		// 90 批 MN3 对照：复习=学习语义 graduation-cap（原 swords 像对战；与阅读器
+		// 工具行/节点编辑器/主页入口对齐，语义沿革见评估报告 E-19 与 P2-1 表）
+		setIcon(reviewBtn, "graduation-cap");
 		reviewBtn.addEventListener("click", () => void this.plugin.openReview());
 		// 节点搜索（89-C，MN3 搜索一级入口对齐）：标题/批注/摘录匹配 → 定位居中闪烁
 		const searchBtn = header.createEl("button", {
@@ -779,19 +777,33 @@ export class MarinMindMindmapView extends ItemView {
 		});
 		setIcon(searchBtn, "search");
 		searchBtn.addEventListener("click", () => this.openNodeSearch());
-		// 三态视图模式切换条 [文档|脑图|联动] 靠右（与阅读器工具行同款，⑰）
+		// 折叠全部/展开全部双态钮（90 批从原头部 addAction 迁入）：icon/禁用态由
+		// syncCollapseButton 动态刷新（setIcon 只换 svg，不破坏点击回调）；创建后
+		// 立即刷一次补初始态（此前仅 loadMap 路径调用，header 骨架期会漏）
+		this.collapseBtnEl = header.createEl("button", {
+			cls: "marinmind-tool-btn",
+			attr: {
+				type: "button",
+				"aria-label": "折叠全部",
+				title: "折叠全部",
+			},
+		});
+		setIcon(this.collapseBtnEl, "chevrons-down-up");
+		this.collapseBtnEl.addEventListener("click", () => this.bulkCollapse(true));
+		this.syncCollapseButton();
+		// 三态视图循环钮（90 批单 icon 化）靠右（与阅读器工具行同款，⑰）
 		this.viewModeOff?.();
 		const modeBar = createViewModeBar(this.plugin);
 		this.viewModeOff = modeBar.off;
 		header.createEl("div", { cls: "marinmind-mm-header-spacer" });
 		header.appendChild(modeBar.el);
-		// ⋯ 溢出菜单（89-B）：低频图级操作折叠收纳，菜单项每次打开现读状态
+		// ⋯ 溢出菜单（89-B；90 批扩组）：低频图级操作折叠收纳，菜单项每次打开现读状态
 		this.headerOverflowBtn = header.createEl("button", {
 			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
 				"aria-label": "更多操作",
-				title: "更多操作（分支样式 / 固定根 / 重命名 / 删除 / 自动布局 / 目录建框架 / 撤销 / 重做 / 刷新）",
+				title: "更多操作（添加卡片 / 新建文字卡片 / 分支样式 / 固定根 / 重命名 / 删除 / 导出 / 自动布局 / 目录建框架 / 撤销 / 重做 / 刷新）",
 			},
 		});
 		setIcon(this.headerOverflowBtn, "more-horizontal");
@@ -817,13 +829,28 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	/**
-	 * ⋯ 溢出菜单（89-B，四组九项，图标+文字）：图（分支样式…/固定根）｜管理
-	 * （重命名/删除脑图）｜排版（自动布局/从文档目录建框架）｜历史（撤销/重做/刷新）。
-	 * Menu 即开即建，勾选/禁用态每次打开现读（mapDefault/fixedRootId/undoStack）。
+	 * ⋯ 溢出菜单（89-B；90 批新增卡片组+导出，五组）：卡片（添加已有卡片/新建文字
+	 * 卡片，原头部 addAction 迁入）｜图（分支样式…/固定根）｜管理（重命名/删除脑图/
+	 * 导出）｜排版（自动布局/从文档目录建框架）｜历史（撤销/重做/刷新）。
+	 * 图标+文字，Menu 即开即建，勾选/禁用态每次打开现读（mapDefault/fixedRootId/undoStack）。
 	 */
 	private openHeaderOverflowMenu(evt: MouseEvent): void {
 		const menu = new Menu();
+		// 卡片组（90 批迁入；无图时方法内 Notice 兜底）
+		menu.addItem((mi) =>
+			mi
+				.setTitle("添加已有卡片…")
+				.setIcon("list-plus")
+				.onClick(() => this.openCardPicker()),
+		);
+		menu.addItem((mi) =>
+			mi
+				.setTitle("新建文字卡片")
+				.setIcon("plus")
+				.onClick(() => this.createTextCard()),
+		);
 		// 图组
+		menu.addSeparator();
 		menu.addItem((mi) =>
 			mi
 				.setTitle("分支样式…")
@@ -844,6 +871,14 @@ export class MarinMindMindmapView extends ItemView {
 		);
 		menu.addItem((mi) =>
 			mi.setTitle("删除脑图").setIcon("trash-2").onClick(() => this.deleteMap()),
+		);
+		// 90 批导出迁入管理组（原头部 addAction；二级菜单定位沿用外层 ⋯ 事件的
+		// 捕获传参模式——MenuItem onClick 参数为 MouseEvent|KeyboardEvent 不能直传）
+		menu.addItem((mi) =>
+			mi
+				.setTitle("导出（大纲 / OPML / 图片）…")
+				.setIcon("download")
+				.onClick(() => this.openExportMenu(evt)),
 		);
 		// 排版组
 		menu.addSeparator();
@@ -2847,7 +2882,7 @@ export class MarinMindMindmapView extends ItemView {
 		menu.addItem((item) =>
 			item
 				.setTitle("复习此分支")
-				.setIcon("swords")
+				.setIcon("graduation-cap")
 				.onClick(() => {
 					const byId = new Map(this.nodes.map((n) => [n.id, n]));
 					const cardIds = subtreeIds(this.nodes, node.id)

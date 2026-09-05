@@ -43,6 +43,16 @@ export function cardPreviewBlocks(card: Card): { note: string | null; excerpt: s
 	};
 }
 
+/**
+ * 卡片行摘要第二行（91 批）：未被标题行吸收的内容（批注 > 摘录文字，与
+ * cardPreview 优先链同序）——OCR 卡/带批注卡在列表里即可见正文；全被标题
+ * 吸收返回 null（不渲染空占位）。复用 cardPreviewBlocks 单源拆分。
+ */
+export function cardRowSummary(card: Card): string | null {
+	const blocks = cardPreviewBlocks(card);
+	return blocks.note ?? blocks.excerpt;
+}
+
 /** 分类选择的三态："all" 全部 / null 未分类 / 具体分类路径（多层以 / 分隔） */
 export type CategorySelection = string | null | "all";
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildSnippet,
+	highlightSnippet,
 	PAGE_HIT_CAP,
 	pdfLinesFromSpecs,
 	searchTexts,
@@ -155,5 +156,44 @@ describe("searchTexts（三形态统一匹配，89-D）", () => {
 		const { hits } = searchTexts(7, lines.map((l) => l.text), "长时程增强");
 		expect(hits).toHaveLength(1);
 		expect(hits[0].page).toBe(7);
+	});
+});
+
+describe("highlightSnippet（命中摘要高亮，91 批）", () => {
+	it("大小写不敏感：查询词与原文大小写不一致也标原文形态", () => {
+		expect(highlightSnippet("consol", "Memory Consolidation")).toBe(
+			"Memory <mark>Consol</mark>idation",
+		);
+		expect(highlightSnippet("memory", "Memory 管理")).toBe("<mark>Memory</mark> 管理");
+	});
+
+	it("snippet 含 HTML 特殊字符全转义，且 mark 标签不被二次转义", () => {
+		const out = highlightSnippet("命中", `<b>命中</b> & "引号"`);
+		expect(out).toBe("&lt;b&gt;<mark>命中</mark>&lt;/b&gt; &amp; &quot;引号&quot;");
+	});
+
+	it("多处命中全标", () => {
+		expect(highlightSnippet("ab", "ab_ab_ab")).toBe(
+			"<mark>ab</mark>_<mark>ab</mark>_<mark>ab</mark>",
+		);
+	});
+
+	it("空/空白 query 返回纯转义（无 mark）", () => {
+		expect(highlightSnippet("", "a<b>c")).toBe("a&lt;b&gt;c");
+		expect(highlightSnippet("   ", "a<b>c")).toBe("a&lt;b&gt;c");
+	});
+
+	it("query 含 & / < / .* 按字面匹配（先原文定位后分段转义，不错位）", () => {
+		expect(highlightSnippet("a&b", "x a&b y")).toBe("x <mark>a&amp;b</mark> y");
+		expect(highlightSnippet("a<b", "x a<b y")).toBe("x <mark>a&lt;b</mark> y");
+		expect(highlightSnippet(".*", "a .* b")).toBe("a <mark>.*</mark> b");
+	});
+
+	it("重叠不嵌套（aaa 搜 aa 只标首个）", () => {
+		expect(highlightSnippet("aa", "aaa")).toBe("<mark>aa</mark>a");
+	});
+
+	it("无命中返回纯转义", () => {
+		expect(highlightSnippet("丙", "甲乙")).toBe("甲乙");
 	});
 });

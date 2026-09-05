@@ -6,6 +6,7 @@ import {
 	buildDeckTree,
 	cardPreview,
 	cardPreviewBlocks,
+	cardRowSummary,
 	distinctColors,
 	distinctDecks,
 	distinctTags,
@@ -556,5 +557,35 @@ describe("allKnownDecks（76 设卡组选择器 items 源）", () => {
 
 	it("仅清单（全空卡组）也返回", () => {
 		expect(allKnownDecks([], ["空组"])).toEqual(["空组"]);
+	});
+});
+
+describe("cardRowSummary（卡片行摘要第二行，91 批）", () => {
+	it("title+note+excerpt：摘要取批注（与 cardPreview 优先链同序）", () => {
+		expect(cardRowSummary(card({ title: "T", note: "批注内容", excerptText: "摘录原文" }))).toBe(
+			"批注内容",
+		);
+	});
+
+	it("title+excerpt（OCR 卡）：摘要取摘录文字", () => {
+		expect(cardRowSummary(card({ title: "T", note: null, excerptText: "摘录原文" }))).toBe(
+			"摘录原文",
+		);
+	});
+
+	it("无 title 有 note+excerpt：note 被标题吸收，摘要取摘录", () => {
+		expect(cardRowSummary(card({ title: null, note: "当标题", excerptText: "摘录原文" }))).toBe(
+			"摘录原文",
+		);
+	});
+
+	it("仅 title：全被吸收返回 null（不空占位）", () => {
+		expect(cardRowSummary(card({ title: "T", note: null, excerptText: null }))).toBeNull();
+	});
+
+	it("全空媒体卡（无文字字段）：返回 null", () => {
+		expect(
+			cardRowSummary(card({ excerptType: "photo", excerptText: null, note: null, title: null })),
+		).toBeNull();
 	});
 });
