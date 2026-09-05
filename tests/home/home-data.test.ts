@@ -158,10 +158,7 @@ describe("normalizeCategory（㊲ 路径归一）", () => {
 });
 
 describe("injectCategoryPath（㊲ 空分类注入）", () => {
-	const tree = buildCategoryTree([
-		doc({ category: "学习/英语" }),
-		doc({ category: "工作" }),
-	]);
+	const tree = buildCategoryTree([doc({ category: "学习/英语" }), doc({ category: "工作" })]);
 
 	it("不存在的路径注入空节点链（可选中/可作拖放目标）", () => {
 		const roots = injectCategoryPath(tree.roots, "学习/数学");
@@ -250,13 +247,19 @@ describe("filterCards deck 三态 + activeDeckPath（73 路径化）", () => {
 			"p2",
 			"p5",
 		]);
-		expect(filterCards(deckCards, { ...all, deck: "学习/英语" }).map((c) => c.id)).toEqual(["p2"]);
+		expect(filterCards(deckCards, { ...all, deck: "学习/英语" }).map((c) => c.id)).toEqual([
+			"p2",
+		]);
 		expect(filterCards(deckCards, { ...all, deck: "学" })).toEqual([]); // 「学」≠「学习」
-		expect(filterCards(deckCards, { ...all, deck: "学习/数学" }).map((c) => c.id)).toEqual(["p5"]);
+		expect(filterCards(deckCards, { ...all, deck: "学习/数学" }).map((c) => c.id)).toEqual([
+			"p5",
+		]);
 	});
 
 	it("UNSET_DECK 哨兵筛未分组；null 不限；归一失败的筛选值不命中任何卡", () => {
-		expect(filterCards(deckCards, { ...all, deck: UNSET_DECK }).map((c) => c.id)).toEqual(["p4"]);
+		expect(filterCards(deckCards, { ...all, deck: UNSET_DECK }).map((c) => c.id)).toEqual([
+			"p4",
+		]);
 		expect(filterCards(deckCards, all)).toHaveLength(5);
 		expect(filterCards(deckCards, { ...all, deck: "长".repeat(121) })).toEqual([]);
 	});
@@ -308,9 +311,17 @@ describe("filterCards + paginate（㊲ 卡片筛选分页；卡组批扩四维�
 
 	it("null 不限全量；按书籍/形态单独与组合筛选", () => {
 		expect(filterCards(cards, all)).toHaveLength(3);
-		expect(filterCards(cards, { ...all, documentId: "d1" }).map((c) => c.id)).toEqual(["t1", "a1"]);
-		expect(filterCards(cards, { ...all, excerptType: "text" }).map((c) => c.id)).toEqual(["t1", "t2"]);
-		expect(filterCards(cards, { ...all, documentId: "d1", excerptType: "text" }).map((c) => c.id)).toEqual(["t1"]);
+		expect(filterCards(cards, { ...all, documentId: "d1" }).map((c) => c.id)).toEqual([
+			"t1",
+			"a1",
+		]);
+		expect(filterCards(cards, { ...all, excerptType: "text" }).map((c) => c.id)).toEqual([
+			"t1",
+			"t2",
+		]);
+		expect(
+			filterCards(cards, { ...all, documentId: "d1", excerptType: "text" }).map((c) => c.id),
+		).toEqual(["t1"]);
 	});
 
 	it("卡组批：按 deck 精确筛选（null 不限；未分组卡用空串筛不到）", () => {
@@ -321,7 +332,10 @@ describe("filterCards + paginate（㊲ 卡片筛选分页；卡组批扩四维�
 			card({ id: "x4", deck: null }),
 		];
 		expect(filterCards(deckCards, all)).toHaveLength(4);
-		expect(filterCards(deckCards, { ...all, deck: "考研单词" }).map((c) => c.id)).toEqual(["x1", "x2"]);
+		expect(filterCards(deckCards, { ...all, deck: "考研单词" }).map((c) => c.id)).toEqual([
+			"x1",
+			"x2",
+		]);
 		expect(filterCards(deckCards, { ...all, deck: "面试题" }).map((c) => c.id)).toEqual(["x3"]);
 	});
 
@@ -331,7 +345,10 @@ describe("filterCards + paginate（㊲ 卡片筛选分页；卡组批扩四维�
 			card({ id: "y2", tags: ["英语"] }),
 			card({ id: "y3", tags: [] }),
 		];
-		expect(filterCards(tagCards, { ...all, tag: "英语" }).map((c) => c.id)).toEqual(["y1", "y2"]);
+		expect(filterCards(tagCards, { ...all, tag: "英语" }).map((c) => c.id)).toEqual([
+			"y1",
+			"y2",
+		]);
 		expect(filterCards(tagCards, { ...all, tag: "词汇" }).map((c) => c.id)).toEqual(["y1"]);
 	});
 
@@ -341,8 +358,12 @@ describe("filterCards + paginate（㊲ 卡片筛选分页；卡组批扩四维�
 			card({ id: "c2", color: "teal" }), // 旧色相存量卡可筛
 			card({ id: "c3", color: null }),
 		];
-		expect(filterCards(colorCards, { ...all, color: "yellow" }).map((c) => c.id)).toEqual(["c1"]);
-		expect(filterCards(colorCards, { ...all, color: UNSET_COLOR }).map((c) => c.id)).toEqual(["c3"]);
+		expect(filterCards(colorCards, { ...all, color: "yellow" }).map((c) => c.id)).toEqual([
+			"c1",
+		]);
+		expect(filterCards(colorCards, { ...all, color: UNSET_COLOR }).map((c) => c.id)).toEqual([
+			"c3",
+		]);
 		expect(distinctColors(colorCards)).toEqual(["teal", "yellow", UNSET_COLOR]);
 		// 无未设色卡时不出现哨兵选项；空输入空数组
 		expect(distinctColors([card({ color: "red" })])).toEqual(["red"]);
@@ -438,7 +459,9 @@ describe("cardPreview 卡片预览文本（㶈 与主页列表/预览弹窗共�
 	});
 
 	it("㊺ 标题最高优先（trim）；空白标题让位于批注", () => {
-		expect(cardPreview(card({ title: "  标题 ", note: "问题", excerptText: "原文" }))).toBe("标题");
+		expect(cardPreview(card({ title: "  标题 ", note: "问题", excerptText: "原文" }))).toBe(
+			"标题",
+		);
 		expect(cardPreview(card({ title: "   ", note: "问题", excerptText: "原文" }))).toBe("问题");
 	});
 });
@@ -452,7 +475,10 @@ describe("cardPreviewBlocks 正文块拆分（85-D 批注/摘录独立展示位�
 	});
 
 	it("只有 OCR 文字（无标题无批注）：不另列（cardPreview 已用它当标题）", () => {
-		expect(cardPreviewBlocks(card({ excerptText: "E" }))).toEqual({ note: null, excerpt: null });
+		expect(cardPreviewBlocks(card({ excerptText: "E" }))).toEqual({
+			note: null,
+			excerpt: null,
+		});
 	});
 
 	it("只有批注：批注不另列（已当标题），摘录无", () => {
@@ -484,7 +510,10 @@ describe("cardPreviewBlocks 正文块拆分（85-D 批注/摘录独立展示位�
 	});
 
 	it("全空（纯媒体卡）：两块皆无", () => {
-		expect(cardPreviewBlocks(card({ excerptText: null }))).toEqual({ note: null, excerpt: null });
+		expect(cardPreviewBlocks(card({ excerptText: null }))).toEqual({
+			note: null,
+			excerpt: null,
+		});
 	});
 
 	it("空白字段按空处理（trim 边界：不计入块也不吸收标题序）", () => {
@@ -562,9 +591,9 @@ describe("allKnownDecks（76 设卡组选择器 items 源）", () => {
 
 describe("cardRowSummary（卡片行摘要第二行，91 批）", () => {
 	it("title+note+excerpt：摘要取批注（与 cardPreview 优先链同序）", () => {
-		expect(cardRowSummary(card({ title: "T", note: "批注内容", excerptText: "摘录原文" }))).toBe(
-			"批注内容",
-		);
+		expect(
+			cardRowSummary(card({ title: "T", note: "批注内容", excerptText: "摘录原文" })),
+		).toBe("批注内容");
 	});
 
 	it("title+excerpt（OCR 卡）：摘要取摘录文字", () => {
@@ -585,7 +614,9 @@ describe("cardRowSummary（卡片行摘要第二行，91 批）", () => {
 
 	it("全空媒体卡（无文字字段）：返回 null", () => {
 		expect(
-			cardRowSummary(card({ excerptType: "photo", excerptText: null, note: null, title: null })),
+			cardRowSummary(
+				card({ excerptType: "photo", excerptText: null, note: null, title: null }),
+			),
 		).toBeNull();
 	});
 });

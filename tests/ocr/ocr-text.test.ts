@@ -103,7 +103,11 @@ describe("整页行级解析 ocrLinesFromBlocks（83）", () => {
 
 	it("正常结构：逐行归一化矩形 + 文本清洗，空行丢弃，阅读序保持", () => {
 		const lines = ocrLinesFromBlocks(blocks, 2200, 3100);
-		expect(lines.map((l) => l.text)).toEqual(["第一章 导论", "这是正文的第一行", "第二章 方法"]);
+		expect(lines.map((l) => l.text)).toEqual([
+			"第一章 导论",
+			"这是正文的第一行",
+			"第二章 方法",
+		]);
 		// 归一化矩形逐字段近似比较（浮点除法/减法顺序不保证逐位一致）
 		expect(lines[0].rect.x).toBeCloseTo(100 / 2200);
 		expect(lines[0].rect.y).toBeCloseTo(200 / 3100);
@@ -138,7 +142,13 @@ describe("整页行级解析 ocrLinesFromBlocks（83）", () => {
 		expect(ocrLinesFromBlocks([{}], 2200, 3100)).toEqual([]);
 		expect(ocrLinesFromBlocks([{ paragraphs: [{}] }], 2200, 3100)).toEqual([]);
 		const badBbox = ocrLinesFromBlocks(
-			[{ paragraphs: [{ lines: [{ text: "坏框", bbox: { x0: "a", y0: 0, x1: 1, y1: 1 } }] }] }],
+			[
+				{
+					paragraphs: [
+						{ lines: [{ text: "坏框", bbox: { x0: "a", y0: 0, x1: 1, y1: 1 } }] },
+					],
+				},
+			],
 			2200,
 			3100,
 		);
@@ -149,7 +159,17 @@ describe("整页行级解析 ocrLinesFromBlocks（83）", () => {
 
 	it("行文本含换行时折叠为空格（保证一行 = 一段文本 = 一个矩形）", () => {
 		const folded = ocrLinesFromBlocks(
-			[{ paragraphs: [{ lines: [{ text: "上半\n下半", bbox: { x0: 0, y0: 0, x1: 100, y1: 40 } }] }] }],
+			[
+				{
+					paragraphs: [
+						{
+							lines: [
+								{ text: "上半\n下半", bbox: { x0: 0, y0: 0, x1: 100, y1: 40 } },
+							],
+						},
+					],
+				},
+			],
 			2200,
 			3100,
 		);

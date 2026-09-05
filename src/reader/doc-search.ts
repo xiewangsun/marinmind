@@ -99,9 +99,7 @@ function occurrences(text: string, q: string): number[] {
 export function buildSnippet(text: string, start: number, hitLength: number, radius = 24): string {
 	const from = Math.max(0, start - radius);
 	const to = Math.min(text.length, start + hitLength + radius);
-	return (
-		(from > 0 ? "…" : "") + text.slice(from, to) + (to < text.length ? "…" : "")
-	);
+	return (from > 0 ? "…" : "") + text.slice(from, to) + (to < text.length ? "…" : "");
 }
 
 /** HTML 转义（91 批高亮拼装用）：匹配在原文上做，分段转义防查询词含 &/引号被转义后错位 */

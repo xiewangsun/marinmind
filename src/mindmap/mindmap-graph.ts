@@ -145,7 +145,10 @@ export function suggestChildPosition(
 		case "tree-left":
 			return { x: parent.x - NODE_WIDTH - GAP_X, y: nextY };
 		case "tree-down":
-			return { x: parent.x + siblings.length * (NODE_WIDTH + GAP_X), y: parent.y + NODE_HEIGHT_EST + 2 * GAP_Y };
+			return {
+				x: parent.x + siblings.length * (NODE_WIDTH + GAP_X),
+				y: parent.y + NODE_HEIGHT_EST + 2 * GAP_Y,
+			};
 		default:
 			return { x: parent.x + NODE_WIDTH + GAP_X, y: nextY };
 	}
@@ -156,9 +159,7 @@ export function suggestChildPosition(
  * ㊺ 起收可选 h（视图实测高度）——三栏节点实际高度普遍大于估值 72，
  * 只看根 y 顶点会把新根排进矮估的上一根身位里
  */
-export function suggestRootPosition(
-	existingRoots: { x: number; y: number; h?: number }[],
-): {
+export function suggestRootPosition(existingRoots: { x: number; y: number; h?: number }[]): {
 	x: number;
 	y: number;
 } {
@@ -451,10 +452,7 @@ export function autoCollectPlacement(
 	const group =
 		card.documentId == null
 			? undefined
-			: nodes.find(
-					(n) =>
-						n.card.documentId === card.documentId && n.card.page == null,
-				);
+			: nodes.find((n) => n.card.documentId === card.documentId && n.card.page == null);
 	if (group) {
 		// 已有分组：挂其下，与既有兄弟顺延（方向随分组生效样式）
 		const siblings = nodes.filter((n) => n.parentId === group.id);
@@ -624,11 +622,7 @@ export type NavigateDir = "parent" | "firstChild" | "prevSibling" | "nextSibling
  * parent：根返回 null；firstChild：折叠中的节点视为无子、子按 compareSiblings 序取首；
  * prev/nextSibling：同级列表含根集合——多根之间互通（根集视为兄弟）。
  */
-export function navigateTree(
-	nodes: GraphNode[],
-	fromId: string,
-	dir: NavigateDir,
-): string | null {
+export function navigateTree(nodes: GraphNode[], fromId: string, dir: NavigateDir): string | null {
 	const from = nodes.find((n) => n.id === fromId);
 	if (!from) {
 		return null;
@@ -899,10 +893,7 @@ export function subtreeIds(nodes: GraphNode[], rootId: string): string[] {
 }
 
 /** subtreeIds 的内部形态（调用方已持有 childrenMap 时免重复构建） */
-function subtreeIdsFromMap(
-	childrenMap: Map<string | null, GraphNode[]>,
-	rootId: string,
-): string[] {
+function subtreeIdsFromMap(childrenMap: Map<string | null, GraphNode[]>, rootId: string): string[] {
 	const out: string[] = [];
 	const visited = new Set<string>([rootId]);
 	const walk = (id: string): void => {
@@ -1056,10 +1047,7 @@ export function fitViewportTransform(
 	// 可用区域（留边后），下限 1 防除零
 	const availW = Math.max(viewport.width - padding * 2, 1);
 	const availH = Math.max(viewport.height - padding * 2, 1);
-	const scale = Math.min(
-		MAX_SCALE,
-		Math.max(MIN_SCALE, Math.min(1, availW / w, availH / h)),
-	);
+	const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.min(1, availW / w, availH / h)));
 	const tx = (viewport.width - w * scale) / 2 - bbox.minX * scale;
 	const ty = (viewport.height - h * scale) / 2 - bbox.minY * scale;
 	return { tx, ty, scale };

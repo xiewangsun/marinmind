@@ -84,12 +84,8 @@ export class DocumentRepository {
 			...current,
 			...(patch.title !== undefined ? { title: patch.title } : {}),
 			...(patch.category !== undefined ? { category: patch.category } : {}),
-			...(patch.collectMapId !== undefined
-				? { collectMapId: patch.collectMapId }
-				: {}),
-			...(patch.autoFlashcard !== undefined
-				? { autoFlashcard: patch.autoFlashcard }
-				: {}),
+			...(patch.collectMapId !== undefined ? { collectMapId: patch.collectMapId } : {}),
+			...(patch.autoFlashcard !== undefined ? { autoFlashcard: patch.autoFlashcard } : {}),
 			...(patch.lastPage !== undefined ? { lastPage: patch.lastPage } : {}),
 			updatedAt: metaOnly ? now() : current.updatedAt,
 		};
@@ -126,10 +122,7 @@ export class DocumentRepository {
 	list(): BookDocument[] {
 		return [...this.store.books.values()]
 			.map((b) => b.doc)
-			.sort(
-				(a, b) =>
-					b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1),
-			);
+			.sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1));
 	}
 
 	count(): number {

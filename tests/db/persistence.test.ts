@@ -111,8 +111,20 @@ describe("Markdown 存储持久化（㉚）", () => {
 		const cards = new CardRepository(store1);
 		const mindmaps = new MindmapRepository(store1);
 		const doc = documents.upsertByPath("books/g.pdf", "图论");
-		const c1 = cards.create({ documentId: doc.id, page: 1, rects: [], excerptType: "text", excerptText: "根" });
-		const c2 = cards.create({ documentId: doc.id, page: 2, rects: [], excerptType: "text", excerptText: "子" });
+		const c1 = cards.create({
+			documentId: doc.id,
+			page: 1,
+			rects: [],
+			excerptType: "text",
+			excerptText: "根",
+		});
+		const c2 = cards.create({
+			documentId: doc.id,
+			page: 2,
+			rects: [],
+			excerptType: "text",
+			excerptText: "子",
+		});
 		const map = mindmaps.create("学习图");
 		const n1 = mindmaps.addNode(map.id, c1.id, null, 0, 0)!;
 		mindmaps.addNode(map.id, c2.id, n1.id, 300, 40);
@@ -140,8 +152,20 @@ describe("Markdown 存储持久化（㉚）", () => {
 		const cards = new CardRepository(store);
 		const docA = documents.upsertByPath("books/a.pdf", "书A");
 		const docB = documents.upsertByPath("books/b.pdf", "书B");
-		cards.create({ documentId: docA.id, page: 1, rects: [], excerptType: "text", excerptText: "a" });
-		cards.create({ documentId: docB.id, page: 1, rects: [], excerptType: "text", excerptText: "b" });
+		cards.create({
+			documentId: docA.id,
+			page: 1,
+			rects: [],
+			excerptType: "text",
+			excerptText: "a",
+		});
+		cards.create({
+			documentId: docB.id,
+			page: 1,
+			rects: [],
+			excerptType: "text",
+			excerptText: "b",
+		});
 		await store.flush();
 		const writesB = adapter.writeCounts.get("书B.md");
 

@@ -9,7 +9,6 @@ import {
 	captureMapState,
 	MindmapUndoStack,
 	UNDO_STACK_LIMIT,
-	type MapSnapshot,
 	type UndoEntry,
 } from "../../src/mindmap/undo-stack";
 import type { MindmapNodeWithCard } from "../../src/types";
@@ -116,8 +115,22 @@ describe("undo-stack 真 repo 集成（capture/diff/重放）", () => {
 		expect(entry.nodes.size).toBe(1);
 		expect(entry.nodes.has(child.id)).toBe(true);
 		expect(entry.nodes.get(child.id)).toEqual({
-			before: { x: 200, y: 0, parentId: root.id, order: 0, collapsed: false, branchStyle: null },
-			after: { x: 500, y: 300, parentId: root.id, order: 0, collapsed: false, branchStyle: null },
+			before: {
+				x: 200,
+				y: 0,
+				parentId: root.id,
+				order: 0,
+				collapsed: false,
+				branchStyle: null,
+			},
+			after: {
+				x: 500,
+				y: 300,
+				parentId: root.id,
+				order: 0,
+				collapsed: false,
+				branchStyle: null,
+			},
 		});
 		expect(entry.nodes.has(other.id)).toBe(false); // 未变节点不进 diff
 	});

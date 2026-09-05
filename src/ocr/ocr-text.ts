@@ -99,11 +99,7 @@ export type OcrPsm = "3" | "6" | "7" | "8" | "11";
  * - 像素宽高均 < 100 → "8"（小方块 = 单词/标题级）；
  * - 其余 → "6"（普通段落块——比默认 "3" 少一层版面切分，小区域更稳）。
  */
-export function pickOcrPsm(
-	rect: DocRect,
-	pagePixelW: number,
-	pagePixelH: number,
-): OcrPsm {
+export function pickOcrPsm(rect: DocRect, pagePixelW: number, pagePixelH: number): OcrPsm {
 	if (!(pagePixelW > 0) || !(pagePixelH > 0)) {
 		return "6"; // 画布尺寸异常（0/负/NaN）时退保守单块
 	}
@@ -135,11 +131,7 @@ export interface OcrLine {
  * - 行序即 tesseract 版面阅读序，不重排；
  * - 结构异常（非数组/缺字段/画布尺寸非正）一律返回 []（宁拒不赌）。
  */
-export function ocrLinesFromBlocks(
-	blocks: unknown,
-	canvasW: number,
-	canvasH: number,
-): OcrLine[] {
+export function ocrLinesFromBlocks(blocks: unknown, canvasW: number, canvasH: number): OcrLine[] {
 	if (!Array.isArray(blocks) || !(canvasW > 0) || !(canvasH > 0)) {
 		return [];
 	}
@@ -162,7 +154,8 @@ export function ocrLinesFromBlocks(
 				if (!text) {
 					continue;
 				}
-				const b = raw?.bbox as { x0?: unknown; y0?: unknown; x1?: unknown; y1?: unknown } | undefined;
+				const b = raw?.bbox as
+					{ x0?: unknown; y0?: unknown; x1?: unknown; y1?: unknown } | undefined;
 				const x0 = Number(b?.x0);
 				const y0 = Number(b?.y0);
 				const x1 = Number(b?.x1);

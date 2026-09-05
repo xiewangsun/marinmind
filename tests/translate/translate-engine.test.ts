@@ -13,7 +13,6 @@ import {
 	isTranslateEngineId,
 	isTranslateLangCode,
 	parseGoogleResponse,
-	parseYoudaoResponse,
 	resolveEngineCall,
 	translateLangLabel,
 	translationAnchor,

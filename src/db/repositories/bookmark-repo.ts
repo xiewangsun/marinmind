@@ -9,10 +9,7 @@ export class BookmarkRepository {
 	/** 某文档的全部书签（按页码升序，同页按创建时间） */
 	listByDocument(documentId: string): DocumentBookmark[] {
 		return [...(this.store.books.get(documentId)?.bookmarks.values() ?? [])].sort(
-			(a, b) =>
-				a.page - b.page ||
-				a.createdAt - b.createdAt ||
-				(a.id < b.id ? -1 : 1),
+			(a, b) => a.page - b.page || a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1),
 		);
 	}
 

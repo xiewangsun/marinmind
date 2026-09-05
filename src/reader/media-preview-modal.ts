@@ -137,26 +137,27 @@ export class MediaPreviewModal extends Modal {
 		// 84-B 重录（仅 audio 卡且宿主接线了 onRerecord——reader 内删旧建新，
 		// home/复习等外部位不接线则不显示）
 		if (this.card.excerptType === "audio" && this.hooks.onRerecord) {
-			new ButtonComponent(actions).setButtonText("重录").setWarning().onClick(() => {
-				new ConfirmModal(
-					this.app,
-					"重录语音",
-					"删除当前语音并立即开始新录音？（旧卡的标题/批注/复习进度不会保留）",
-					() => {
-						this.hooks.onRerecord?.(this.card);
-					},
-				).open();
-			});
+			new ButtonComponent(actions)
+				.setButtonText("重录")
+				.setWarning()
+				.onClick(() => {
+					new ConfirmModal(
+						this.app,
+						"重录语音",
+						"删除当前语音并立即开始新录音？（旧卡的标题/批注/复习进度不会保留）",
+						() => {
+							this.hooks.onRerecord?.(this.card);
+						},
+					).open();
+				});
 		}
 		// 84-D 照片定位（仅 photo 卡且宿主接线了 onRelocate——reader 进重定位模式；
 		// home/复习等外部位不接线则不显示）；已定位可取消（rects 清空回徽标锚定）
 		if (this.card.excerptType === "photo" && this.hooks.onRelocate) {
-			new ButtonComponent(actions)
-				.setButtonText("定位到页面…")
-				.onClick(() => {
-					this.close();
-					this.hooks.onRelocate?.(this.card);
-				});
+			new ButtonComponent(actions).setButtonText("定位到页面…").onClick(() => {
+				this.close();
+				this.hooks.onRelocate?.(this.card);
+			});
 			if (this.card.rects.length > 0) {
 				new ButtonComponent(actions).setButtonText("取消定位").onClick(() => {
 					this.plugin.cards.update(this.card.id, { rects: [] });
@@ -164,10 +165,13 @@ export class MediaPreviewModal extends Modal {
 				});
 			}
 		}
-		new ButtonComponent(actions).setButtonText("删除卡片").setWarning().onClick(() => {
-			this.hooks.onDelete(this.card);
-			this.close();
-		});
+		new ButtonComponent(actions)
+			.setButtonText("删除卡片")
+			.setWarning()
+			.onClick(() => {
+				this.hooks.onDelete(this.card);
+				this.close();
+			});
 	}
 
 	private renderNote(): void {

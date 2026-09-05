@@ -56,12 +56,7 @@ export function normRectToPercent(rect: DocRect): {
 }
 
 /** 拖拽结果是否过小（按显示像素阈值判定误触，丢弃不生成卡片） */
-export function isTinyNormRect(
-	rect: DocRect,
-	pageW: number,
-	pageH: number,
-	minPx = 6,
-): boolean {
+export function isTinyNormRect(rect: DocRect, pageW: number, pageH: number, minPx = 6): boolean {
 	return rect.w * pageW < minPx || rect.h * pageH < minPx;
 }
 
@@ -177,8 +172,12 @@ export function occlusionBounds(card: {
 		return {
 			x: Math.min(...card.rects.map((r) => r.x)),
 			y: Math.min(...card.rects.map((r) => r.y)),
-			w: Math.max(...card.rects.map((r) => r.x + r.w)) - Math.min(...card.rects.map((r) => r.x)),
-			h: Math.max(...card.rects.map((r) => r.y + r.h)) - Math.min(...card.rects.map((r) => r.y)),
+			w:
+				Math.max(...card.rects.map((r) => r.x + r.w)) -
+				Math.min(...card.rects.map((r) => r.x)),
+			h:
+				Math.max(...card.rects.map((r) => r.y + r.h)) -
+				Math.min(...card.rects.map((r) => r.y)),
 		};
 	}
 	return excerptCropRect(card.rects);
@@ -190,10 +189,10 @@ export function occlusionBounds(card: {
  * area/lasso/handwriting 快照图按 rects 并集包围盒取比；photo 的 rects 是
  * 页上展示框非图像几何（图像恒整图，见 occlusionBounds），无锚可取回退 4:3。
  */
-export function snapshotImgSize(card: {
-	rects: DocRect[];
-	excerptType?: string;
-}): { width: number; height: number } {
+export function snapshotImgSize(card: { rects: DocRect[]; excerptType?: string }): {
+	width: number;
+	height: number;
+} {
 	if (card.excerptType !== "photo" && card.rects.length > 0) {
 		const w =
 			Math.max(...card.rects.map((r) => r.x + r.w)) - Math.min(...card.rects.map((r) => r.x));
@@ -235,7 +234,10 @@ export function planSelectionToolbarPosition(input: ToolbarPlanInput): {
 	const minLeft = c.left + 4;
 	const maxLeft = c.left + c.width - input.toolbarWidth - 4;
 	// 容器比工具栏还窄（极端窗格）：钳制次序反转时取 minLeft 保左对齐不溢出右缘
-	const left = Math.min(Math.max(centerX - input.toolbarWidth / 2, minLeft), Math.max(minLeft, maxLeft));
+	const left = Math.min(
+		Math.max(centerX - input.toolbarWidth / 2, minLeft),
+		Math.max(minLeft, maxLeft),
+	);
 	// 垂直：上方优先（选区顶 − 工具栏高 − 间距），容器顶放不下回退选区下方
 	const aboveTop = input.anchor.top - input.toolbarHeight - margin;
 	const belowTop = input.anchor.bottom + margin;

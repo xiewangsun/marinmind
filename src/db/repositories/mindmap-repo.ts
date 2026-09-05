@@ -1,6 +1,5 @@
 import type { MarinMindStore, MapState } from "../../store/marinmind-store";
 import type { BranchStyle, Mindmap, MindmapNode, MindmapNodeWithCard } from "../../types";
-import { isBranchStyle } from "../../types";
 import { subtreeIds } from "../../mindmap/mindmap-graph";
 import { newId, now } from "../../utils";
 
@@ -235,11 +234,7 @@ export class MindmapRepository {
 	 * order（㉜）：插入到新父下的兄弟序——inside 挂子传末位、before/after 插同级传
 	 * insertOrder 计算的中点；缺省保留原序号（普通改父不重排）。
 	 */
-	setParent(
-		nodeId: string,
-		parentId: string | null,
-		order?: number,
-	): MindmapNode | undefined {
+	setParent(nodeId: string, parentId: string | null, order?: number): MindmapNode | undefined {
 		const node = this.getNode(nodeId);
 		if (!node) {
 			return undefined;

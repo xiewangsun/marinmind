@@ -1,6 +1,9 @@
 import { Menu, setIcon } from "obsidian";
 import type { DocRect, LineStyle } from "../types";
 import { LINE_STYLES, LINE_STYLE_LABELS } from "../types";
+import type { AiMenuAction } from "../ai/ai-prompts";
+import { SELECTION_ACTION_LABELS } from "../ai/ai-prompts";
+import type { AiCustomPrompt } from "../ai/ai-provider";
 import { HIGHLIGHT_COLORS, LINE_STYLE_ICONS, type HighlightColorValue } from "./highlight-colors";
 import { planSelectionToolbarPosition } from "./rect-utils";
 
@@ -24,6 +27,10 @@ export interface SelectionToolbarActions {
 	/** 线型菜单选择（77）：写设置持久化 + Notice；不建卡不收起（后续色点/摘录用新线型） */
 	onPickLineStyle(style: LineStyle): void;
 	onTranslate(snap: SelectionSnapshot): void;
+	/** AI 菜单选择（97）：终态动作（弹窗承接），选区使命完成走 runAction 收尾 */
+	onAiAction(snap: SelectionSnapshot, action: AiMenuAction): void;
+	/** AI 制卡（99）：终态动作（预览弹窗承接），走 runAction 收尾 */
+	onAiCardgen(snap: SelectionSnapshot): void;
 	onCopy(text: string): void;
 	onBookmark(snap: SelectionSnapshot): void;
 	onSearch(text: string): void;
@@ -34,18 +41,22 @@ export interface SelectionToolbarOptions {
 	showBookmark: boolean;
 	/** 读当前线型（77）：菜单打开/刷新 title 时刻取值（镜像 onExcerpt 缺省色的「取值新鲜」模式） */
 	currentLineStyle: () => LineStyle;
+	/** 读自定义 AI 指令（97）：菜单打开时刻取值（设置弹窗里增删即时反映） */
+	customAiPrompts: () => AiCustomPrompt[];
 	actions: SelectionToolbarActions;
 }
 
 /**
  * 划选文字浮动工具栏（75，微信读书式）：text 工具划选松开后浮出——
- * 四色点一键摘录 + 摘录/线型（77 三选菜单）/翻译/复制/书签/搜索。
+ * 四色点一键摘录 + 摘录/线型（77 三选菜单）/翻译/AI 操作（97 菜单）/
+ * 复制/书签/搜索。
  * obsidian/DOM 耦合不单测（镜像 md-document 分层先例）；定位纯函数
  * planSelectionToolbarPosition 在 rect-utils（vitest 覆盖）。
  */
 export class SelectionToolbar {
 	private readonly host: HTMLElement;
 	private readonly currentLineStyle: () => LineStyle;
+	private readonly customAiPrompts: () => AiCustomPrompt[];
 	private readonly actions: SelectionToolbarActions;
 	private readonly el: HTMLElement;
 	private readonly lineBtn: HTMLElement;
@@ -60,6 +71,7 @@ export class SelectionToolbar {
 	constructor(host: HTMLElement, opts: SelectionToolbarOptions) {
 		this.host = host;
 		this.currentLineStyle = opts.currentLineStyle;
+		this.customAiPrompts = opts.customAiPrompts;
 		this.actions = opts.actions;
 		// 默认 visibility 隐藏（非 display:none）：offsetWidth/Height 可测 + 免费淡入
 		this.el = host.createDiv({ cls: "marinmind-selection-toolbar" });
@@ -106,6 +118,57 @@ export class SelectionToolbar {
 		this.addButton("languages", "翻译", () =>
 			this.runAction((snap) => this.actions.onTranslate(snap)),
 		);
+		// AI 钮（97）：弹操作菜单（解释/总结/改写 + 自定义指令）；菜单项是终态
+		// 动作（结果弹窗承接）——点击走 runAction（hide + 清选区）。菜单打开
+		// 时刻读自定义指令（取值新鲜，设置增删即时反映）
+		const aiBtn = this.el.createEl("button", { cls: "marinmind-selection-btn" });
+		setIcon(aiBtn, "sparkles");
+		aiBtn.setAttribute("aria-label", "AI 操作");
+		aiBtn.title = "AI 操作";
+		aiBtn.addEventListener("click", (evt) => {
+			const menu = new Menu();
+			for (const [kind, label] of Object.entries(SELECTION_ACTION_LABELS) as [
+				keyof typeof SELECTION_ACTION_LABELS,
+				string,
+			][]) {
+				menu.addItem((item) =>
+					item
+						.setTitle(label)
+						.setIcon("sparkles")
+						.onClick(() =>
+							this.runAction((snap) => this.actions.onAiAction(snap, { kind })),
+						),
+				);
+			}
+			// AI 制卡（99）：划选材料 → QA/填空卡预览（终态动作，同走 runAction）
+			menu.addItem((item) =>
+				item
+					.setTitle("AI 制卡…")
+					.setIcon("list-checks")
+					.onClick(() => this.runAction((snap) => this.actions.onAiCardgen(snap))),
+			);
+			const customs = this.customAiPrompts();
+			if (customs.length > 0) {
+				menu.addSeparator();
+				for (const custom of customs) {
+					menu.addItem((item) =>
+						item
+							.setTitle(custom.label)
+							.setIcon("wand")
+							.onClick(() =>
+								this.runAction((snap) =>
+									this.actions.onAiAction(snap, {
+										kind: "custom",
+										label: custom.label,
+										prompt: custom.prompt,
+									}),
+								),
+							),
+					);
+				}
+			}
+			menu.showAtMouseEvent(evt);
+		});
 		this.addButton("copy", "复制", () =>
 			this.runAction((snap) => this.actions.onCopy(snap.text)),
 		);

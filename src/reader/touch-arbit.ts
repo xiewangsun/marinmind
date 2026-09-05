@@ -51,8 +51,7 @@ export class TouchHoldArbiter {
 	) {
 		this.holdMs = opts.holdMs ?? 500;
 		this.tolerance = opts.moveTolerance ?? 10;
-		this.schedule =
-			opts.schedule ?? ((fn, ms) => globalThis.setTimeout(fn, ms));
+		this.schedule = opts.schedule ?? ((fn, ms) => globalThis.setTimeout(fn, ms));
 		this.clearTimer = opts.clear ?? ((h) => globalThis.clearTimeout(h as number));
 	}
 

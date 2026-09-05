@@ -46,7 +46,10 @@ export class TranslateModal extends Modal {
 	private saveButton: ButtonComponent | null = null;
 	private copyButton!: ButtonComponent;
 
-	constructor(app: App, private readonly opts: TranslateModalOptions) {
+	constructor(
+		app: App,
+		private readonly opts: TranslateModalOptions,
+	) {
 		super(app);
 		this.target = isTranslateLangCode(opts.target) ? opts.target : DEFAULT_TRANSLATE_TARGET;
 	}

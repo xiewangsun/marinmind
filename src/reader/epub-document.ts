@@ -271,11 +271,7 @@ function groupTocNode(title: string, children: EpubTocNode[]): EpubTocNode {
 }
 
 /** EPUB3 nav：ol > li > (a|span) + 嵌套 ol 递归 */
-function parseNavOl(
-	ol: XmlElement,
-	navFile: string,
-	idx: Map<string, number>,
-): EpubTocNode[] {
+function parseNavOl(ol: XmlElement, navFile: string, idx: Map<string, number>): EpubTocNode[] {
 	const out: EpubTocNode[] = [];
 	for (const li of childElements(ol, "li")) {
 		// li 的直接子 a（深搜会误取嵌套子 li 的 a）
@@ -386,10 +382,7 @@ function makeEntryReader(bytes: Uint8Array): (path: string) => Uint8Array | null
  * 全量解压字节也不再常驻内存（只留压缩原文 + ≤64MB 解压缓存）。
  */
 export function parseEpub(bytes: Uint8Array): EpubBook {
-	const metaPass = unzipEntries(bytes, [
-		"META-INF/container.xml",
-		"META-INF/encryption.xml",
-	]);
+	const metaPass = unzipEntries(bytes, ["META-INF/container.xml", "META-INF/encryption.xml"]);
 	if (metaPass["META-INF/encryption.xml"] !== undefined) {
 		throw new Error("该 EPUB 含加密内容（DRM 或字体混淆），暂不支持");
 	}
@@ -459,9 +452,7 @@ export function entryText(book: EpubBook, path: string): string | null {
  * （container.xml → OPF → 仅封面条目三趟），不整包解压。任何失败归 null
  * （封面是增强不是依赖，契约永不抛）。
  */
-export function epubCoverBytes(
-	bytes: Uint8Array,
-): { href: string; bytes: Uint8Array } | null {
+export function epubCoverBytes(bytes: Uint8Array): { href: string; bytes: Uint8Array } | null {
 	try {
 		const containerPass = unzipSync(bytes, {
 			filter: (f) => f.name === "META-INF/container.xml",
@@ -527,7 +518,11 @@ export function epubChapterTitleOf(book: EpubBook, spineIndexZeroBased: number):
 	const walk = (nodes: readonly EpubTocNode[]): void => {
 		for (const n of nodes) {
 			// 文档序靠后者更具体（同章小节覆盖章名）；> 判定放宽为 >= 保证平级后者胜出
-			if (n.spineIndex >= 0 && n.spineIndex <= spineIndexZeroBased && n.spineIndex >= bestIdx) {
+			if (
+				n.spineIndex >= 0 &&
+				n.spineIndex <= spineIndexZeroBased &&
+				n.spineIndex >= bestIdx
+			) {
 				bestIdx = n.spineIndex;
 				bestTitle = n.title;
 			}

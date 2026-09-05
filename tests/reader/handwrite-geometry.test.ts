@@ -12,8 +12,18 @@ describe("手写几何 strokesBBox", () => {
 	it("取全部笔迹点的 min/max 并外加 padding", () => {
 		const bbox = strokesBBox(
 			[
-				{ points: [{ x: 0.2, y: 0.3 }, { x: 0.4, y: 0.3 }] },
-				{ points: [{ x: 0.3, y: 0.2 }, { x: 0.3, y: 0.5 }] },
+				{
+					points: [
+						{ x: 0.2, y: 0.3 },
+						{ x: 0.4, y: 0.3 },
+					],
+				},
+				{
+					points: [
+						{ x: 0.3, y: 0.2 },
+						{ x: 0.3, y: 0.5 },
+					],
+				},
 			],
 			0.01,
 			0.02,
@@ -26,7 +36,18 @@ describe("手写几何 strokesBBox", () => {
 	});
 
 	it("结果 clamp 到 [0,1]：贴边笔迹不越界", () => {
-		const bbox = strokesBBox([{ points: [{ x: 0, y: 0 }, { x: 1, y: 1 }] }], 0.05, 0.05);
+		const bbox = strokesBBox(
+			[
+				{
+					points: [
+						{ x: 0, y: 0 },
+						{ x: 1, y: 1 },
+					],
+				},
+			],
+			0.05,
+			0.05,
+		);
 		expect(bbox).toEqual({ x: 0, y: 0, w: 1, h: 1 });
 	});
 
@@ -60,7 +81,10 @@ describe("手写导出 pngPixelSize", () => {
 	});
 
 	it("极小 bbox 至少 1×1 像素", () => {
-		const size = pngPixelSize({ x: 0.5, y: 0.5, w: 0.0001, h: 0.0001 }, { width: 600, height: 800 });
+		const size = pngPixelSize(
+			{ x: 0.5, y: 0.5, w: 0.0001, h: 0.0001 },
+			{ width: 600, height: 800 },
+		);
 		expect(size.width).toBeGreaterThanOrEqual(1);
 		expect(size.height).toBeGreaterThanOrEqual(1);
 	});
@@ -92,8 +116,18 @@ describe("84-A 橡皮擦命中 eraseHitStrokeIndices", () => {
 	const pageW = 800;
 	const pageH = 600;
 	const strokes = [
-		{ points: [{ x: 0.1, y: 0.5 }, { x: 0.3, y: 0.5 }] }, // 水平笔画（像素 y=300）
-		{ points: [{ x: 0.5, y: 0.2 }, { x: 0.5, y: 0.8 }] }, // 垂直笔画（像素 x=400）
+		{
+			points: [
+				{ x: 0.1, y: 0.5 },
+				{ x: 0.3, y: 0.5 },
+			],
+		}, // 水平笔画（像素 y=300）
+		{
+			points: [
+				{ x: 0.5, y: 0.2 },
+				{ x: 0.5, y: 0.8 },
+			],
+		}, // 垂直笔画（像素 x=400）
 	];
 
 	it("点在线段上命中（距离 0 ≤ 半径）", () => {
@@ -105,18 +139,32 @@ describe("84-A 橡皮擦命中 eraseHitStrokeIndices", () => {
 		// x=0.35 在第一笔 (0.1..0.3) 延长线上：最近点为端点 0.3×800=240px（差 40px > 半径 12，不命中）
 		expect(eraseHitStrokeIndices(strokes, { x: 0.35, y: 0.5 }, 12, pageW, pageH)).toEqual([]);
 		// x=0.3125 → 250px，距端点 10px ≤ 12 命中
-		expect(eraseHitStrokeIndices(strokes, { x: 0.3125, y: 0.5 }, 12, pageW, pageH)).toEqual([0]);
+		expect(eraseHitStrokeIndices(strokes, { x: 0.3125, y: 0.5 }, 12, pageW, pageH)).toEqual([
+			0,
+		]);
 	});
 
 	it("半径边界：距离恰等于 radiusPx 命中", () => {
 		// 垂直笔画 x=400（0.5×800），点 x=412 → 距离 12
-		expect(eraseHitStrokeIndices(strokes, { x: 412 / 800, y: 0.5 }, 12, pageW, pageH)).toEqual([1]);
-		expect(eraseHitStrokeIndices(strokes, { x: 413 / 800, y: 0.5 }, 12, pageW, pageH)).toEqual([]);
+		expect(eraseHitStrokeIndices(strokes, { x: 412 / 800, y: 0.5 }, 12, pageW, pageH)).toEqual([
+			1,
+		]);
+		expect(eraseHitStrokeIndices(strokes, { x: 413 / 800, y: 0.5 }, 12, pageW, pageH)).toEqual(
+			[],
+		);
 	});
 
 	it("多笔画只删命中笔（互不牵连）", () => {
 		const both = eraseHitStrokeIndices(
-			[...strokes, { points: [{ x: 0.1, y: 0.5 }, { x: 0.3, y: 0.5 }] }],
+			[
+				...strokes,
+				{
+					points: [
+						{ x: 0.1, y: 0.5 },
+						{ x: 0.3, y: 0.5 },
+					],
+				},
+			],
 			{ x: 0.2, y: 0.5 },
 			12,
 			pageW,
@@ -134,9 +182,17 @@ describe("84-A 橡皮擦命中 eraseHitStrokeIndices", () => {
 	});
 
 	it("空笔画不参与命中；单点笔画按点距离判定", () => {
-		expect(eraseHitStrokeIndices([{ points: [] }], { x: 0.5, y: 0.5 }, 12, pageW, pageH)).toEqual([]);
 		expect(
-			eraseHitStrokeIndices([{ points: [{ x: 0.5, y: 0.5 }] }], { x: 0.5, y: 0.5 }, 12, pageW, pageH),
+			eraseHitStrokeIndices([{ points: [] }], { x: 0.5, y: 0.5 }, 12, pageW, pageH),
+		).toEqual([]);
+		expect(
+			eraseHitStrokeIndices(
+				[{ points: [{ x: 0.5, y: 0.5 }] }],
+				{ x: 0.5, y: 0.5 },
+				12,
+				pageW,
+				pageH,
+			),
 		).toEqual([0]);
 	});
 });

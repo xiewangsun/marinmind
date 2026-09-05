@@ -119,7 +119,11 @@ export async function exportMindmapPng(
 	}
 	const bytes = await blob.arrayBuffer();
 	const vault = plugin.app.vault;
-	const target = allocateExportPath(mapName, "png", (p) => vault.getAbstractFileByPath(p) != null);
+	const target = allocateExportPath(
+		mapName,
+		"png",
+		(p) => vault.getAbstractFileByPath(p) != null,
+	);
 	try {
 		await vault.createBinary(target, bytes);
 	} catch (err) {

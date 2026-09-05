@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-	BookDocument,
-	Card,
-	Mindmap,
-	MindmapNode,
-	ReviewState,
-} from "../../src/types";
+import type { BookDocument, Card, Mindmap, MindmapNode, ReviewState } from "../../src/types";
 import { newId } from "../../src/utils";
 import type { ListableStorageAdapter } from "../../src/storage/vault-rooted-adapter";
 import { MarinMindStore, ORPHAN_SCOPE } from "../../src/store/marinmind-store";
@@ -112,7 +106,9 @@ function map(partial: Partial<Mindmap> = {}): Mindmap {
 	};
 }
 
-function node(partial: Partial<MindmapNode> & Pick<MindmapNode, "id" | "mapId" | "cardId">): MindmapNode {
+function node(
+	partial: Partial<MindmapNode> & Pick<MindmapNode, "id" | "mapId" | "cardId">,
+): MindmapNode {
 	return {
 		parentId: null,
 		x: 0,
@@ -399,7 +395,10 @@ describe("MarinMindStore 外部修改回灌", () => {
 		// 用户手编：改文本 + 批注 + 标签
 		const edited = textOf(adapter, rel)
 			.replace("摘录内容", "磁盘版文本")
-			.replace("> [!excerpt]\n> 磁盘版文本", "> [!excerpt]\n> 磁盘版文本\n> **批注**：磁盘批注\n> #重要");
+			.replace(
+				"> [!excerpt]\n> 磁盘版文本",
+				"> [!excerpt]\n> 磁盘版文本\n> **批注**：磁盘批注\n> #重要",
+			);
 		writeText(adapter, rel, edited);
 		const r = await store.handleExternalChange(rel, edited);
 		expect(r.warnings.join()).toContain("合并");

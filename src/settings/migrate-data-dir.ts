@@ -40,7 +40,9 @@ export async function migrateDataDir(plugin: MarinMindPlugin, newDir: string): P
 	try {
 		newLoc = await resolveDataLocation(plugin.app, result.normalized);
 	} catch (err) {
-		new Notice(`MarinMind：目标目录不可用：${err instanceof Error ? err.message : String(err)}`);
+		new Notice(
+			`MarinMind：目标目录不可用：${err instanceof Error ? err.message : String(err)}`,
+		);
 		return;
 	}
 
@@ -124,9 +126,11 @@ async function performMigration(
 		);
 		if (Platform.isDesktopApp) {
 			// App 类型未公开 commands 字段，做最小形状断言（backup-service 同款先例）
-			(plugin.app as unknown as {
-				commands: { executeCommandById(id: string): unknown };
-			}).commands.executeCommandById("app:reload");
+			(
+				plugin.app as unknown as {
+					commands: { executeCommandById(id: string): unknown };
+				}
+			).commands.executeCommandById("app:reload");
 		} else {
 			// 移动端无 app:reload；不重启则旧会话可能覆盖新位置数据
 			new Notice("MarinMind：请立即重启 Obsidian，否则数据可能被旧会话覆盖！", 10000);

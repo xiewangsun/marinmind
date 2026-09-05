@@ -212,7 +212,10 @@ export async function renderStrokesToPNG(
 		for (let i = 0; i + 1 < pts.length; i++) {
 			const a = pts[i];
 			const b = pts[i + 1];
-			ctx.lineWidth = pressureWidthPx(((a.pressure ?? 0.5) + (b.pressure ?? 0.5)) / 2, baseWidth);
+			ctx.lineWidth = pressureWidthPx(
+				((a.pressure ?? 0.5) + (b.pressure ?? 0.5)) / 2,
+				baseWidth,
+			);
 			ctx.beginPath();
 			ctx.moveTo(((a.x - bbox.x) / bbox.w) * outW, ((a.y - bbox.y) / bbox.h) * outH);
 			ctx.lineTo(((b.x - bbox.x) / bbox.w) * outW, ((b.y - bbox.y) / bbox.h) * outH);

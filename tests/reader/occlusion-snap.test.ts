@@ -8,10 +8,7 @@ function line(y: number, partial: Partial<DocRect> = {}): DocRect {
 }
 
 /** 逐字段断言（h 是两浮点相减有尾差，不用 toEqual 整体比） */
-function expectRect(
-	out: DocRect,
-	want: { x: number; y: number; w: number; h: number },
-) {
+function expectRect(out: DocRect, want: { x: number; y: number; w: number; h: number }) {
 	expect(out.x).toBeCloseTo(want.x, 10);
 	expect(out.y).toBeCloseTo(want.y, 10);
 	expect(out.w).toBeCloseTo(want.w, 10);

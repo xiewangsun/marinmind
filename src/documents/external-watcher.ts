@@ -3,11 +3,7 @@ import type MarinMindPlugin from "../main";
 import { externalFileExists } from "../storage/external-file";
 import { loadModule } from "../storage/node-fs-adapter";
 import { isAbsoluteFsPath } from "../storage/paths";
-import {
-	externalBasename,
-	externalParentDir,
-	planExternalReconcile,
-} from "./external-reconcile";
+import { externalBasename, externalParentDir, planExternalReconcile } from "./external-reconcile";
 
 /** 事件防抖窗口（ms）：目录事件常成串到达（rename 触发多个事件），攒齐再对账 */
 const RECONCILE_DEBOUNCE_MS = 500;

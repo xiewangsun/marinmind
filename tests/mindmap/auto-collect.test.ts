@@ -3,7 +3,15 @@ import { MarinMindStore } from "../../src/store/marinmind-store";
 import { CardRepository } from "../../src/db/repositories/card-repo";
 import { DocumentRepository } from "../../src/db/repositories/document-repo";
 import { MindmapRepository } from "../../src/db/repositories/mindmap-repo";
-import { autoAddCard, chapterParentFor, collectTargetOf, ensureBookMindmap, fixedRootDocOf, followBookRename, linkedMapOf } from "../../src/mindmap/auto-collect";
+import {
+	autoAddCard,
+	chapterParentFor,
+	collectTargetOf,
+	ensureBookMindmap,
+	fixedRootDocOf,
+	followBookRename,
+	linkedMapOf,
+} from "../../src/mindmap/auto-collect";
 import type { Card } from "../../src/types";
 import { MemoryAdapter } from "../helpers/memory-adapter";
 
@@ -125,7 +133,9 @@ describe("摘录自动入图（㉗：书籍默认脑图 + 固定根节点）", (
 		const aCard = excerpt("A2", docA.id, 3);
 		const touched = autoAddCard({ documents, cards, mindmaps }, aCard);
 		expect(touched).toBe(mapA.id);
-		expect(mindmaps.listNodes(mapA.id).find((n) => n.cardId === aCard.id)?.parentId).toBe(pinnedNode.id);
+		expect(mindmaps.listNodes(mapA.id).find((n) => n.cardId === aCard.id)?.parentId).toBe(
+			pinnedNode.id,
+		);
 	});
 
 	it("固定根取消后：回到书籍默认脑图路径", () => {
@@ -198,10 +208,7 @@ describe("摘录目标图（㊴：打开即建同名图 + 按书切换 + 改名�
 		const mapId = ensureBookMindmap({ documents, cards, mindmaps }, doc.id);
 		const group = mindmaps.listNodes(mapId!)[0];
 
-		const touched = autoAddCard(
-			{ documents, cards, mindmaps },
-			excerpt("要点", doc.id),
-		);
+		const touched = autoAddCard({ documents, cards, mindmaps }, excerpt("要点", doc.id));
 		expect(touched).toBe(mapId);
 		const nodes = mindmaps.listNodes(mapId!);
 		expect(nodes).toHaveLength(2);
@@ -352,7 +359,9 @@ describe("固定根仅所属文档生效（80：fixedRootDocOf 推导 + 三级�
 
 		const aCard = excerpt("A2", docA.id, 2);
 		expect(autoAddCard({ documents, cards, mindmaps }, aCard)).toBe(mapA.id);
-		expect(mindmaps.listNodes(mapA.id).find((n) => n.cardId === aCard.id)!.parentId).toBe(pinned.id);
+		expect(mindmaps.listNodes(mapA.id).find((n) => n.cardId === aCard.id)!.parentId).toBe(
+			pinned.id,
+		);
 
 		// B 让位：走第 2 级自建书B图（组卡正常，不混入固定根）
 		const bCard = excerpt("B1", docB.id);
@@ -384,8 +393,12 @@ describe("固定根仅所属文档生效（80：fixedRootDocOf 推导 + 三级�
 		// 两书摘录都直挂固定根，不再建书图
 		expect(mindmaps.findByDocument(docA.id)).toBeUndefined();
 		expect(mindmaps.findByDocument(docB.id)).toBeUndefined();
-		expect(mindmaps.listNodes(topic.id).find((n) => n.cardId === aCard.id)!.parentId).toBe(pinned.id);
-		expect(mindmaps.listNodes(topic.id).find((n) => n.cardId === bCard.id)!.parentId).toBe(pinned.id);
+		expect(mindmaps.listNodes(topic.id).find((n) => n.cardId === aCard.id)!.parentId).toBe(
+			pinned.id,
+		);
+		expect(mindmaps.listNodes(topic.id).find((n) => n.cardId === bCard.id)!.parentId).toBe(
+			pinned.id,
+		);
 	});
 
 	it("钉在主题图但钉节点卡片属书A（摘录卡节点）：仅 A 收集，B 让位", () => {
@@ -397,7 +410,9 @@ describe("固定根仅所属文档生效（80：fixedRootDocOf 推导 + 三级�
 		const pinned = mindmaps.addNode(topic.id, aCard.id, null, 0, 0)!;
 		mindmaps.setFixedRoot(topic.id, pinned.id);
 
-		expect(autoAddCard({ documents, cards, mindmaps }, excerpt("A2", docA.id, 2))).toBe(topic.id);
+		expect(autoAddCard({ documents, cards, mindmaps }, excerpt("A2", docA.id, 2))).toBe(
+			topic.id,
+		);
 		expect(autoAddCard({ documents, cards, mindmaps }, excerpt("B1", docB.id))).toBe(
 			mindmaps.findByDocument(docB.id)!.id,
 		);
@@ -454,12 +469,19 @@ describe("固定根仅所属文档生效（80：fixedRootDocOf 推导 + 三级�
 		const bCard = excerpt("B1", docB.id);
 		const node = mindmaps.addNode(mapA.id, bCard.id, null, 0, 0)!;
 		mindmaps.setFixedRoot(mapA.id, node.id);
-		expect(fixedRootDocOf({ documents, cards, mindmaps }, { mapId: node.mapId, nodeId: node.id })).toBe(docA.id);
+		expect(
+			fixedRootDocOf({ documents, cards, mindmaps }, { mapId: node.mapId, nodeId: node.id }),
+		).toBe(docA.id);
 
 		// 主题图（无 documentId）钉 B 卡节点 → 回退卡片归属
 		const topic = mindmaps.create("主题图");
 		const tnode = mindmaps.addNode(topic.id, bCard.id, null, 0, 0)!;
-		expect(fixedRootDocOf({ documents, cards, mindmaps }, { mapId: tnode.mapId, nodeId: tnode.id })).toBe(docB.id);
+		expect(
+			fixedRootDocOf(
+				{ documents, cards, mindmaps },
+				{ mapId: tnode.mapId, nodeId: tnode.id },
+			),
+		).toBe(docB.id);
 
 		// 主题图钉手工卡（无 documentId）→ null（跨文档）
 		const manual = cards.create({
@@ -470,7 +492,12 @@ describe("固定根仅所属文档生效（80：fixedRootDocOf 推导 + 三级�
 			excerptText: "手工",
 		});
 		const mnode = mindmaps.addNode(topic.id, manual.id, null, 0, 0)!;
-		expect(fixedRootDocOf({ documents, cards, mindmaps }, { mapId: mnode.mapId, nodeId: mnode.id })).toBeNull();
+		expect(
+			fixedRootDocOf(
+				{ documents, cards, mindmaps },
+				{ mapId: mnode.mapId, nodeId: mnode.id },
+			),
+		).toBeNull();
 	});
 
 	it("固定根幂等：已在固定根所在图的卡重复触发返回 null", () => {
@@ -528,8 +555,20 @@ describe("PDF 目录框架归章（55：outline 回环过滤 + chapterParentFor�
 			excerptText: "《书A》",
 		});
 		const gnode = mindmaps.addNode(map.id, group.id, null, 0, 0)!;
-		const ch1Id = mindmaps.addNode(map.id, chapter("第一章", doc.id, 1).id, gnode.id, 200, 0)!.id;
-		const ch2Id = mindmaps.addNode(map.id, chapter("第二章", doc.id, 20).id, gnode.id, 400, 0)!.id;
+		const ch1Id = mindmaps.addNode(
+			map.id,
+			chapter("第一章", doc.id, 1).id,
+			gnode.id,
+			200,
+			0,
+		)!.id;
+		const ch2Id = mindmaps.addNode(
+			map.id,
+			chapter("第二章", doc.id, 20).id,
+			gnode.id,
+			400,
+			0,
+		)!.id;
 
 		// 页 5 → 第一章；页 25 → 第二章；页 0（前言）→ 组卡直挂
 		const c5 = excerpt("页5要点", doc.id, 5);
@@ -548,7 +587,19 @@ describe("PDF 目录框架归章（55：outline 回环过滤 + chapterParentFor�
 		const docA = documents.upsertByPath("books/a.pdf", "书A");
 		const docB = documents.upsertByPath("books/b.pdf", "书B");
 		const map = mindmaps.create("框架图");
-		const g = mindmaps.addNode(map.id, cards.create({ documentId: docA.id, page: null, rects: [], excerptType: "text", excerptText: "《书A》" }).id, null, 0, 0)!;
+		const g = mindmaps.addNode(
+			map.id,
+			cards.create({
+				documentId: docA.id,
+				page: null,
+				rects: [],
+				excerptType: "text",
+				excerptText: "《书A》",
+			}).id,
+			null,
+			0,
+			0,
+		)!;
 		// 两章同 page 5（损坏目录少见但可能）：命中其一即可（listNodes 同毫秒
 		// 按 id 排序不定——语义上前章节优先，但同为 page 5 时任一都正确）
 		const chA1 = mindmaps.addNode(map.id, chapter("甲一", docA.id, 5).id, g.id, 200, 0)!;
@@ -582,7 +633,9 @@ describe("PDF 目录框架归章（55：outline 回环过滤 + chapterParentFor�
 
 		const c = excerpt("页40要点", docA.id, 40);
 		expect(autoAddCard({ documents, cards, mindmaps }, c)).toBe(mapA.id);
-		expect(mindmaps.listNodes(mapA.id).find((n) => n.cardId === c.id)!.parentId).toBe(groupNode.id);
+		expect(mindmaps.listNodes(mapA.id).find((n) => n.cardId === c.id)!.parentId).toBe(
+			groupNode.id,
+		);
 	});
 });
 
@@ -616,13 +669,31 @@ describe("归章 (page, y) 字典序泛化（62：md 同页 y 分章；pdf/epub 
 		const map = mindmaps.create("笔记A", doc.id);
 		const group = mindmaps.addNode(
 			map.id,
-			cards.create({ documentId: doc.id, page: null, rects: [], excerptType: "text", excerptText: "《笔记A》" }).id,
+			cards.create({
+				documentId: doc.id,
+				page: null,
+				rects: [],
+				excerptType: "text",
+				excerptText: "《笔记A》",
+			}).id,
 			null,
 			0,
 			0,
 		)!;
-		const ch1 = mindmaps.addNode(map.id, mdChapter("第一章", doc.id, 0.05).id, group.id, 200, 0)!;
-		const ch2 = mindmaps.addNode(map.id, mdChapter("第二章", doc.id, 0.5).id, group.id, 400, 0)!;
+		const ch1 = mindmaps.addNode(
+			map.id,
+			mdChapter("第一章", doc.id, 0.05).id,
+			group.id,
+			200,
+			0,
+		)!;
+		const ch2 = mindmaps.addNode(
+			map.id,
+			mdChapter("第二章", doc.id, 0.5).id,
+			group.id,
+			400,
+			0,
+		)!;
 
 		// y=0.3 的摘录 → 第一章（第二章 0.5 尚未开始）；y=0.7 → 第二章；
 		// y=0.02（第一章标题之前的前言）→ 组卡直挂
@@ -643,7 +714,13 @@ describe("归章 (page, y) 字典序泛化（62：md 同页 y 分章；pdf/epub 
 		const map = mindmaps.create("图");
 		const g = mindmaps.addNode(
 			map.id,
-			cards.create({ documentId: doc.id, page: null, rects: [], excerptType: "text", excerptText: "组" }).id,
+			cards.create({
+				documentId: doc.id,
+				page: null,
+				rects: [],
+				excerptType: "text",
+				excerptText: "组",
+			}).id,
 			null,
 			0,
 			0,
@@ -666,14 +743,28 @@ describe("归章 (page, y) 字典序泛化（62：md 同页 y 分章；pdf/epub 
 		const map = mindmaps.create("图");
 		const g = mindmaps.addNode(
 			map.id,
-			cards.create({ documentId: doc.id, page: null, rects: [], excerptType: "text", excerptText: "组" }).id,
+			cards.create({
+				documentId: doc.id,
+				page: null,
+				rects: [],
+				excerptType: "text",
+				excerptText: "组",
+			}).id,
 			null,
 			0,
 			0,
 		)!;
 		const ch1 = mindmaps.addNode(
 			map.id,
-			cards.create({ documentId: doc.id, page: 3, rects: [], excerptType: "text", excerptText: "一", title: "一", outline: true }).id,
+			cards.create({
+				documentId: doc.id,
+				page: 3,
+				rects: [],
+				excerptType: "text",
+				excerptText: "一",
+				title: "一",
+				outline: true,
+			}).id,
 			g.id,
 			0,
 			0,

@@ -1,22 +1,59 @@
 import { DropdownComponent, ItemView, Menu, Notice, setIcon } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
-import type { BookDocument, Card, DocRect, MindmapNodeWithCard, ReviewGrade, ReviewState } from "../types";
+import type {
+	BookDocument,
+	Card,
+	DocRect,
+	MindmapNodeWithCard,
+	ReviewGrade,
+	ReviewState,
+} from "../types";
 import { ReviewSession } from "./review-session";
-import { buildSessionRows, sessionRowTitle, type SessionListFilter, type SessionSortKey } from "./session-list";
+import {
+	buildSessionRows,
+	sessionRowTitle,
+	type SessionListFilter,
+	type SessionSortKey,
+} from "./session-list";
 import { ContextPreviewRenderer } from "./context-preview";
 import { buildMapContext } from "./map-context";
 import { buildMapThumbnailSvg } from "./map-thumbnail";
 import { DeckPickerModal } from "./deck-picker-modal";
 import { ReviewStatsModal } from "./review-stats-modal";
 import { CardPreviewModal } from "../home/card-preview-modal";
-import { deleteCardCascade, promptCardDeck, promptCardEdit, promptCardTags } from "../home/card-actions";
+import {
+	deleteCardCascade,
+	promptCardAiComment,
+	promptCardDeck,
+	promptCardEdit,
+	promptCardTags,
+} from "../home/card-actions";
+import { AiActionModal } from "../ai/ai-action-modal";
+import { sendChat } from "../ai/ai-service";
+import {
+	buildMistakeSummaryMessages,
+	buildQuizMessages,
+	buildReviewHintMessages,
+	parseQuizDistractors,
+	parseReviewHint,
+	shuffleQuizOptions,
+	type MistakeItem,
+} from "../ai/ai-review";
 import { ConfirmModal } from "../mindmap/confirm-modal";
 import { occlusionBounds, occlusionPercent, snapshotImgSize } from "../reader/rect-utils";
 import { renderExcerptVisual } from "../reader/excerpt-visual";
-import { HIGHLIGHT_COLORS, highlightFallbackColor, highlightLineColor } from "../reader/highlight-colors";
+import {
+	HIGHLIGHT_COLORS,
+	highlightFallbackColor,
+	highlightLineColor,
+} from "../reader/highlight-colors";
 import { pageWordOf } from "../storage/paths";
-import { resolveEngineCall, translationAnchor, type EngineCall } from "../translate/translate-engine";
+import {
+	resolveEngineCall,
+	translationAnchor,
+	type EngineCall,
+} from "../translate/translate-engine";
 import { TranslateModal } from "../translate/translate-modal";
 
 /** 复习视图的 viewType */
@@ -156,9 +193,27 @@ export class MarinMindReviewView extends ItemView {
 	 * 67 撤销快照双栈（视图侧）：与 session.undoStack 压栈同一同步闭包、栈顶一一对
 	 * 应——session 管会话态回退，这里管 DB 态回退（评分前 ReviewState 快照 + ts）。
 	 * before=null 表示该次评分未落库（卡被删 review 返 undefined）——撤销只回会话态。
-	 * session.remove 清栈时这里同步全清（cardBus removed 订阅），新会话重建时清空。
+	 * 103-B 起删卡不再全清：session.remove 迁移撤销栈下标，这里按 cardId 丢弃被删
+	 * 卡的快照（其余原序保留，双栈保持 1:1）；新会话重建时清空。
 	 */
-	private undoSnapshots: { cardId: string; grade: ReviewGrade; before: ReviewState | null; ts: number }[] = [];
+	private undoSnapshots: {
+		cardId: string;
+		grade: ReviewGrade;
+		before: ReviewState | null;
+		ts: number;
+	}[] = [];
+	/**
+	 * 101 AI 复习助手（会话态不持久化）：卡壳提示文本与选择题自测状态，
+	 * 各自记录所属 cardId——换卡自动失效（render 里比对复位），重进同卡保留。
+	 * quiz.picked 非空后选项锁定；两者都不触碰 SRS（评分仍由人工四档完成）。
+	 */
+	private aiHint: { cardId: string; text: string } | null = null;
+	private aiQuiz: {
+		cardId: string;
+		options: string[];
+		correct: string;
+		picked: string | null;
+	} | null = null;
 	/**
 	 * 70 卡片组列表：左侧可收起面板（会话态不持久化，默认收起）。
 	 * 排序/筛选只影响列表行序与可见性——不动队列本体，SRS 语义零干扰。
@@ -166,20 +221,31 @@ export class MarinMindReviewView extends ItemView {
 	private listOpen = false;
 	private listSort: SessionSortKey = "queue";
 	private listFilter: SessionListFilter = {};
+	/** keydown 宿主文档（bindKeydown 记录，unbindKeydown 解绑用；弹窗/主窗随 ownerDocument 切换） */
+	private keydownDoc: Document | null = null;
+	/** 文档级 keydown 处理器（箭头字段持有 this 绑定，绑/解同一引用） */
+	private readonly onDocKeydown = (evt: KeyboardEvent): void => {
+		this.onKeydown(evt);
+	};
 
 	constructor(leaf: WorkspaceLeaf, plugin: MarinMindPlugin) {
 		super(leaf);
 		this.plugin = plugin;
 		this.context = new ContextPreviewRenderer(plugin);
+		// keydown 解绑兜底（103-D）：popout 迁移等路径若漏调 onClose 的显式解绑，卸载时兜底清理
+		this.register(() => this.unbindKeydown());
 		// cardBus 订阅（卡组批）：契约——回调零写库，只做内存/DOM 更新。
 		// removed：本会话或外部（阅读器/主页/预览弹窗）删卡 → 会话剔除并重渲染；
 		// changed：队列内的卡被外部改（标签/卡组/批注/OCR 写回）→ 重渲染取最新
 		this.cardBusOffs.push(
 			plugin.cardBus.onCardRemoved((cardId) => {
 				if (this.session?.remove(cardId)) {
-					// 67 对齐：session.remove 开头清了会话撤销栈，视图快照栈同步全清
-					//（删除的 graded 重键破坏栈内 index 有效性，双栈一起作废）
-					this.undoSnapshots.length = 0;
+					// 103-B 对齐：session.remove 迁移撤销栈（被删卡步骤作废、其余下标前移），
+					// 这里按 cardId 丢弃同一批快照——被删卡的 DB 回退快照已无意义（restoreReview
+					// 会复活已删卡的复习状态），双栈保持 1:1 原序
+					this.undoSnapshots = this.undoSnapshots.filter(
+						(snap) => snap.cardId !== cardId,
+					);
 					this.render();
 				}
 			}),
@@ -207,9 +273,27 @@ export class MarinMindReviewView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		// contentEl 是 div 不可聚焦，键盘事件挂 document（仅激活标签页响应）
-		this.registerDomEvent(document, "keydown", (evt) => this.onKeydown(evt));
+		// 103-D（85-A 同修法）：keydown 绑 contentEl.ownerDocument——contentEl 是
+		// div 不可聚焦，键盘事件挂文档级（仅激活标签页响应）；registerDomEvent
+		// (document,…) 绑死主窗口，popout 弹出窗口内不可用且迁移会累积重复处理器
+		this.bindKeydown();
 		await this.startSession();
+	}
+
+	/** 绑定文档级 keydown（onOpen 调用；先解后绑保证重复 onOpen 幂等） */
+	private bindKeydown(): void {
+		this.unbindKeydown();
+		const doc = this.contentEl.ownerDocument;
+		doc.addEventListener("keydown", this.onDocKeydown);
+		this.keydownDoc = doc;
+	}
+
+	/** 解绑文档级 keydown（onClose 调用；this.register 兜底防泄漏） */
+	private unbindKeydown(): void {
+		if (this.keydownDoc) {
+			this.keydownDoc.removeEventListener("keydown", this.onDocKeydown);
+			this.keydownDoc = null;
+		}
 	}
 
 	/**
@@ -250,30 +334,32 @@ export class MarinMindReviewView extends ItemView {
 			);
 		}
 		this.undoSnapshots.length = 0;
-		this.session = new ReviewSession(
-			cards,
-			(cardId, grade) => {
-				// 67 单一时间源：一次评分的 ts 捕获一次，贯穿 review() 的日志记录
-				// 与撤销快照（跨午夜撤销回退 ts 对齐依赖此点）
-				const ts = Date.now();
-				const before = this.plugin.reviews.get(cardId);
-				// 卡片可能在会话中被删除：review 返回 undefined 被忽略，会话照常推进；
-				// 此时无 DB 写入，快照记 before=null（撤销只回退会话态不写库）
-				const next = this.plugin.reviews.review(cardId, grade, ts);
-				this.undoSnapshots.push({
-					cardId,
-					grade,
-					before: next && before ? before : null,
-					ts,
-				});
-			},
-		);
+		this.session = new ReviewSession(cards, (cardId, grade) => {
+			// 67 单一时间源：一次评分的 ts 捕获一次，贯穿 review() 的日志记录
+			// 与撤销快照（跨午夜撤销回退 ts 对齐依赖此点）
+			const ts = Date.now();
+			const before = this.plugin.reviews.get(cardId);
+			// 卡片可能在会话中被删除：review 返回 undefined 被忽略，会话照常推进；
+			// 此时无 DB 写入，快照记 before=null（撤销只回退会话态不写库）
+			const next = this.plugin.reviews.review(cardId, grade, ts);
+			this.undoSnapshots.push({
+				cardId,
+				grade,
+				before: next && before ? before : null,
+				ts,
+			});
+		});
 		this.render();
 	}
 
 	// ---------- 内部实现 ----------
 
-	private render(): void {
+	/**
+	 * 整体重渲染。opts.deepNav（缺省 true）= 是否驱动深度复习的阅读侧/脑图侧
+	 * 定位：浏览导航（◀ ▶ / 卡组列表跳转，91 批）传 false 只换卡——插件侧
+	 * suppress 更新去重基点后不动阅读位置；评分/翻面/新会话保持 true。
+	 */
+	private render(opts: { deepNav?: boolean } = {}): void {
 		// 整体重渲染前必须清空旧内容：翻面/评分/导航都走这里（㉒ 修复：
 		// 此前只有 startSession 清空，重渲染往下叠加旧 stage，切换看似无效）
 		this.contentEl.empty();
@@ -302,20 +388,26 @@ export class MarinMindReviewView extends ItemView {
 		this.renderCard(stage, s, card);
 		// 79-5 深度复习：三窗格布局下当前卡驱动阅读滚动 + 脑图定位
 		//（插件侧判定布局/激活/翻面去重；非深度布局零影响）
-		void this.plugin.deepNavigateToCard(card, this.leaf);
+		void this.plugin.deepNavigateToCard(card, this.leaf, {
+			suppress: opts.deepNav === false,
+		});
 	}
 
 	/** Empty 屏文案按范围四态区分（全部/本书/卡组/自定义范围） */
 	private emptyText(): string {
 		if (this.reviewScope?.kind === "book") return "本书当前没有到期闪卡 🎉";
-		if (this.reviewScope?.kind === "deck") return `本组「${this.reviewScope.deck}」当前没有到期闪卡 🎉`;
-		if (this.reviewScope?.kind === "cards") return `本范围「${this.reviewScope.label}」当前没有到期闪卡 🎉`;
+		if (this.reviewScope?.kind === "deck")
+			return `本组「${this.reviewScope.deck}」当前没有到期闪卡 🎉`;
+		if (this.reviewScope?.kind === "cards")
+			return `本范围「${this.reviewScope.label}」当前没有到期闪卡 🎉`;
 		return "当前没有到期卡片 🎉";
 	}
 
 	/** 空态 / DB 未就绪提示（带"再查一批"按钮） */
 	private renderMessage(text: string, stage?: HTMLElement): void {
-		const box = (stage ?? this.contentEl.createDiv({ cls: "marinmind-review-stage" })).createDiv({
+		const box = (
+			stage ?? this.contentEl.createDiv({ cls: "marinmind-review-stage" })
+		).createDiv({
 			cls: "marinmind-review-message",
 		});
 		box.textContent = text;
@@ -359,7 +451,11 @@ export class MarinMindReviewView extends ItemView {
 		// 70 卡片组列表开关（panel-left 与主页文件夹收起同图标语言；空会话无列表可开）
 		const listBtn = topbar.createEl("button", {
 			cls: "marinmind-review-nav-btn",
-			attr: { type: "button", "aria-label": "卡片组列表", title: "卡片组列表（排序 / 筛选 / 跳转）" },
+			attr: {
+				type: "button",
+				"aria-label": "卡片组列表",
+				title: "卡片组列表（排序 / 筛选 / 跳转）",
+			},
 		});
 		setIcon(listBtn, "panel-left");
 		if (this.listOpen) {
@@ -392,7 +488,11 @@ export class MarinMindReviewView extends ItemView {
 		// 67 撤销上次评分（Ctrl+Z）：会话态 + DB SM-2/日志 一并回退；改评 = 撤销后重评
 		const undo = topbar.createEl("button", {
 			cls: "marinmind-review-nav-btn",
-			attr: { type: "button", "aria-label": "撤销上次评分 (Ctrl+Z)", title: "撤销上次评分 (Ctrl+Z)" },
+			attr: {
+				type: "button",
+				"aria-label": "撤销上次评分 (Ctrl+Z)",
+				title: "撤销上次评分 (Ctrl+Z)",
+			},
 		});
 		setIcon(undo, "undo-2");
 		undo.disabled = s.undoDepth === 0;
@@ -430,7 +530,8 @@ export class MarinMindReviewView extends ItemView {
 		// 出处段：book 范围书名已在 chip 不重复；deck 范围组内跨书需完整出处
 		let source: string;
 		if (this.reviewScope?.kind === "book") {
-			source = card.page != null ? `第 ${card.page} ${doc ? pageWordOf(doc.filePath) : "页"}` : "";
+			source =
+				card.page != null ? `第 ${card.page} ${doc ? pageWordOf(doc.filePath) : "页"}` : "";
 		} else if (doc) {
 			source = `《${doc.title}》${card.page != null ? ` · 第 ${card.page} ${pageWordOf(doc.filePath)}` : ""}`;
 		} else {
@@ -518,9 +619,56 @@ export class MarinMindReviewView extends ItemView {
 			});
 		}
 
+		// AI 复习助手（101 P5）：待考卡且有「问题」（note）才提供——hint/自测的
+		// 泄题防线在数据侧（prompt 只见正面问题，答案不进请求；干扰项除外——
+		// 出题必须知道正确答案，但产物只作 UI 选项）
+		if (s.isCurrentPending && card.note) {
+			// 换卡复位（浏览已考卡再回来时状态仍在，同一卡不重复请求）
+			if (this.aiHint && this.aiHint.cardId !== card.id) {
+				this.aiHint = null;
+			}
+			if (this.aiQuiz && this.aiQuiz.cardId !== card.id) {
+				this.aiQuiz = null;
+			}
+			if (!s.isRevealed) {
+				// 未翻面：提示 + 选择题自测（先回忆再看答案）
+				const aiRow = stage.createDiv({ cls: "marinmind-review-ai-row" });
+				const hintBtn = aiRow.createEl("button", {
+					cls: "marinmind-review-btn is-ai",
+					text: "AI 提示",
+				});
+				hintBtn.addEventListener("click", () => void this.requestHint(card));
+				if (card.excerptText) {
+					const quizBtn = aiRow.createEl("button", {
+						cls: "marinmind-review-btn is-ai",
+						text: "选择题自测",
+					});
+					quizBtn.addEventListener("click", () => void this.requestQuiz(card));
+				}
+				if (this.aiHint) {
+					stage.createDiv({ cls: "marinmind-review-ai-result", text: this.aiHint.text });
+				}
+				if (this.aiQuiz) {
+					this.renderQuiz(stage, this.aiQuiz);
+				}
+			} else if (card.excerptText) {
+				// 翻面后：AI 解释（复用卡片评论单源——上下文含标题/批注，可填入批注）
+				const aiRow = stage.createDiv({ cls: "marinmind-review-ai-row" });
+				const explainBtn = aiRow.createEl("button", {
+					cls: "marinmind-review-btn is-ai",
+					text: "AI 解释",
+				});
+				explainBtn.addEventListener("click", () =>
+					promptCardAiComment(this.app, this.plugin, card),
+				);
+			}
+		}
+
 		const hint = stage.createDiv({ cls: "marinmind-review-hint" });
 		if (s.isCurrentPending) {
-			hint.textContent = s.isRevealed ? "按 1-4 评分 · ← → 切换卡片" : "空格 / 回车翻面 · ← → 切换卡片";
+			hint.textContent = s.isRevealed
+				? "按 1-4 评分 · ← → 切换卡片"
+				: "空格 / 回车翻面 · ← → 切换卡片";
 		} else if (s.gradedAt) {
 			hint.textContent = "已考过的卡（只读）· ← → 继续浏览";
 		} else {
@@ -568,7 +716,7 @@ export class MarinMindReviewView extends ItemView {
 				visualHost.createDiv({
 					cls: "marinmind-review-excerpt",
 					// P3-1 措辞对齐 card-preview-modal 同款兜底文案（统一「或」）
-				text: card.excerptText || "（摘录图不可用——附件缺失或原文文件无法读取）",
+					text: card.excerptText || "（摘录图不可用——附件缺失或原文文件无法读取）",
 				});
 			}
 		});
@@ -737,7 +885,9 @@ export class MarinMindReviewView extends ItemView {
 			cls: "clickable-icon marinmind-review-ctx-auto",
 			attr: {
 				type: "button",
-				title: this.autoExpandContext ? "自动展开溯源上下文：开（点击关闭）" : "自动展开溯源上下文：关（点击开启）",
+				title: this.autoExpandContext
+					? "自动展开溯源上下文：开（点击关闭）"
+					: "自动展开溯源上下文：关（点击开启）",
 			},
 		});
 		setIcon(autoBtn, this.autoExpandContext ? "eye" : "eye-off");
@@ -874,6 +1024,8 @@ export class MarinMindReviewView extends ItemView {
 				new ReviewStatsModal(this.app, this.plugin).open();
 			});
 		}
+		// 101 AI 错题总结：收尾屏正是归纳薄弱点的时刻（自由文本流式弹窗，可存为卡片）
+		this.renderMistakeSummaryEntry(done, s);
 		// 范围限定下的切换入口（与 Empty 屏一致）
 		if (this.reviewScope !== null) {
 			const all = done.createEl("button", {
@@ -907,6 +1059,147 @@ export class MarinMindReviewView extends ItemView {
 			});
 			back.addEventListener("click", () => this.navigate(() => s.goPrev()));
 		}
+	}
+
+	/** 101 AI 选择题自测渲染：选项按钮式，picked 非空锁定并对答案上色 */
+	private renderQuiz(
+		stage: HTMLElement,
+		quiz: { options: string[]; correct: string; picked: string | null },
+	): void {
+		const box = stage.createDiv({ cls: "marinmind-review-quiz" });
+		for (const option of quiz.options) {
+			const btn = box.createEl("button", {
+				cls: "marinmind-review-quiz-option",
+				text: option,
+			});
+			if (quiz.picked != null) {
+				// 锁定态：选中的错着色、正确的绿显——无论选没选对都揭示答案
+				btn.disabled = true;
+				if (option === quiz.correct) {
+					btn.addClass("is-correct");
+				} else if (option === quiz.picked) {
+					btn.addClass("is-wrong");
+				}
+			} else {
+				btn.addEventListener("click", () => this.pickQuizOption(option));
+			}
+		}
+		if (quiz.picked != null) {
+			box.createDiv({
+				cls: "marinmind-review-quiz-note",
+				text:
+					quiz.picked === quiz.correct
+						? "回答正确 ✓（自测不影响评分，请按真实记忆难度评分）"
+						: "回答有误 ✗（自测不影响评分，建议考虑「重来」档）",
+			});
+		}
+	}
+
+	/** 101 请求卡壳提示：非流式（几十字短结果不值得流式开销），泄题防线见 ai-review 注释 */
+	private async requestHint(card: Card): Promise<void> {
+		if (this.aiHint?.cardId === card.id) {
+			return; // 已有提示不重复请求
+		}
+		const settings = this.plugin.settings;
+		try {
+			const messages = buildReviewHintMessages(card.note ?? "");
+			const raw = await sendChat(settings, messages);
+			this.aiHint = { cardId: card.id, text: parseReviewHint(raw) };
+		} catch (err) {
+			new Notice(`AI 提示失败：${err instanceof Error ? err.message : String(err)}`);
+			return;
+		}
+		this.render();
+	}
+
+	/** 101 请求选择题自测：正确答案 + 3 个干扰项洗牌成 4 选项 */
+	private async requestQuiz(card: Card): Promise<void> {
+		if (this.aiQuiz?.cardId === card.id) {
+			return; // 已出题不重复请求
+		}
+		const settings = this.plugin.settings;
+		try {
+			const messages = buildQuizMessages(card.note ?? "", card.excerptText ?? "");
+			const raw = await sendChat(settings, messages);
+			const distractors = parseQuizDistractors(raw, card.excerptText ?? "");
+			this.aiQuiz = {
+				cardId: card.id,
+				options: shuffleQuizOptions([card.excerptText ?? "", ...distractors]),
+				correct: card.excerptText ?? "",
+				picked: null,
+			};
+		} catch (err) {
+			new Notice(`选择题生成失败：${err instanceof Error ? err.message : String(err)}`);
+			return;
+		}
+		this.render();
+	}
+
+	/** 101 选择题作答：仅记 UI 状态并重绘上色，不触碰 SRS */
+	private pickQuizOption(option: string): void {
+		if (!this.aiQuiz || this.aiQuiz.picked != null) {
+			return;
+		}
+		this.aiQuiz.picked = option;
+		this.render();
+	}
+
+	/**
+	 * 101 AI 错题总结入口（收尾屏）：收集本会话评「重来」的卡（同卡 again
+	 * 重现按下标只算一次——按 id 去重取首见），拼清单交 AiActionModal 流式
+	 * 总结，「存为卡片」落 blank 卡（documentId=null 防 81 自动入图回环，
+	 * 与 AI 分组卡同款取舍——错题总结不属于任何原文）。
+	 */
+	private renderMistakeSummaryEntry(done: HTMLElement, s: ReviewSession): void {
+		const seen = new Set<string>();
+		const items: MistakeItem[] = [];
+		s.cards.forEach((card, i) => {
+			if (s.gradeOf(i) !== "again" || seen.has(card.id)) {
+				return;
+			}
+			seen.add(card.id);
+			items.push({
+				question: card.note ?? card.title ?? card.excerptText ?? "",
+				answer: card.excerptText ?? "",
+			});
+		});
+		if (items.length === 0) {
+			return; // 本组零错题不挂入口
+		}
+		const btn = done.createEl("button", {
+			cls: "marinmind-review-link",
+			text: `错题总结（AI）· 本组 ${items.length} 张`,
+		});
+		btn.addEventListener("click", () => {
+			const sourceText = items
+				.map((it, i) =>
+					it.answer
+						? `${i + 1}. ${it.question}｜答案：${it.answer}`
+						: `${i + 1}. ${it.question}`,
+				)
+				.join("\n");
+			new AiActionModal(this.app, {
+				title: "错题总结",
+				sourceText,
+				messages: buildMistakeSummaryMessages(items),
+				settings: this.plugin.settings,
+				onUsage: (usage) => this.plugin.addAiUsage(usage),
+				apply: {
+					label: "存为卡片",
+					onApply: (text) => {
+						this.plugin.cards?.create({
+							documentId: null,
+							page: null,
+							rects: [],
+							excerptType: "blank",
+							excerptText: text,
+							title: `错题总结 · ${new Date().toLocaleDateString()}`,
+							tags: ["AI", "错题总结"],
+						});
+					},
+				},
+			}).open();
+		});
 	}
 
 	/**
@@ -1001,7 +1294,7 @@ export class MarinMindReviewView extends ItemView {
 			row.addEventListener("click", () => {
 				s.goTo(index);
 				this.contextTab = null; // 跳转换卡收起上下文（navigate 同语义）
-				this.render();
+				this.render({ deepNav: false }); // 浏览跳转同 ◀ ▶：只换卡不跳原文（91 批）
 			});
 		}
 	}
@@ -1142,11 +1435,12 @@ export class MarinMindReviewView extends ItemView {
 		menu.showAtMouseEvent(evt);
 	}
 
-	/** 浏览导航统一入口：移动成功才重渲染（换卡收起上下文，保住"先回忆"） */
+	/** 浏览导航统一入口：移动成功才重渲染（换卡收起上下文，保住"先回忆"）。
+	 *  91 批浏览语义：只切换复习卡，不驱动深度复习的阅读侧/脑图侧定位 */
 	private navigate(move: () => boolean): void {
 		if (move()) {
 			this.contextTab = null;
-			this.render();
+			this.render({ deepNav: false });
 		}
 	}
 
@@ -1191,10 +1485,17 @@ export class MarinMindReviewView extends ItemView {
 		const target = evt.target as HTMLElement | null;
 		const inInput =
 			!!target &&
-			(target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+			(target.tagName === "INPUT" ||
+				target.tagName === "TEXTAREA" ||
+				target.isContentEditable);
 		// 67 撤销评分：Ctrl/Cmd+Z（不带 Shift；输入态让位原生文本撤销）。必须在
 		// 组合键早退之前分支——z 会先被吞掉；session 判空挪到 undoLastGrade 内部
-		if ((evt.ctrlKey || evt.metaKey) && !evt.shiftKey && !evt.altKey && evt.key.toLowerCase() === "z") {
+		if (
+			(evt.ctrlKey || evt.metaKey) &&
+			!evt.shiftKey &&
+			!evt.altKey &&
+			evt.key.toLowerCase() === "z"
+		) {
 			if (inInput) {
 				return;
 			}
@@ -1254,6 +1555,7 @@ export class MarinMindReviewView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		this.unbindKeydown(); // 文档级 keydown 显式解绑（幂等）
 		// cardBus 退订（constructor 订阅的镜像清理——视图关闭后不再响应改卡/删卡）
 		for (const off of this.cardBusOffs.splice(0)) {
 			off();

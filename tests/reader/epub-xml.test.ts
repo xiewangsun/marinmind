@@ -10,7 +10,7 @@ import {
 
 describe("parseXml 基础结构（㊼ EPUB 结构解析）", () => {
 	it("元素 + 单/双引号属性往返；标签与属性名小写归一", () => {
-		const root = parseXml('<root Version="2.0" mode=\'auto\'><child/></root>');
+		const root = parseXml("<root Version=\"2.0\" mode='auto'><child/></root>");
 		expect(root).not.toBeNull();
 		expect(root!.tag).toBe("root");
 		expect(root!.attrs).toEqual({ version: "2.0", mode: "auto" });
@@ -54,7 +54,7 @@ describe("parseXml 实体解码", () => {
 	it("五种 XML 预定义实体", () => {
 		const root = parseXml('<a v="&lt;&amp;&gt;">&quot;&apos;</a>');
 		expect(root!.attrs.v).toBe("<&>");
-		expect(root!.children[0]).toBe('"\'');
+		expect(root!.children[0]).toBe("\"'");
 	});
 
 	it("十进制与十六进制数字字符引用（含 CJK）", () => {
@@ -65,7 +65,7 @@ describe("parseXml 实体解码", () => {
 	it("常用命名实体（nbsp/mdash/ldquo 等）解码；未知命名实体原样保留", () => {
 		const root = parseXml("<a>a&nbsp;b&mdash;c&ldquo;d&quot;&fake;</a>");
 		// nbsp 显式写  ，避免测试源文件里混入不可见字符
-		expect(root!.children[0]).toBe("a b—c“d\"&fake;");
+		expect(root!.children[0]).toBe('a b—c“d"&fake;');
 	});
 
 	it("非法数字码位（0 / 越界 / 代理区）原样保留", () => {

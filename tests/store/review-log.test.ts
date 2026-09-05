@@ -13,6 +13,7 @@ import {
 	serializeReviewLogMd,
 	streakFromLog,
 	futureDueBuckets,
+	loggedReviewTotal,
 	totalReviewsApprox,
 	unrecordReview,
 	type ReviewLogData,
@@ -101,10 +102,14 @@ describe("parseReviewLogMd / serializeReviewLogMd（66）", () => {
 		expect(parseReviewLogMd(head)).toBeNull(); // 无注释
 		expect(parseReviewLogMd(`${head}\n<!--mm-log {oops}-->\n`)).toBeNull(); // JSON 非法
 		expect(
-			parseReviewLogMd(`${head}\n<!--mm-log {"2026-09-01":{"reviews":"x","newCards":0,"again":0}}-->\n`),
+			parseReviewLogMd(
+				`${head}\n<!--mm-log {"2026-09-01":{"reviews":"x","newCards":0,"again":0}}-->\n`,
+			),
 		).toBeNull(); // 字段非数
 		expect(
-			parseReviewLogMd(`${head}\n<!--mm-log {"昨天":{"reviews":1,"newCards":0,"again":0}}-->\n`),
+			parseReviewLogMd(
+				`${head}\n<!--mm-log {"昨天":{"reviews":1,"newCards":0,"again":0}}-->\n`,
+			),
 		).toBeNull(); // 日键乱造
 	});
 });
@@ -114,13 +119,8 @@ describe("parseReviewLogMd / serializeReviewLogMd（66）", () => {
 // ---------------------------------------------------------------------------
 
 let store: MarinMindStore;
-let cards: CardRepository;
-let reviews: ReviewRepository;
-
 beforeEach(async () => {
 	store = await MarinMindStore.open(new MemoryAdapter());
-	cards = new CardRepository(store);
-	reviews = new ReviewRepository(store);
 });
 afterEach(() => store.close());
 
@@ -155,7 +155,13 @@ describe("复习日志 store 集成（66）", () => {
 		const s1 = await MarinMindStore.open(adapter);
 		const c1 = new CardRepository(s1);
 		const r1 = new ReviewRepository(s1);
-		const card = c1.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "Q" });
+		const card = c1.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "Q",
+		});
 		r1.enable(card.id, 1000);
 		const ts = new Date(2026, 8, 1, 10, 0).getTime();
 		r1.review(card.id, "good", ts); // 首考 = 新卡
@@ -174,14 +180,21 @@ describe("复习日志 store 集成（66）", () => {
 
 	it("外部修改采纳：手编数字即权威（整文件覆盖内存，lastWritten 跟随不回声）", async () => {
 		const adapter = new MemoryAdapter();
-		writeText(adapter, REVIEW_LOG_FILENAME, serializeReviewLogMd({
-			"2026-09-01": { reviews: 99, newCards: 50, again: 0 },
-		}));
+		writeText(
+			adapter,
+			REVIEW_LOG_FILENAME,
+			serializeReviewLogMd({
+				"2026-09-01": { reviews: 99, newCards: 50, again: 0 },
+			}),
+		);
 		const s1 = await MarinMindStore.open(adapter);
 		await s1.handleExternalChange(REVIEW_LOG_FILENAME, textOf(adapter, REVIEW_LOG_FILENAME));
 		expect(s1.getReviewLog()["2026-09-01"]?.reviews).toBe(99);
 		// 同内容再来一次 = 插件自写回声（lastWritten 已跟随）→ 无警告无变化
-		const result = await s1.handleExternalChange(REVIEW_LOG_FILENAME, textOf(adapter, REVIEW_LOG_FILENAME));
+		const result = await s1.handleExternalChange(
+			REVIEW_LOG_FILENAME,
+			textOf(adapter, REVIEW_LOG_FILENAME),
+		);
 		expect(result.warnings).toEqual([]);
 		s1.close();
 	});
@@ -192,16 +205,23 @@ describe("复习日志 store 集成（66）", () => {
 		writeText(adapter, REVIEW_LOG_FILENAME, serializeReviewLogMd(log));
 		const s1 = await MarinMindStore.open(adapter);
 		// 半截写入：frontmatter 认领但机器注释 JSON 被截断
-		await s1.handleExternalChange(REVIEW_LOG_FILENAME, "---\nmarinmind: reviewlog\n---\n<!--mm-log {trunc");
+		await s1.handleExternalChange(
+			REVIEW_LOG_FILENAME,
+			"---\nmarinmind: reviewlog\n---\n<!--mm-log {trunc",
+		);
 		expect(s1.getReviewLog()).toEqual(log);
 		s1.close();
 	});
 
 	it("外部删除：内存清空不复活——后续 flush 不重写文件；新评分自然重建", async () => {
 		const adapter = new MemoryAdapter();
-		writeText(adapter, REVIEW_LOG_FILENAME, serializeReviewLogMd({
-			"2026-09-01": { reviews: 3, newCards: 0, again: 0 },
-		}));
+		writeText(
+			adapter,
+			REVIEW_LOG_FILENAME,
+			serializeReviewLogMd({
+				"2026-09-01": { reviews: 3, newCards: 0, again: 0 },
+			}),
+		);
 		const s1 = await MarinMindStore.open(adapter);
 		// vault delete 事件到达时磁盘文件已消失（store 只清内存，不负责删盘）
 		adapter.files.delete(REVIEW_LOG_FILENAME);
@@ -215,7 +235,13 @@ describe("复习日志 store 集成（66）", () => {
 		const s2 = await MarinMindStore.open(adapter);
 		const c2 = new CardRepository(s2);
 		const r2 = new ReviewRepository(s2);
-		const card = c2.create({ documentId: null, page: null, rects: [], excerptType: "text", excerptText: "Q" });
+		const card = c2.create({
+			documentId: null,
+			page: null,
+			rects: [],
+			excerptType: "text",
+			excerptText: "Q",
+		});
 		r2.enable(card.id, 1000);
 		r2.review(card.id, "good", new Date(2026, 8, 2, 9, 0).getTime());
 		await s2.flush();
@@ -287,9 +313,13 @@ describe("streakFromLog（69 连续复习天数）", () => {
 		};
 		expect(streakFromLog(log, "2026-09-01")).toBe(2);
 		// reviews=0 的日不算（手编清零 = 没复习）
-		expect(streakFromLog({ "2026-09-01": { reviews: 0, newCards: 0, again: 0 } }, "2026-09-01")).toBe(0);
+		expect(
+			streakFromLog({ "2026-09-01": { reviews: 0, newCards: 0, again: 0 } }, "2026-09-01"),
+		).toBe(0);
 		// 日志全部晚于 todayKey（未来）→ 0
-		expect(streakFromLog({ "2026-09-05": { reviews: 1, newCards: 0, again: 0 } }, "2026-09-01")).toBe(0);
+		expect(
+			streakFromLog({ "2026-09-05": { reviews: 1, newCards: 0, again: 0 } }, "2026-09-01"),
+		).toBe(0);
 	});
 });
 
@@ -351,5 +381,15 @@ describe("futureDueBuckets（69 到期分布）", () => {
 		];
 		expect(totalReviewsApprox(states)).toBe(16); // 近似口径含禁用卡历史（调度字段保留）
 		expect(flashcardCount(states)).toBe(2);
+	});
+
+	it("loggedReviewTotal：Σ 各日 reviews（103-C 累计复习的日志侧口径）", () => {
+		expect(loggedReviewTotal({})).toBe(0);
+		expect(
+			loggedReviewTotal({
+				"2026-09-01": { reviews: 12, newCards: 3, again: 1 },
+				"2026-09-02": { reviews: 7, newCards: 0, again: 2 },
+			}),
+		).toBe(19);
 	});
 });

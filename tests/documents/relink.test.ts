@@ -80,7 +80,7 @@ describe("applyRelink 落库", () => {
 	it("空目标接管：先删空行再改道（内存同步操作天然原子）", async () => {
 		const rig = await makeRig();
 		const source = rig.documents.upsertByPath("old/b.pdf", "B");
-		const card = makeCard(rig, source.id);
+		makeCard(rig, source.id);
 		const empty = rig.documents.upsertByPath("taken/b.pdf", "占位空行"); // 打开即 upsert 产生的空记录
 
 		applyRelink(rig.documents, rig.cards, source, "taken/b.pdf");
@@ -102,9 +102,7 @@ describe("applyRelink 落库", () => {
 		// 实现前提锁定：不经删行直接改道必然撞应用层占用检查（对齐旧库 file_path UNIQUE）
 		expect(() => rig.documents.renamePath("old/c.pdf", "taken/c.pdf")).toThrow();
 		// applyRelink 的防御分支
-		expect(() =>
-			applyRelink(rig.documents, rig.cards, source, "taken/c.pdf"),
-		).toThrow("占用");
+		expect(() => applyRelink(rig.documents, rig.cards, source, "taken/c.pdf")).toThrow("占用");
 		// 抛错在改动前：源行未被改道
 		expect(rig.documents.getByPath("old/c.pdf")?.id).toBe(source.id);
 		rig.store.close();

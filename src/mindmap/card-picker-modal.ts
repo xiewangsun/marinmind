@@ -27,9 +27,9 @@ export class CardPickerModal extends FuzzySuggestModal<Card> {
 
 	getItems(): Card[] {
 		// 已在当前图中的卡片不出现（UNIQUE 约束的 UI 侧第一道闸）
-		return this.plugin.cards.recent(RECENT_LIMIT).filter(
-			(card) => !this.plugin.mindmaps.hasCard(this.mapId, card.id),
-		);
+		return this.plugin.cards
+			.recent(RECENT_LIMIT)
+			.filter((card) => !this.plugin.mindmaps.hasCard(this.mapId, card.id));
 	}
 
 	getItemText(card: Card): string {
@@ -43,8 +43,7 @@ export class CardPickerModal extends FuzzySuggestModal<Card> {
 		name.className = "marinmind-picker-name";
 		const title = document.createElement("span");
 		title.className = "marinmind-picker-title";
-		title.textContent =
-			card.note ?? card.excerptText ?? `（${card.excerptType} 摘录）`;
+		title.textContent = card.note ?? card.excerptText ?? `（${card.excerptType} 摘录）`;
 
 		const dir = document.createElement("div");
 		dir.className = "marinmind-picker-dir";

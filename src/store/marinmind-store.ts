@@ -775,8 +775,10 @@ export class MarinMindStore {
 		}
 		// 66 复习日志 / 76 清单文件占用守卫：书名恰为「复习日志」「分类」「卡组」时
 		// 让路加后缀，防覆盖这些数据根专属文件
-		return this.booksByPath.has(rel) || rel === REVIEW_LOG_FILENAME ||
-				rel === FOLDERS_FILENAME || rel === DECKS_FILENAME
+		return this.booksByPath.has(rel) ||
+			rel === REVIEW_LOG_FILENAME ||
+			rel === FOLDERS_FILENAME ||
+			rel === DECKS_FILENAME
 			? `${base} (${id.slice(0, 4)}).md`
 			: rel;
 	}
@@ -787,20 +789,14 @@ export class MarinMindStore {
 		if (rel === selfPath) {
 			return rel;
 		}
-		return this.mapsByPath.has(rel)
-			? `${MINDMAPS_SUBDIR}/${base} (${id.slice(0, 4)}).md`
-			: rel;
+		return this.mapsByPath.has(rel) ? `${MINDMAPS_SUBDIR}/${base} (${id.slice(0, 4)}).md` : rel;
 	}
 
 	/** 标题变更 → 文件改名（旧路径删除排队、lastWritten 跟随、全部脑图标脏刷新 wikilink） */
 	private refreshBookPath(state: BookState): void {
 		// 传 selfPath：标题未变（documents.update 只改 category 等元数据）时
 		// 目标路径被自己占用不算冲突——否则文件会在 书名.md ↔ 书名 (id).md 间反复翻转
-		const desired = this.allocateBookPath(
-			state.doc.title,
-			state.doc.id,
-			state.relPath,
-		);
+		const desired = this.allocateBookPath(state.doc.title, state.doc.id, state.relPath);
 		if (desired === state.relPath) return;
 		this.pendingDeletes.add(state.relPath);
 		this.lastWritten.delete(state.relPath);
@@ -812,11 +808,7 @@ export class MarinMindStore {
 	}
 
 	private refreshMapPath(state: MapState): void {
-		const desired = this.allocateMapPath(
-			state.map.name,
-			state.map.id,
-			state.relPath,
-		);
+		const desired = this.allocateMapPath(state.map.name, state.map.id, state.relPath);
 		if (desired === state.relPath) return;
 		this.pendingDeletes.add(state.relPath);
 		this.lastWritten.delete(state.relPath);
@@ -938,7 +930,9 @@ export class MarinMindStore {
 			}
 			const parsed = parseMindmapMd(content, { fileName: relPath.split("/").pop() });
 			if (!parsed.claimed) {
-				warnings.push(`脑图《${map.map.name}》的 MarinMind frontmatter 缺失，外部修改被忽略`);
+				warnings.push(
+					`脑图《${map.map.name}》的 MarinMind frontmatter 缺失，外部修改被忽略`,
+				);
 				return { removedCards, warnings };
 			}
 			if (this.dirtyScopes.has(map.map.id)) {
@@ -1033,7 +1027,10 @@ export class MarinMindStore {
 		for (const l of parsed.links) this.linksById.set(l.id, l);
 	}
 
-	private absorbMap(relPath: string, parsed: { map: Mindmap; nodes: MindmapNode[]; extraFrontmatter: string[] }): void {
+	private absorbMap(
+		relPath: string,
+		parsed: { map: Mindmap; nodes: MindmapNode[]; extraFrontmatter: string[] },
+	): void {
 		const state: MapState = {
 			relPath,
 			map: parsed.map,
@@ -1123,7 +1120,10 @@ export class MarinMindStore {
 			const mem = state.cards.get(disk.id);
 			if (!mem) {
 				// 磁盘新卡（用户手编新增）→ 直接并入
-				state.cards.set(disk.id, state === this.orphan ? { ...disk, documentId: null } : disk);
+				state.cards.set(
+					disk.id,
+					state === this.orphan ? { ...disk, documentId: null } : disk,
+				);
 				const r = parsed.reviews.find((x) => x.cardId === disk.id);
 				if (r) this.reviewsById.set(disk.id, r);
 				continue;

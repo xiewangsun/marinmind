@@ -89,9 +89,10 @@ export class PdfPickerModal extends FuzzySuggestModal<PdfPickResult> {
 		if (!Platform.isDesktopApp) {
 			return vaultPicks;
 		}
-		const externalPicks = this.recentExternal.map(
-			(e): PdfPickResult => ({ kind: "external", absPath: e.absPath }),
-		);
+		const externalPicks = this.recentExternal.map((e): PdfPickResult => ({
+			kind: "external",
+			absPath: e.absPath,
+		}));
 		return [...externalPicks, ...vaultPicks];
 	}
 

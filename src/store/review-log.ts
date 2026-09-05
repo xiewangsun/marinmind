@@ -126,9 +126,12 @@ export function parseReviewLogMd(text: string): ReviewLogData | null {
 		const newCards = v.newCards;
 		const again = v.again;
 		if (
-			typeof reviews !== "number" || !Number.isFinite(reviews) ||
-			typeof newCards !== "number" || !Number.isFinite(newCards) ||
-			typeof again !== "number" || !Number.isFinite(again)
+			typeof reviews !== "number" ||
+			!Number.isFinite(reviews) ||
+			typeof newCards !== "number" ||
+			!Number.isFinite(newCards) ||
+			typeof again !== "number" ||
+			!Number.isFinite(again)
 		) {
 			return null;
 		}
@@ -200,11 +203,13 @@ function dateToDayKey(d: Date): string {
  */
 export function streakFromLog(log: ReviewLogData, todayKey: string): number {
 	const active = new Set(
-		Object.entries(log).filter(([, d]) => d.reviews > 0).map(([k]) => k),
+		Object.entries(log)
+			.filter(([, d]) => d.reviews > 0)
+			.map(([k]) => k),
 	);
 	if (active.size === 0) return 0;
 	// 起点：今日有记录从今日数；否则从 < 今日的最大键数（保留昨日成果）
-	let cursor: Date | null = null;
+	let cursor: Date;
 	if (active.has(todayKey)) {
 		cursor = dayKeyToDate(todayKey);
 	} else {
@@ -242,12 +247,20 @@ export function heatmapCells(log: ReviewLogData, todayTs: number, weeks = 13): H
 	// 周一起始的当周周一；再回退 weeks-1 周作为网格左上角
 	const dow = (today.getDay() + 6) % 7;
 	const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dow);
-	const start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - (weeks - 1) * 7);
+	const start = new Date(
+		monday.getFullYear(),
+		monday.getMonth(),
+		monday.getDate() - (weeks - 1) * 7,
+	);
 	const todayKey = dateToDayKey(today);
 	const cells: HeatmapCell[] = [];
 	for (let w = 0; w < weeks; w++) {
 		for (let d = 0; d < 7; d++) {
-			const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + w * 7 + d);
+			const date = new Date(
+				start.getFullYear(),
+				start.getMonth(),
+				start.getDate() + w * 7 + d,
+			);
 			const key = dateToDayKey(date);
 			if (key > todayKey) {
 				cells.push({ dateKey: key, count: 0, level: 0, future: true });
@@ -292,11 +305,18 @@ export function futureDueBuckets(
 	return buckets;
 }
 
-/** 累计复习次数近似：Σ(repetitions + lapses)——日志只记当日聚合，历史总量以
- *  SM-2 字段近似（面板口径脚注写明；禁用再启用的卡历史保留故不受影响） */
+/** 累计复习次数近似：Σ(repetitions + lapses)——仅作 103-C 基线迁移的输入
+ *  （迁移前历史总量回推；迁移后「累计」= 基线 + loggedReviewTotal，不再直接展示） */
 export function totalReviewsApprox(reviews: Iterable<ReviewState>): number {
 	let n = 0;
 	for (const r of reviews) n += r.repetitions + r.lapses;
+	return n;
+}
+
+/** 日志记录的复习总次数（Σ 各日 reviews）——「累计复习」的日志侧口径（103-C） */
+export function loggedReviewTotal(log: ReviewLogData): number {
+	let n = 0;
+	for (const day of Object.values(log)) n += day.reviews;
 	return n;
 }
 

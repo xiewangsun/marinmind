@@ -27,7 +27,9 @@ afterAll(async () => {
 describe("readExternalBinary", () => {
 	it("读回真实文件字节一致", async () => {
 		const buf = await readExternalBinary(pdfPath);
-		expect(new Uint8Array(buf)).toEqual(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]));
+		expect(new Uint8Array(buf)).toEqual(
+			new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]),
+		);
 	});
 	it("文件不存在时中文错误文案含路径", async () => {
 		const missing = join(dir, "不存在.pdf");

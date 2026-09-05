@@ -6,6 +6,10 @@ import { CATEGORY_MAX_LENGTH, normalizeCategory } from "./home-data";
 import { CardEditModal } from "./card-edit-modal";
 import { DeckAssignModal } from "./deck-assign-modal";
 import { TextPromptModal } from "../reader/note-edit-modal";
+import { AiActionModal } from "../ai/ai-action-modal";
+import { buildCardCommentMessages } from "../ai/ai-prompts";
+import { AiCardgenModal } from "../ai/ai-cardgen-modal";
+import { AiLinkModal } from "../ai/ai-link-modal";
 
 /**
  * 卡片管理动作（打标签 / 设卡组 / 编辑标题批注 / 删除）：复习视图 ⋯ 菜单与卡片预览弹窗
@@ -26,7 +30,12 @@ export function promptPathName(
 ): void {
 	new TextPromptModal(
 		app,
-		{ title: options.title, initialText: options.initialText, placeholder: options.placeholder, multiline: false },
+		{
+			title: options.title,
+			initialText: options.initialText,
+			placeholder: options.placeholder,
+			multiline: false,
+		},
 		(name) => {
 			const raw = name ?? "";
 			const normalized = normalizeCategory(raw);
@@ -96,6 +105,62 @@ export function promptCardDeck(app: App, plugin: MarinMindPlugin, card: Card): v
  */
 export function promptCardEdit(app: App, plugin: MarinMindPlugin, card: Card): void {
 	new CardEditModal(app, plugin, card).open();
+}
+
+/**
+ * AI 补充解释（97，MN4 AI 评论对齐）：摘录内容流式解释弹窗，「填入批注」
+ * 把结果预填 CardEditModal——经人手确认/修改后落库（AI 不直接写库）。
+ * 阅读器高亮菜单与卡片预览 ⋯ 菜单单源共享；无摘录文字的卡（区域/照片等
+ * 未 OCR）由调用方守卫不给入口。
+ */
+export function promptCardAiComment(app: App, plugin: MarinMindPlugin, card: Card): void {
+	const source = card.excerptText?.trim();
+	if (!source) {
+		return;
+	}
+	new AiActionModal(app, {
+		title: "AI 补充解释",
+		sourceText: source,
+		messages: buildCardCommentMessages(card),
+		settings: plugin.settings,
+		onUsage: (usage) => plugin.addAiUsage(usage),
+		apply: {
+			label: "填入批注",
+			onApply: (text) => {
+				// fresh 取库：弹窗开着时卡可能被外部改过（镜像 CardEditModal 保存语义）
+				const fresh = plugin.cards.get(card.id);
+				if (fresh) {
+					new CardEditModal(app, plugin, fresh, undefined, text).open();
+				}
+			},
+		},
+	}).open();
+}
+
+/**
+ * AI 制卡（99，MN4 对齐）：以卡片摘录文字为材料生成 QA/填空卡，预览勾选批量
+ * 落库。有原文锚点（documentId+page）的卡生成的卡继承回链——自动入图归章；
+ * 无源卡（区域/照片等无文字）由调用方守卫不给入口。
+ */
+export function promptCardGen(app: App, plugin: MarinMindPlugin, card: Card): void {
+	const source = card.excerptText?.trim();
+	if (!source) {
+		return;
+	}
+	const { documentId, page } = card;
+	new AiCardgenModal(app, plugin, {
+		sourceText: source,
+		anchor: documentId != null && page != null ? { documentId, page, rects: card.rects } : null,
+	}).open();
+}
+
+/**
+ * 相关卡片（AI 推荐）（99，MN4 AI 链接建议对齐）：同文档候选经 LLM 推荐语义
+ * 相关卡，勾选确认后写入 links 双向链接、受影响脑图重画虚线边。
+ * 卡片预览 ⋯ 菜单与脑图节点右键菜单单源共享；无文档归属由弹窗内说明拦截。
+ */
+export function promptCardLinks(app: App, plugin: MarinMindPlugin, card: Card): void {
+	new AiLinkModal(app, plugin, card).open();
 }
 
 /**

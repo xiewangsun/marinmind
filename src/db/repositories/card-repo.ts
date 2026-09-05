@@ -147,7 +147,9 @@ export class CardRepository {
 			...(patch.deck !== undefined ? { deck: patch.deck } : {}),
 			...(patch.occlusions !== undefined ? { occlusions: patch.occlusions } : {}),
 			// 语音时长秒（84-B）：null 清空（归一 undefined = 未知）/ undefined 不动
-			...(patch.durationSec !== undefined ? { durationSec: patch.durationSec ?? undefined } : {}),
+			...(patch.durationSec !== undefined
+				? { durationSec: patch.durationSec ?? undefined }
+				: {}),
 			...(patch.tags !== undefined ? { tags: patch.tags } : {}),
 			updatedAt: now(),
 		};
@@ -192,9 +194,9 @@ export class CardRepository {
 	/** 全库卡片（含孤儿卡），按更新时间降序——主页卡片页全量浏览的数据源。
 	 *  81 起排除书名分组卡（结构卡不纳入卡片系统，选择器/卡组派生同源受益） */
 	listAll(): Card[] {
-		return [...allCards(this.store)].filter(
-			(c) => !c.group,
-		).sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1));
+		return [...allCards(this.store)]
+			.filter((c) => !c.group)
+			.sort((a, b) => b.updatedAt - a.updatedAt || (a.id < b.id ? -1 : 1));
 	}
 
 	/** 卡片总数（81 起不含书名分组卡——统计砖/每书卡数/relink 占用判定均为

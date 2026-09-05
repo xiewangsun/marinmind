@@ -32,14 +32,28 @@ export interface CardMergeHost {
 	store: MarinMindStore;
 }
 
-export type MergeResult =
-	| { ok: true; affectedMapIds: string[] }
-	| { ok: false; reason: string };
+export type MergeResult = { ok: true; affectedMapIds: string[] } | { ok: false; reason: string };
 
 /** 文本类字段并入补丁构造（纯函数，可单测）：目标有值不动、目标空取源、tags 并集 */
 export function buildMergePatch(
-	source: { note: string | null; excerptText: string | null; title: string | null; deck: string | null; color: string | null; occlusions: unknown[]; tags: string[] },
-	target: { note: string | null; excerptText: string | null; title: string | null; deck: string | null; color: string | null; occlusions: unknown[]; tags: string[] },
+	source: {
+		note: string | null;
+		excerptText: string | null;
+		title: string | null;
+		deck: string | null;
+		color: string | null;
+		occlusions: unknown[];
+		tags: string[];
+	},
+	target: {
+		note: string | null;
+		excerptText: string | null;
+		title: string | null;
+		deck: string | null;
+		color: string | null;
+		occlusions: unknown[];
+		tags: string[];
+	},
 ): CardPatch {
 	const patch: CardPatch = {};
 	if (source.note != null && target.note != null) {
@@ -69,7 +83,10 @@ export function buildMergePatch(
 			mergedTags.push(t);
 		}
 	}
-	if (mergedTags.length !== target.tags.length || mergedTags.some((t, i) => t !== target.tags[i])) {
+	if (
+		mergedTags.length !== target.tags.length ||
+		mergedTags.some((t, i) => t !== target.tags[i])
+	) {
 		patch.tags = mergedTags;
 	}
 	return patch;
@@ -113,9 +130,7 @@ export function mergeCardsInto(
 		}
 		const twin = targetNodes.find((tn) => tn.mapId === sn.mapId);
 		if (twin) {
-			const children = host.mindmaps
-				.listNodes(sn.mapId)
-				.filter((n) => n.parentId === sn.id);
+			const children = host.mindmaps.listNodes(sn.mapId).filter((n) => n.parentId === sn.id);
 			for (const child of children) {
 				host.mindmaps.setParent(child.id, twin.id);
 			}

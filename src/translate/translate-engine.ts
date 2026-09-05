@@ -233,9 +233,12 @@ export function buildBaiduSign(appid: string, q: string, salt: string, secret: s
 
 /** 解析百度 translate 响应：trans_result[].dst 按序 join；error_code 非空抛中文错 */
 export function parseBaiduResponse(data: unknown): TranslateOutcome {
-	const obj = data as
-		| { trans_result?: unknown; from?: unknown; error_code?: unknown; error_msg?: unknown }
-		| null;
+	const obj = data as {
+		trans_result?: unknown;
+		from?: unknown;
+		error_code?: unknown;
+		error_msg?: unknown;
+	} | null;
 	if (
 		typeof obj === "object" &&
 		obj !== null &&
@@ -442,7 +445,8 @@ export function parseDeepLResponse(data: unknown): TranslateOutcome {
 	if (!text) {
 		throw new Error("翻译结果为空");
 	}
-	const raw = typeof first?.detected_source_language === "string" ? first.detected_source_language : "";
+	const raw =
+		typeof first?.detected_source_language === "string" ? first.detected_source_language : "";
 	const from = raw ? (DEEPL_FROM_LABELS[raw] ?? raw.toLowerCase()) : "auto";
 	return { text, from };
 }
@@ -519,6 +523,12 @@ export function resolveEngineCall(settings: {
 export function defaultEngineCall(): EngineCall {
 	return {
 		engine: TRANSLATE_ENGINES[0],
-		cred: { baiduAppid: "", baiduSecret: "", youdaoAppKey: "", youdaoAppSecret: "", deeplKey: "" },
+		cred: {
+			baiduAppid: "",
+			baiduSecret: "",
+			youdaoAppKey: "",
+			youdaoAppSecret: "",
+			deeplKey: "",
+		},
 	};
 }

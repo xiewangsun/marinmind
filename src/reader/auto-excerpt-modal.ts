@@ -1,4 +1,4 @@
-import { App, Modal, Notice, setIcon } from "obsidian";
+import { App, Modal, Notice } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card } from "../types";
 import { detectBlocks, isDuplicateBlock, type AutoBlock, type AutoBlockKind } from "./auto-excerpt";
@@ -87,7 +87,10 @@ export class AutoExcerptModal extends Modal {
 			cls: "marinmind-autoex-select",
 			attr: { "aria-label": "摘录范围" },
 		});
-		select.createEl("option", { value: "current", text: `当前页（第 ${this.opts.currentPage} 页）` });
+		select.createEl("option", {
+			value: "current",
+			text: `当前页（第 ${this.opts.currentPage} 页）`,
+		});
 		select.createEl("option", { value: "range", text: "页码范围" });
 		const rangeBox = scopeRow.createDiv({ cls: "marinmind-autoex-range" });
 		// R3（W-04）：数字输入补可访问名（相邻双框无 label 无法区分起止）
@@ -200,7 +203,9 @@ export class AutoExcerptModal extends Modal {
 				}
 				for (const block of detectBlocks(items, size.width, size.height)) {
 					if (this.kinds.has(block.kind)) {
-						const duplicate = byPage.get(page)?.some((c) => isDuplicateBlock(block, page, c)) ?? false;
+						const duplicate =
+							byPage.get(page)?.some((c) => isDuplicateBlock(block, page, c)) ??
+							false;
 						rows.push({ block, page, checked: !duplicate, duplicate });
 					}
 				}
@@ -247,7 +252,7 @@ export class AutoExcerptModal extends Modal {
 		const allCb = all.createEl("input", { type: "checkbox" });
 		allCb.checked = this.rows.every((r) => r.checked);
 		const dupCount = this.rows.filter((r) => r.duplicate).length;
-		const countLabel = head.createSpan({
+		head.createSpan({
 			cls: "marinmind-autoex-count",
 			text: `共 ${this.rows.length} 块${dupCount > 0 ? ` · ${dupCount} 块与已有卡片重复` : ""}`,
 			// R3（W-03）：识别完成（异步）后计数可被屏幕阅读器感知
@@ -338,7 +343,8 @@ export class AutoExcerptModal extends Modal {
 				excerptType: "text",
 				excerptText: row.block.text,
 				// ㊹ 四色化：标题浅红（MN4"同一类元素同一种颜色"），正文跟随文字工具当前色系
-				color: row.block.kind === "heading" ? "red" : this.plugin.settings.excerptColors.text,
+				color:
+					row.block.kind === "heading" ? "red" : this.plugin.settings.excerptColors.text,
 				// 77 线型：AI 批量 text 卡跟随全局线型设置（标题/正文同值，镜像建卡色先例）
 				lineStyle:
 					this.plugin.settings.excerptLineStyle !== "underline"

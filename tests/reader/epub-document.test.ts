@@ -70,7 +70,8 @@ function sampleEpub3(
 <nav epub:type="landmarks" hidden="hidden"><ol><li><a href="text/ch1.xhtml">正文</a></li></ol></nav>
 </body>
 </html>`,
-		"OEBPS/text/ch1.xhtml": "<html><body><h1 id=\"s1\">第一章标题</h1><p>中文正文内容</p></body></html>",
+		"OEBPS/text/ch1.xhtml":
+			'<html><body><h1 id="s1">第一章标题</h1><p>中文正文内容</p></body></html>',
 		"OEBPS/text/ch2.xhtml": "<html><body><p>第二章内容</p></body></html>",
 		"OEBPS/text/app.xhtml": "<html><body><p>附录内容</p></body></html>",
 		"OEBPS/images/cover.jpg": new Uint8Array([1, 2, 3, 4]),
@@ -192,7 +193,11 @@ describe("parseEpub EPUB3（㊼）", () => {
 		expect(book.toc.map((n) => n.title)).toEqual(["第一章", "第二章", "附录"]);
 		expect(book.toc[0].spineIndex).toBe(0);
 		expect(book.toc[0].children).toHaveLength(1);
-		expect(book.toc[0].children[0]).toMatchObject({ title: "第一节", fragment: "s1", spineIndex: 0 });
+		expect(book.toc[0].children[0]).toMatchObject({
+			title: "第一节",
+			fragment: "s1",
+			spineIndex: 0,
+		});
 		// 纯分组节点（li>span）无链接；其子级指向非 spine 资源 → spineIndex -1
 		expect(book.toc[2]).toMatchObject({ href: "", spineIndex: -1, fragment: null });
 		expect(book.toc[2].children[0]).toMatchObject({ title: "附录 A", spineIndex: -1 });
@@ -244,13 +249,18 @@ describe("parseEpub EPUB2 与目录回退（㊼）", () => {
 		expect(book.title).toBe("EPUB2 老书");
 		expect(book.coverHref).toBe("OEBPS/images/cover.png");
 		expect(book.toc.map((n) => n.title)).toEqual(["卷一", "第 2 章"]);
-		expect(book.toc[0].children[0]).toMatchObject({ title: "第 1 章", fragment: "top", spineIndex: 0 });
+		expect(book.toc[0].children[0]).toMatchObject({
+			title: "第 1 章",
+			fragment: "top",
+			spineIndex: 0,
+		});
 		expect(book.toc[1].spineIndex).toBe(1);
 	});
 
 	it("nav 与 NCX 并存 → 用 nav；仅 NCX（无 nav）回退 NCX", () => {
-		const book = parseEpub(sampleEpub3({
-			"OEBPS/content.opf": `<?xml version="1.0" encoding="UTF-8"?>
+		const book = parseEpub(
+			sampleEpub3({
+				"OEBPS/content.opf": `<?xml version="1.0" encoding="UTF-8"?>
 <package version="3.0" unique-identifier="uid">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>双目录书</dc:title></metadata>
 <manifest>
@@ -261,10 +271,11 @@ describe("parseEpub EPUB2 与目录回退（㊼）", () => {
 </manifest>
 <spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/></spine>
 </package>`,
-			"OEBPS/nav.xhtml": `<?xml version="1.0"?>
+				"OEBPS/nav.xhtml": `<?xml version="1.0"?>
 <html><body><nav epub:type="toc"><ol><li><a href="text/ch1.xhtml">导航优先</a></li></ol></nav></body></html>`,
-			"OEBPS/toc.ncx": sampleEpub2()["OEBPS/toc.ncx"] as string,
-		}));
+				"OEBPS/toc.ncx": sampleEpub2()["OEBPS/toc.ncx"] as string,
+			}),
+		);
 		expect(book.toc.map((n) => n.title)).toEqual(["导航优先"]);
 
 		const ncxOnly = parseEpub(sampleEpub2());
@@ -272,8 +283,9 @@ describe("parseEpub EPUB2 与目录回退（㊼）", () => {
 	});
 
 	it("nav 与 NCX 皆无 → toc=[]（reader 兜底「第 N 章」平铺）", () => {
-		const book = parseEpub(sampleEpub3({
-			"OEBPS/content.opf": `<?xml version="1.0" encoding="UTF-8"?>
+		const book = parseEpub(
+			sampleEpub3({
+				"OEBPS/content.opf": `<?xml version="1.0" encoding="UTF-8"?>
 <package version="3.0" unique-identifier="uid">
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>无目录书</dc:title></metadata>
 <manifest>
@@ -282,7 +294,8 @@ describe("parseEpub EPUB2 与目录回退（㊼）", () => {
 </manifest>
 <spine><itemref idref="c1"/><itemref idref="c2"/></spine>
 </package>`,
-		}));
+			}),
+		);
 		expect(book.toc).toEqual([]);
 		expect(book.spine).toHaveLength(2);
 	});
@@ -300,13 +313,15 @@ describe("epubOutline / epubChapterTitleOf（㊼ 阅读器接线）", () => {
 	});
 
 	it("toc 为空时兜底「第 N 章」平铺（spine 顺序）", () => {
-		const book = parseEpub(sampleEpub3({
-			"OEBPS/content.opf": `<?xml version="1.0" encoding="UTF-8"?>
+		const book = parseEpub(
+			sampleEpub3({
+				"OEBPS/content.opf": `<?xml version="1.0" encoding="UTF-8"?>
 <package version="3.0"><metadata/><manifest>
 <item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
 <item id="c2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
 </manifest><spine><itemref idref="c1"/><itemref idref="c2"/></spine></package>`,
-		}));
+			}),
+		);
 		const outline = epubOutline(book);
 		expect(outline.map((e) => e.title)).toEqual(["第 1 章", "第 2 章"]);
 		expect(outline.map((e) => e.page)).toEqual([1, 2]);
@@ -332,20 +347,29 @@ describe("parseEpub 错误路径（中文文案，宁拒不赌）", () => {
 	});
 
 	it("缺 container.xml / container 无 rootfile / OPF 文件缺失 / 空 spine", () => {
-		expect(() => parseEpub(sampleEpub3({}, ["META-INF/container.xml"]))).toThrow(/container\.xml/);
+		expect(() => parseEpub(sampleEpub3({}, ["META-INF/container.xml"]))).toThrow(
+			/container\.xml/,
+		);
 		expect(() =>
-			parseEpub(sampleEpub3({
-				"META-INF/container.xml": '<container version="1.0"><rootfiles/></container>',
-			})),
+			parseEpub(
+				sampleEpub3({
+					"META-INF/container.xml": '<container version="1.0"><rootfiles/></container>',
+				}),
+			),
 		).toThrow(/rootfile/);
 		expect(() =>
-			parseEpub(sampleEpub3({
-				"META-INF/container.xml": CONTAINER.replace("OEBPS/content.opf", "OEBPS/missing.opf"),
-			})),
+			parseEpub(
+				sampleEpub3({
+					"META-INF/container.xml": CONTAINER.replace(
+						"OEBPS/content.opf",
+						"OEBPS/missing.opf",
+					),
+				}),
+			),
 		).toThrow(/missing\.opf/);
-		expect(() =>
-			parseEpub(sampleEpub3({ "OEBPS/content.opf": opfWithSpine("") })),
-		).toThrow(/可读章节/);
+		expect(() => parseEpub(sampleEpub3({ "OEBPS/content.opf": opfWithSpine("") }))).toThrow(
+			/可读章节/,
+		);
 	});
 });
 
@@ -364,9 +388,11 @@ describe("epubCoverBytes filter 限次提取（㊼ 主页封面）", () => {
 	});
 
 	it("无封面 → null；非 zip → null 不抛（封面是增强不是依赖）", () => {
-		const noCover = epubCoverBytes(sampleEpub3({
-			"OEBPS/content.opf": opfWithSpine('<itemref idref="c1"/>'),
-		}));
+		const noCover = epubCoverBytes(
+			sampleEpub3({
+				"OEBPS/content.opf": opfWithSpine('<itemref idref="c1"/>'),
+			}),
+		);
 		expect(noCover).toBeNull();
 		expect(epubCoverBytes(new Uint8Array([1, 2, 3]))).toBeNull();
 	});

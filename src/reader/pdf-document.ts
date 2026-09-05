@@ -6,7 +6,6 @@ import type {
 	PdfPageProxy,
 	PdfPageRef,
 	PdfRenderTask,
-	PdfViewport,
 	PdfjsLib,
 } from "./pdfjs-types";
 import type { LayoutItem } from "./auto-excerpt";

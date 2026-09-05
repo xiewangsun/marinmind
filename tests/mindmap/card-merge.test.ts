@@ -39,22 +39,70 @@ function makeCard(text: string) {
 describe("buildMergePatch 文本类字段并入", () => {
 	it("note 双有拼接空行分隔；目标空取源", () => {
 		const both = buildMergePatch(
-			{ note: "源批注", excerptText: null, title: null, deck: null, color: null, occlusions: [], tags: ["a"] },
-			{ note: "目标批注", excerptText: null, title: null, deck: null, color: null, occlusions: [], tags: [] },
+			{
+				note: "源批注",
+				excerptText: null,
+				title: null,
+				deck: null,
+				color: null,
+				occlusions: [],
+				tags: ["a"],
+			},
+			{
+				note: "目标批注",
+				excerptText: null,
+				title: null,
+				deck: null,
+				color: null,
+				occlusions: [],
+				tags: [],
+			},
 		);
 		expect(both.note).toBe("目标批注\n\n源批注");
 
 		const emptyTarget = buildMergePatch(
-			{ note: "源批注", excerptText: null, title: null, deck: null, color: null, occlusions: [], tags: [] },
-			{ note: null, excerptText: null, title: null, deck: null, color: null, occlusions: [], tags: [] },
+			{
+				note: "源批注",
+				excerptText: null,
+				title: null,
+				deck: null,
+				color: null,
+				occlusions: [],
+				tags: [],
+			},
+			{
+				note: null,
+				excerptText: null,
+				title: null,
+				deck: null,
+				color: null,
+				occlusions: [],
+				tags: [],
+			},
 		);
 		expect(emptyTarget.note).toBe("源批注");
 	});
 
 	it("目标有值的字段不动（excerptText/title/deck/color）；目标空取源", () => {
 		const patch = buildMergePatch(
-			{ note: null, excerptText: "源文", title: "源题", deck: "源组", color: "green", occlusions: [], tags: [] },
-			{ note: null, excerptText: "目标文", title: null, deck: null, color: null, occlusions: [], tags: [] },
+			{
+				note: null,
+				excerptText: "源文",
+				title: "源题",
+				deck: "源组",
+				color: "green",
+				occlusions: [],
+				tags: [],
+			},
+			{
+				note: null,
+				excerptText: "目标文",
+				title: null,
+				deck: null,
+				color: null,
+				occlusions: [],
+				tags: [],
+			},
 		);
 		expect(patch.excerptText).toBeUndefined(); // 目标有
 		expect(patch.title).toBe("源题"); // 目标空取源
@@ -64,15 +112,47 @@ describe("buildMergePatch 文本类字段并入", () => {
 
 	it("tags 并集去重（顺序：目标在前源在后）", () => {
 		const patch = buildMergePatch(
-			{ note: null, excerptText: null, title: null, deck: null, color: null, occlusions: [], tags: ["b", "c"] },
-			{ note: null, excerptText: null, title: null, deck: null, color: null, occlusions: [], tags: ["a", "b"] },
+			{
+				note: null,
+				excerptText: null,
+				title: null,
+				deck: null,
+				color: null,
+				occlusions: [],
+				tags: ["b", "c"],
+			},
+			{
+				note: null,
+				excerptText: null,
+				title: null,
+				deck: null,
+				color: null,
+				occlusions: [],
+				tags: ["a", "b"],
+			},
 		);
 		expect(patch.tags).toEqual(["a", "b", "c"]);
 
 		// 无新增不发 tags 补丁
 		const same = buildMergePatch(
-			{ note: null, excerptText: null, title: null, deck: null, color: null, occlusions: [], tags: ["a"] },
-			{ note: null, excerptText: null, title: null, deck: null, color: null, occlusions: [], tags: ["a"] },
+			{
+				note: null,
+				excerptText: null,
+				title: null,
+				deck: null,
+				color: null,
+				occlusions: [],
+				tags: ["a"],
+			},
+			{
+				note: null,
+				excerptText: null,
+				title: null,
+				deck: null,
+				color: null,
+				occlusions: [],
+				tags: ["a"],
+			},
 		);
 		expect(same.tags).toBeUndefined();
 	});
@@ -184,7 +264,7 @@ describe("mergeCardsInto store 级集成", () => {
 		const map2 = mindmaps.create("图2");
 		const a = makeCard("A");
 		const b = makeCard("B");
-		const an = mindmaps.addNode(map.id, a.id, null, 0, 0)!;
+		mindmaps.addNode(map.id, a.id, null, 0, 0)!;
 		const bn = mindmaps.addNode(map.id, b.id, null, 0, 100)!;
 		const an2 = mindmaps.addNode(map2.id, a.id, null, 0, 0)!;
 

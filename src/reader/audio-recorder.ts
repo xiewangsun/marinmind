@@ -10,12 +10,9 @@ const MIME_CANDIDATES = [
  * 选择当前环境支持的录音 MIME 类型（纯函数：isTypeSupported 可注入，便于测试回退链）。
  * 全部不支持返回 undefined（MediaRecorder 用默认编码）。
  */
-export function pickAudioMime(
-	isTypeSupported?: (mime: string) => boolean,
-): string | undefined {
+export function pickAudioMime(isTypeSupported?: (mime: string) => boolean): string | undefined {
 	const check =
-		isTypeSupported ??
-		((mime: string) => MediaRecorder.isTypeSupported?.(mime) ?? false);
+		isTypeSupported ?? ((mime: string) => MediaRecorder.isTypeSupported?.(mime) ?? false);
 	return MIME_CANDIDATES.find((m) => check(m));
 }
 

@@ -16,7 +16,10 @@ import type { BookDocument } from "../types";
  * （级联清理，含附件）。低频维护操作：不承诺与打开中的视图实时同步（与备份导入一致的取舍）。
  */
 export class DocumentManagerModal extends Modal {
-	constructor(app: App, private readonly plugin: MarinMindPlugin) {
+	constructor(
+		app: App,
+		private readonly plugin: MarinMindPlugin,
+	) {
 		super(app);
 	}
 
@@ -36,14 +39,18 @@ export class DocumentManagerModal extends Modal {
 
 		const docs = this.plugin.documents.list();
 		// 库外路径探活是异步 stat：逐文档并发判定后一次性渲染（㉟ 抽出共享判定，主页同源）
-		const presences = await Promise.all(docs.map((doc) => resolveDocPresence(this.app, doc.filePath)));
+		const presences = await Promise.all(
+			docs.map((doc) => resolveDocPresence(this.app, doc.filePath)),
+		);
 		const missing = presences.filter((p) => p === "missing" || p === "external-missing").length;
 		const external = presences.filter((p) => p.startsWith("external")).length;
 		contentEl.createEl("p", {
 			cls: "marinmind-doc-summary",
 			text:
 				`共 ${docs.length} 个文档，${missing} 个已失联（文件不在库中或库外路径已失效）` +
-				(external > 0 ? `，其中 ${external} 个为库外文档（桌面绝对路径，不进备份包）。` : "。") +
+				(external > 0
+					? `，其中 ${external} 个为库外文档（桌面绝对路径，不进备份包）。`
+					: "。") +
 				"重关联后卡片与复习进度全部保留；库内文件改名/移动通常会自动同步，" +
 				"库外文件同目录改名桌面端自动跟随（㊳），跨目录移动需手动重关联。",
 		});
@@ -83,9 +90,7 @@ export class DocumentManagerModal extends Modal {
 		row.createDiv({ cls: "marinmind-doc-cards", text: `${cardCount} 卡` });
 
 		const actions = row.createDiv({ cls: "marinmind-doc-actions" });
-		new ButtonComponent(actions)
-			.setButtonText("重关联")
-			.onClick(() => this.pickNewFile(doc));
+		new ButtonComponent(actions).setButtonText("重关联").onClick(() => this.pickNewFile(doc));
 		if (missing) {
 			new ButtonComponent(actions)
 				.setButtonText("删除记录")

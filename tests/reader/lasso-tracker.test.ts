@@ -40,7 +40,14 @@ describe("pathToNormPolygon", () => {
 	it("空/两点/共线 → null", () => {
 		expect(pathToNormPolygon([], 100, 100)).toBeNull();
 		expect(
-			pathToNormPolygon([{ x: 0, y: 0 }, { x: 1, y: 1 }], 100, 100),
+			pathToNormPolygon(
+				[
+					{ x: 0, y: 0 },
+					{ x: 1, y: 1 },
+				],
+				100,
+				100,
+			),
 		).toBeNull();
 	});
 

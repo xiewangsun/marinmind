@@ -19,7 +19,9 @@ function sampleFoldersMd(): string {
 describe("group-list 解析（76）", () => {
 	it("frontmatter 认领 + 行解析（folders/decks 各自标记）", () => {
 		expect(parseGroupListMd(sampleFoldersMd(), "folders")).toEqual(["学习", "学习/英语"]);
-		expect(parseGroupListMd(serializeGroupListMd("decks", ["英语"]), "decks")).toEqual(["英语"]);
+		expect(parseGroupListMd(serializeGroupListMd("decks", ["英语"]), "decks")).toEqual([
+			"英语",
+		]);
 	});
 
 	it("标记不符（folders 文件按 decks 解析）不认领 → null", () => {
@@ -32,7 +34,9 @@ describe("group-list 解析（76）", () => {
 	});
 
 	it("认领但无有效行 → []（手编删光 = 空清单合法）", () => {
-		expect(parseGroupListMd(sampleFoldersMd().split("\n").slice(0, 4).join("\n"), "folders")).toEqual([]);
+		expect(
+			parseGroupListMd(sampleFoldersMd().split("\n").slice(0, 4).join("\n"), "folders"),
+		).toEqual([]);
 	});
 
 	it("行归一化（空白变体归并）+ 去重 + 无效行跳过", () => {
@@ -100,7 +104,11 @@ describe("group-list 增删改纯函数（76）", () => {
 
 	it("renamePrefixInGroupList：前缀级联（自身替换 + 子路径跟随）；无命中原引用", () => {
 		const list = ["学习", "学习/英语", "工作"];
-		expect(renamePrefixInGroupList(list, "学习", "study")).toEqual(["study", "study/英语", "工作"]);
+		expect(renamePrefixInGroupList(list, "学习", "study")).toEqual([
+			"study",
+			"study/英语",
+			"工作",
+		]);
 		const l2 = ["工作"];
 		expect(renamePrefixInGroupList(l2, "学习", "study")).toBe(l2);
 	});

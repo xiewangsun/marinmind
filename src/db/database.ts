@@ -47,9 +47,9 @@ export class MarinMindDatabase {
 		}
 
 		// SqlJsConfig 类型未收录 wasmBinary 字段，但运行时支持——经 unknown 断言传入
-		const config = (opts.wasmBinary !== undefined ? { wasmBinary: opts.wasmBinary } : {}) as unknown as Parameters<
-			typeof initSqlJs
-		>[0];
+		const config = (opts.wasmBinary !== undefined
+			? { wasmBinary: opts.wasmBinary }
+			: {}) as unknown as Parameters<typeof initSqlJs>[0];
 		const SQL = await initSqlJs(config);
 
 		let existing: Uint8Array | undefined;
@@ -138,10 +138,7 @@ export class MarinMindDatabase {
 	exportBytes(): ArrayBuffer {
 		const data = this.db.export();
 		// 复制独立 buffer，避免依赖导出视图的生命周期
-		return data.buffer.slice(
-			data.byteOffset,
-			data.byteOffset + data.byteLength,
-		) as ArrayBuffer;
+		return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
 	}
 
 	/** 关闭内存库（调用前应先 flush 未落盘的写入） */

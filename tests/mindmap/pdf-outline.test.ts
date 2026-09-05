@@ -9,10 +9,7 @@ function entry(title: string, page: number | null, children: OutlineEntry[] = []
 
 describe("planOutlineChapters 目录建卡计划（55）", () => {
 	it("深度优先平铺：层级深度与 parentIndex 指向正确（父先子后，建卡按下标回挂）", () => {
-		const tree = [
-			entry("第一章", 1, [entry("1.1", 2), entry("1.2", 5)]),
-			entry("第二章", 20),
-		];
+		const tree = [entry("第一章", 1, [entry("1.1", 2), entry("1.2", 5)]), entry("第二章", 20)];
 		expect(planOutlineChapters(tree)).toEqual([
 			{ title: "第一章", page: 1, anchorY: null, depth: 0, parentIndex: null },
 			{ title: "1.1", page: 2, anchorY: null, depth: 1, parentIndex: 0 },

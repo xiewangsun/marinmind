@@ -18,10 +18,10 @@ describe("84-E diffAssetFiles 附件对账", () => {
 	});
 
 	it("双向并存：孤儿与缺失同报", () => {
-		const r = diffAssetFiles(["assets/orphan.png", "assets/ok.png"], [
-			"assets/ok.png",
-			"assets/gone.webm",
-		]);
+		const r = diffAssetFiles(
+			["assets/orphan.png", "assets/ok.png"],
+			["assets/ok.png", "assets/gone.webm"],
+		);
 		expect(r.orphans).toEqual(["assets/orphan.png"]);
 		expect(r.missing).toEqual(["assets/gone.webm"]);
 	});

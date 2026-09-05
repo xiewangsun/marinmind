@@ -598,6 +598,34 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	text-overflow: ellipsis;
 }
 
+/* 101 拖动重摆 grip：胶囊左缘竖排抓握点，拖动可把胶囊挪离正文 */
+.marinmind-blank-chip .marinmind-blank-grip {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	margin-left: -4px;
+	color: var(--text-faint);
+	cursor: grab;
+	/* grip 图标撑高命中区（图标 14px + 上下余量），不依赖 label 行高 */
+	padding: 2px 0;
+}
+
+.marinmind-blank-chip .marinmind-blank-grip:active {
+	cursor: grabbing;
+}
+
+.marinmind-blank-chip .marinmind-blank-grip .svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+.marinmind-blank-chip.is-dragging {
+	box-shadow: var(--mm-shadow-lg, 0 4px 14px rgba(0, 0, 0, 0.3));
+	opacity: 0.92;
+	z-index: 5; /* 拖动中浮到同页其他胶囊之上 */
+}
+
 /* 83-F 展开态：多行全文（32em / 30vh 内滚动） */
 .marinmind-blank-chip.is-expanded {
 	max-width: min(32em, 90%);
@@ -799,6 +827,8 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	text-overflow: ellipsis;
 }
 
+/* 92 批：搜索弹窗内标题与摘要共用行式配方（文字主体规则见下方搜索弹窗段） */
+
 .marinmind-picker-ext-badge {
 	flex-shrink: 0;
 	font-size: var(--font-ui-smaller);
@@ -824,23 +854,77 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 .marinmind-search-modal {
 	width: min(560px, 90vw);
 	padding: 0.8em 0.9em 0.6em;
+	box-sizing: border-box; /* 92 批：防止 padding 撑破 modal 宽度 */
 }
 
+/* 93 批：标题美化——放大镜 icon + 文案居中行内排布，小号弱化配色
+   （覆盖 .modal-title 默认的 1.2em 居中大字） */
+.marinmind-search-modal-title {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.45em;
+	margin: 0 0 0.6em;
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: var(--text-muted);
+}
+
+.marinmind-search-modal-title .svg-icon {
+	width: 1em;
+	height: 1em;
+}
+
+/* 92 批：输入框占据 90% 宽度，左右各留 5% 边距 */
 .marinmind-search-modal-input {
-	width: 100%;
+	width: 90%;
+	max-width: none;
 	margin-bottom: 0.6em;
+	margin-left: 5%;
+	box-sizing: border-box;
 }
 
-/* 结果列表：限高滚动（大量命中不撑爆弹窗） */
+/* 结果列表：限高滚动（大量命中不撑爆弹窗）；93 批左右各缩 5% 与输入框
+   两缘对齐（文字对齐输入框左缘、徽标对齐右缘；百分比基于同一父容器基准） */
 .marinmind-search-modal-list {
-	max-height: 45vh;
+	max-height: 60vh;
 	overflow-y: auto;
+	padding: 0 5%;
 }
 
+/* 滚动条收窄：出现时不把右缘徽标推离输入框右缘太远 */
+.marinmind-search-modal-list::-webkit-scrollbar {
+	width: 6px;
+}
+
+/* 空态文案：居中弱化 */
+.marinmind-search-modal-empty {
+	padding: 1.2em 5%;
+	text-align: center;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+}
+
+/* 底部计数：右对齐弱化（与列表 5% 缩进对齐） */
+.marinmind-search-modal-count {
+	padding: 0.45em 5% 0;
+	text-align: right;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+/* 92 批行式重排：结果行 = 文字左对齐占满剩余宽 + 徽标（文档页码 / 脑图摘录
+   类型）行尾右对齐同一行；文字过长在自身宽度内自动换行，徽标不缩不换行。
+   93 批：横向缩进交给列表 5% padding（行文字/徽标与输入框两缘精确对齐），
+   行内只留纵向 padding——悬停/选中底色与输入框同宽同位 */
 .marinmind-search-modal-item {
-	padding: 0.45em 0.6em;
+	padding: 0.45em 0;
 	border-radius: var(--radius-s);
 	cursor: var(--cursor);
+	display: flex;
+	align-items: baseline;
+	gap: 0.5em;
 }
 
 .marinmind-search-modal-item:hover,
@@ -848,35 +932,23 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	background: var(--background-modifier-hover);
 }
 
-.marinmind-search-modal-item.is-selected .marinmind-picker-title {
+.marinmind-search-modal-item.is-selected .marinmind-picker-title,
+.marinmind-search-modal-item.is-selected .marinmind-search-modal-snippet {
 	color: var(--text-accent);
 }
 
-/* 命中字段徽标（标题/批注/摘录）：与 picker-ext-badge 同配方，颜色中性区分 */
+/* 命中徽标（文档页码/章段 · 脑图标题/批注/摘录）：与 picker-ext-badge 同配方，
+   颜色中性区分；行尾右对齐、不缩不换行 */
 .marinmind-search-modal-badge {
-	flex-shrink: 0;
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 999px;
-	padding: 0 0.5em;
-}
-
-/* 91 批文档内搜索结果行重排：徽标独占置顶行 + 摘要两行截断 + mark 高亮。
-   子级选择器作用域——脑图搜索的 badge 在 picker-name 内不是 item 直接子级，不受影响 */
-.marinmind-search-modal-item > .marinmind-search-modal-badge {
+	padding: 0 0.4em;
 	display: inline-block;
-	margin-bottom: 0.2em;
-}
-
-.marinmind-search-modal-snippet {
-	font-size: var(--font-ui-small);
-	color: var(--text-normal);
-	word-break: break-word;
-	display: -webkit-box;
-	-webkit-box-orient: vertical;
-	-webkit-line-clamp: 2;
-	overflow: hidden;
+	line-height: 1.4;
+	white-space: nowrap;
+	flex-shrink: 0;
 }
 
 /* 命中词高亮：主题高亮底色，选中行文字转 accent 时保持可读 */
@@ -887,21 +959,21 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	border-radius: 2px;
 }
 
-.marinmind-search-modal-item.is-selected .marinmind-search-modal-snippet {
-	color: var(--text-accent); /* 镜像脑图搜索 picker-title 选中配色 */
-}
-
-.marinmind-search-modal-empty {
-	padding: 1.2em 0.6em;
-	color: var(--text-faint);
-	text-align: center;
-}
-
-.marinmind-search-modal-count {
-	margin-top: 0.4em;
-	color: var(--text-faint);
-	font-size: var(--font-ui-smaller);
-	text-align: right;
+/* 搜索文字主体（文档摘要 / 脑图节点文字）：左对齐、占满剩余宽自动换行，
+   最多 3 行截断 */
+.marinmind-search-modal-snippet,
+.marinmind-search-modal .marinmind-picker-title {
+	flex: 1;
+	min-width: 0;
+	font-size: var(--font-ui-small);
+	color: var(--text-normal);
+	word-break: break-word;
+	white-space: normal;
+	line-height: 1.5;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	overflow: hidden;
 }
 
 /* 89-D 文档内搜索：PDF 命中行闪烁框（页容器内 absolute 覆盖层，不动文本 DOM；
@@ -1476,6 +1548,71 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 .marinmind-review-hint {
 	text-align: center;
 	color: var(--text-muted); /* P0-3：键位提示是真实信息（faint 40% 透明看不清） */
+	font-size: var(--font-ui-smaller);
+}
+
+/* 101 AI 复习助手：按钮行 + 提示结果 + 选择题自测 */
+.marinmind-review-ai-row {
+	display: flex;
+	gap: 0.5em;
+	justify-content: center;
+}
+
+.marinmind-review-btn.is-ai {
+	flex: 0 0 auto;
+	padding: 0.35em 1em;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-accent);
+}
+
+.marinmind-review-ai-result {
+	padding: 0.6em 0.9em;
+	border-left: 2px solid var(--interactive-accent);
+	border-radius: var(--radius-s, 4px);
+	background: var(--background-secondary);
+	font-size: var(--font-ui-smaller);
+	white-space: pre-wrap;
+}
+
+.marinmind-review-quiz {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4em;
+}
+
+.marinmind-review-quiz-option {
+	padding: 0.5em 0.9em;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	background: var(--interactive-normal);
+	color: var(--text-normal);
+	font: inherit;
+	font-size: var(--font-ui-smaller);
+	text-align: left;
+	cursor: pointer;
+	white-space: pre-wrap;
+}
+
+.marinmind-review-quiz-option:hover:not(:disabled) {
+	background: var(--interactive-hover);
+}
+
+/* 锁定态上色：正确绿显（无论选没选对都揭示），选错的错色 */
+.marinmind-review-quiz-option.is-correct {
+	border-color: var(--color-green, #4caf50);
+	color: var(--color-green, #4caf50);
+	background: transparent;
+}
+
+.marinmind-review-quiz-option.is-wrong {
+	border-color: var(--text-error);
+	color: var(--text-error);
+	background: transparent;
+}
+
+.marinmind-review-quiz-note {
+	text-align: center;
+	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 }
 
@@ -3152,6 +3289,337 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	margin-top: 12px;
 }
 
+/* ===== AI 预设管理弹窗（96）===== */
+.marinmind-ai-preset-empty {
+	padding: 10px 12px;
+	border: 1px dashed var(--background-modifier-border);
+	border-radius: 6px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	margin-bottom: 8px;
+}
+
+.marinmind-ai-preset-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	margin-bottom: 6px;
+	cursor: pointer;
+}
+
+.marinmind-ai-preset-row:hover {
+	background: var(--background-modifier-hover);
+}
+
+.marinmind-ai-preset-row.is-active {
+	border-color: var(--interactive-accent);
+}
+
+.marinmind-ai-preset-main {
+	flex: 1;
+	min-width: 0;
+}
+
+.marinmind-ai-preset-name {
+	font-weight: 600;
+}
+
+.marinmind-ai-preset-meta {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.marinmind-ai-preset-actions {
+	display: flex;
+	gap: 2px;
+	flex-shrink: 0;
+}
+
+.marinmind-ai-preset-row.is-active .marinmind-ai-preset-toggle {
+	color: var(--interactive-accent);
+}
+
+.marinmind-ai-preset-add {
+	margin-top: 4px;
+}
+
+.marinmind-ai-preset-field {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 8px;
+}
+
+.marinmind-ai-preset-field label {
+	width: 72px;
+	flex-shrink: 0;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.marinmind-ai-preset-input {
+	flex: 1;
+	min-width: 0;
+}
+
+/* 97 自定义 AI 指令弹窗：指令多行文本（同款字段行布局，纵向占满） */
+.marinmind-ai-prompt-input {
+	flex: 1;
+	min-width: 0;
+	width: 100%;
+	min-height: 96px;
+	resize: vertical;
+}
+
+/* ===== AI 助手对话面板（98，右停靠 ItemView）===== */
+.marinmind-ai-chat {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	padding: 0;
+}
+
+.marinmind-ai-chat-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.marinmind-ai-chat-scope {
+	flex: 1;
+	min-width: 0;
+	font-size: var(--font-ui-small);
+}
+
+.marinmind-ai-chat-list {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.marinmind-ai-chat-empty {
+	margin: auto;
+	padding: 16px;
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	text-align: center;
+	line-height: 1.7;
+}
+
+.marinmind-ai-chat-msg {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+}
+
+.marinmind-ai-chat-msg.is-user {
+	align-items: flex-end;
+}
+
+.marinmind-ai-chat-bubble {
+	max-width: 92%;
+	padding: 8px 12px;
+	border-radius: var(--radius-m, 8px);
+	font-size: var(--font-ui-small);
+	line-height: 1.65;
+	white-space: pre-wrap;
+	word-break: break-word;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+}
+
+.marinmind-ai-chat-msg.is-user .marinmind-ai-chat-bubble {
+	background: var(--background-modifier-hover);
+	border-color: var(--interactive-accent);
+}
+
+.marinmind-ai-chat-bubble.is-loading {
+	color: var(--text-muted);
+}
+
+.marinmind-ai-chat-error {
+	border-color: var(--text-error);
+	color: var(--text-error);
+}
+
+.marinmind-ai-chat-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 6px;
+}
+
+.marinmind-ai-chat-chip {
+	font-size: var(--font-ui-smaller);
+	padding: 2px 8px;
+	border-radius: 999px;
+	border: 1px solid var(--interactive-accent);
+	color: var(--interactive-accent);
+	background: transparent;
+	cursor: pointer;
+}
+
+.marinmind-ai-chat-chip:hover {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.marinmind-ai-chat-foot {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
+	padding: 8px 10px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.marinmind-ai-chat-input {
+	flex: 1;
+	min-width: 0;
+	resize: none;
+	font-size: var(--font-ui-small);
+	line-height: 1.5;
+}
+
+.marinmind-ai-chat-send {
+	flex-shrink: 0;
+}
+
+/* ===== AI 摘要弹窗（98）===== */
+.marinmind-ai-summary-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 8px;
+}
+
+.marinmind-ai-summary-row label {
+	width: 72px;
+	flex-shrink: 0;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.marinmind-ai-summary-progress {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	min-height: 1.4em;
+	margin-bottom: 6px;
+}
+
+/* ===== AI 制卡 / 相关卡推荐弹窗（99，列表勾选交互镜像 74 批 AutoExcerptModal）===== */
+.marinmind-ai-cardgen {
+	max-height: 70vh;
+	display: flex;
+	flex-direction: column;
+}
+
+.marinmind-ai-cardgen-loading {
+	padding: 10px 12px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.marinmind-ai-cardgen-list {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+}
+
+.marinmind-ai-cardgen-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 8px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	margin-bottom: 6px;
+}
+
+.marinmind-ai-cardgen-row input[type="checkbox"] {
+	margin-top: 3px;
+	flex-shrink: 0;
+}
+
+.marinmind-ai-cardgen-main {
+	flex: 1;
+	min-width: 0;
+}
+
+.marinmind-ai-cardgen-front {
+	font-weight: 600;
+}
+
+.marinmind-ai-cardgen-back {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	margin-top: 2px;
+	overflow-wrap: anywhere;
+}
+
+.marinmind-ai-cardgen-kind {
+	flex-shrink: 0;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	padding: 1px 6px;
+	margin-top: 2px;
+}
+
+.marinmind-ai-cardgen-kind.is-qa {
+	color: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+}
+
+/* ===== AI 大纲预览行（100，树形缩进 + 页码标签）===== */
+.marinmind-ai-outline-row {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 3px 10px;
+}
+
+.marinmind-ai-outline-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.marinmind-ai-outline-page {
+	flex-shrink: 0;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.marinmind-ai-outline-page.is-invalid {
+	color: var(--text-faint);
+}
+
+.marinmind-ai-preset-editor-actions {
+	display: flex;
+	justify-content: space-between;
+	margin-top: 12px;
+}
+
+.marinmind-ai-preset-editor-right {
+	display: flex;
+	gap: 8px;
+}
+
 /* ===== 83-E 翻译侧栏页签（观感主体复用上方 marinmind-tr-* 配方） ===== */
 .marinmind-tt-head {
 	margin: 4px 0 2px;
@@ -3598,26 +4066,38 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	background: var(--mm-hl-line);
 }
 
+/* 95 批：长标题两行截断且正文列封顶 60%——超长自动换行，两行后省略
+   （原文单行省略导致长文件名/长卡片文字几乎不可读；60% 上限给右侧
+   徽标/meta 留稳定空间，正文不横贯整行） */
 .marinmind-home-row-title {
 	font-size: 0.8125rem;
-	white-space: nowrap;
+	max-width: 60%;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
 	overflow: hidden;
-	text-overflow: ellipsis;
+	word-break: break-word;
 }
 
+/* 95 批：次行（路径/出处/统计）同享 60% 列宽 + 两行截断——长文件路径、
+   《书名》·页出处不再单行急促截断（原 nowrap + 省略） */
 .marinmind-home-row-sub {
 	font-size: 0.75rem;
 	color: var(--text-muted);
-	white-space: nowrap;
+	max-width: 60%;
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
 	overflow: hidden;
-	text-overflow: ellipsis;
+	word-break: break-word;
 }
 
 /* 91 批卡片行摘要第二行：标题未吸收字段（批注/摘录文字）两行截断——
-   OCR 长文字正文首屏可见，区别于 sub 行的出处信息 */
+   OCR 长文字正文首屏可见，区别于 sub 行的出处信息；95 批同享 60% 正文列宽 */
 .marinmind-home-row-summary {
 	font-size: 0.75rem;
 	color: var(--text-muted);
+	max-width: 60%;
 	display: -webkit-box;
 	-webkit-box-orient: vertical;
 	-webkit-line-clamp: 2;

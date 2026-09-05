@@ -10,7 +10,6 @@ import {
 	effectiveBranchStyle,
 	fitViewportTransform,
 	frameRectFor,
-	FRAME_COLS,
 	FRAME_PADDING,
 	GAP_X,
 	GAP_Y,
@@ -63,7 +62,12 @@ describe("mindmap-graph 图纯逻辑", () => {
 	});
 
 	it("isDescendantOrSelf：直接子 / 孙 / 自身为 true，无关为 false", () => {
-		const nodes = [makeNode("a", null), makeNode("b", "a"), makeNode("c", "b"), makeNode("x", null)];
+		const nodes = [
+			makeNode("a", null),
+			makeNode("b", "a"),
+			makeNode("c", "b"),
+			makeNode("x", null),
+		];
 		expect(isDescendantOrSelf(nodes, "a", "a")).toBe(true); // 自身
 		expect(isDescendantOrSelf(nodes, "a", "b")).toBe(true); // 直接子
 		expect(isDescendantOrSelf(nodes, "a", "c")).toBe(true); // 孙
@@ -84,7 +88,10 @@ describe("mindmap-graph 图纯逻辑", () => {
 		const first = suggestChildPosition(parent, []);
 		expect(first).toEqual({ x: 100 + NODE_WIDTH + GAP_X, y: 200 });
 
-		const siblings = [{ x: 0, y: 300 }, { x: 0, y: 500 }];
+		const siblings = [
+			{ x: 0, y: 300 },
+			{ x: 0, y: 500 },
+		];
 		const next = suggestChildPosition(parent, siblings);
 		expect(next.x).toBe(first.x);
 		expect(next.y).toBe(500 + NODE_HEIGHT_EST + GAP_Y);
@@ -104,7 +111,9 @@ describe("mindmap-graph 图纯逻辑", () => {
 		// 父 (0,0)、子 (500,0)，均无 h：y 锚 = NODE_HEIGHT_EST/2；dx = |500-200|/2 = 150（区间内）
 		const path = edgePath({ x: 0, y: 0 }, { x: 500, y: 0 });
 		const mid = NODE_HEIGHT_EST / 2;
-		expect(path).toBe(`M ${NODE_WIDTH} ${mid} C ${NODE_WIDTH + 150} ${mid}, ${500 - 150} ${mid}, 500 ${mid}`);
+		expect(path).toBe(
+			`M ${NODE_WIDTH} ${mid} C ${NODE_WIDTH + 150} ${mid}, ${500 - 150} ${mid}, 500 ${mid}`,
+		);
 	});
 
 	it("edgePath：传入实测高度时锚点按中点偏移；近距离收紧控制点", () => {
@@ -223,7 +232,9 @@ describe("mindmap-graph 图纯逻辑", () => {
 	});
 
 	it("collapsedAncestorsOf：孤儿（父悬空）空数组；成环脏数据不死循环且环内截断", () => {
-		expect(collapsedAncestorsOf([makeNode("a", null), makeNode("o", "missing")], "o")).toEqual([]);
+		expect(collapsedAncestorsOf([makeNode("a", null), makeNode("o", "missing")], "o")).toEqual(
+			[],
+		);
 		// b ↔ c 成环：从 c 上溯经 b 后回到 c 截断（环外节点不可达）
 		const cyclic = [
 			makeNode("a", null, 0, 0, true),
@@ -305,7 +316,9 @@ describe("mindmap-graph 图纯逻辑", () => {
 
 	it("linkEdgePath：水平主导（b 在 a 右）取 a 右缘中点 → b 左缘中点", () => {
 		const d = linkEdgePath({ x: 0, y: 0 }, { x: NODE_WIDTH + GAP_X, y: 0 });
-		expect(d).toBe(`M ${NODE_WIDTH} ${NODE_HEIGHT_EST / 2} L ${NODE_WIDTH + GAP_X} ${NODE_HEIGHT_EST / 2}`);
+		expect(d).toBe(
+			`M ${NODE_WIDTH} ${NODE_HEIGHT_EST / 2} L ${NODE_WIDTH + GAP_X} ${NODE_HEIGHT_EST / 2}`,
+		);
 	});
 
 	it("linkEdgePath：左侧镜像（b 在 a 左）取 a 左缘 → b 右缘", () => {
@@ -325,7 +338,10 @@ describe("mindmap-graph 图纯逻辑", () => {
 		// r → { b1, b2 }（均为叶）：b1 y=0、b2 y=H+GAP；r 居中于 [0, 2H+GAP]
 		const nodes = [makeNode("r", null), makeNode("b1", "r"), makeNode("b2", "r")];
 		const pos = layoutTree(nodes);
-		expect(pos.get("r")).toEqual({ x: 0, y: (2 * NODE_HEIGHT_EST + GAP_Y - NODE_HEIGHT_EST) / 2 });
+		expect(pos.get("r")).toEqual({
+			x: 0,
+			y: (2 * NODE_HEIGHT_EST + GAP_Y - NODE_HEIGHT_EST) / 2,
+		});
 		expect(pos.get("b1")).toEqual({ x: NODE_WIDTH + GAP_X, y: 0 });
 		expect(pos.get("b2")).toEqual({
 			x: NODE_WIDTH + GAP_X,
@@ -349,11 +365,7 @@ describe("mindmap-graph 图纯逻辑", () => {
 
 	it("layoutTree：多根（含孤儿）自上而下纵向堆叠 ROOT_GAP_Y", () => {
 		// 两棵单叶树：r1 块 [0, H]，r2 顶 = H + ROOT_GAP_Y；孤儿 o 视为根继续顺延
-		const nodes = [
-			makeNode("r1", null),
-			makeNode("r2", null),
-			makeNode("o", "missing-parent"),
-		];
+		const nodes = [makeNode("r1", null), makeNode("r2", null), makeNode("o", "missing-parent")];
 		const pos = layoutTree(nodes);
 		expect(pos.get("r1")!.y).toBe(0);
 		expect(pos.get("r2")!.y).toBe(NODE_HEIGHT_EST + ROOT_GAP_Y);
@@ -461,7 +473,9 @@ describe("mindmap-graph 图纯逻辑", () => {
 		expect(skew).toBe("M 200 40 H 350 V 130 H 500");
 		// 子在父左侧：自动换向
 		const rev = edgePath({ x: 500, y: 0 }, { x: 0, y: 0 }, "line");
-		expect(rev).toBe(`M 500 ${mid} H ${NODE_WIDTH + (500 - NODE_WIDTH) / 2} V ${mid} H ${NODE_WIDTH}`);
+		expect(rev).toBe(
+			`M 500 ${mid} H ${NODE_WIDTH + (500 - NODE_WIDTH) / 2} V ${mid} H ${NODE_WIDTH}`,
+		);
 	});
 
 	it("edgePath frame：无连线（null，层级由收纳框表达）", () => {
@@ -535,7 +549,14 @@ describe("mindmap-graph 图纯逻辑", () => {
 			x: 100 - NODE_WIDTH - GAP_X,
 			y: 200,
 		});
-		const two = suggestChildPosition(parent, [{ x: 0, y: 0 }, { x: 0, y: 90 }], "tree-left");
+		const two = suggestChildPosition(
+			parent,
+			[
+				{ x: 0, y: 0 },
+				{ x: 0, y: 90 },
+			],
+			"tree-left",
+		);
 		expect(two.x).toBe(100 - NODE_WIDTH - GAP_X);
 		expect(two.y).toBe(90 + NODE_HEIGHT_EST + GAP_Y);
 		const down = suggestChildPosition(parent, [{ x: 0, y: 0 }], "tree-down");
@@ -546,10 +567,7 @@ describe("mindmap-graph 图纯逻辑", () => {
 	});
 
 	it("dropPlacement：父节点样式感知落位（tree-left 覆盖 → 落左侧）", () => {
-		const nodes = [
-			makeNode("r", null, 0, 0, false, "tree-left"),
-			makeNode("a", "r"),
-		];
+		const nodes = [makeNode("r", null, 0, 0, false, "tree-left"), makeNode("a", "r")];
 		const p = dropPlacement(nodes, "a", { x: 999, y: 999 }, "tree");
 		expect(p.parentId).toBe("a");
 		expect(p.x).toBe(-NODE_WIDTH - GAP_X); // 继承祖先 r 的 tree-left 覆盖
@@ -609,7 +627,10 @@ describe("mindmap-graph 图纯逻辑", () => {
 		expect(pos.get("b2")).toEqual({ x: NODE_WIDTH + GAP_X, y: NODE_HEIGHT_EST + GAP_Y });
 		expect(pos.get("b3")).toEqual({ x: -(NODE_WIDTH + GAP_X), y: 0 });
 		// 父 x 不动（0），y 居中于两侧子块 [0, 2H+GAP]
-		expect(pos.get("r")).toEqual({ x: 0, y: (2 * NODE_HEIGHT_EST + GAP_Y - NODE_HEIGHT_EST) / 2 });
+		expect(pos.get("r")).toEqual({
+			x: 0,
+			y: (2 * NODE_HEIGHT_EST + GAP_Y - NODE_HEIGHT_EST) / 2,
+		});
 		// bidir 的子节点继承单侧样式：b1 的孙（map 默认 tree 下仍延续右向 tree）
 		const deep = [
 			makeNode("r", null, 0, 0, false, "bidir"),
@@ -703,11 +724,7 @@ describe("mindmap-graph 图纯逻辑", () => {
 	});
 
 	it("layoutTree：图默认样式作用于未覆盖节点（mapDefault=line）", () => {
-		const nodes = [
-			makeNode("r", null),
-			makeNode("b1", "r"),
-			makeNode("b2", "r"),
-		];
+		const nodes = [makeNode("r", null), makeNode("b1", "r"), makeNode("b2", "r")];
 		const pos = layoutTree(nodes, "line");
 		expect(pos.get("r")).toEqual({ x: 0, y: 0 });
 		expect(pos.get("b1")).toEqual({ x: NODE_WIDTH + GAP_X, y: 0 });
@@ -861,7 +878,15 @@ describe("autoCollectPlacement 摘录自动入图落点（⑲）", () => {
 		documentId: string | null,
 		page: number | null,
 	) {
-		return { id, parentId, x, y, collapsed: false, branchStyle: null, card: { documentId, page } };
+		return {
+			id,
+			parentId,
+			x,
+			y,
+			collapsed: false,
+			branchStyle: null,
+			card: { documentId, page },
+		};
 	}
 
 	it("已有分组节点：摘录卡挂其下并与既有兄弟顺延", () => {
@@ -900,7 +925,9 @@ describe("autoCollectPlacement 摘录自动入图落点（⑲）", () => {
 	it("分组判定：同文档摘录卡（page 非空）不算分组，手工卡（documentId null）不误配", () => {
 		// docA 只有摘录卡、无分组节点 → 新摘录仍要建分组
 		const onlyExcerpt = [makeCardNode("k", null, 0, 0, "docA", 5)];
-		expect(autoCollectPlacement(onlyExcerpt, { documentId: "docA", page: 6 }).createGroup).toBe(true);
+		expect(autoCollectPlacement(onlyExcerpt, { documentId: "docA", page: 6 }).createGroup).toBe(
+			true,
+		);
 
 		// 手工卡 documentId 为 null：即便图里有 documentId=null 的节点也不构成"分组"
 		const onlyManual = [makeCardNode("m", null, 0, 0, null, null)];
@@ -911,7 +938,15 @@ describe("autoCollectPlacement 摘录自动入图落点（⑲）", () => {
 
 	it("已有分组且分组带样式覆盖：子落位方向随分组生效样式", () => {
 		const nodes = [
-			{ id: "g", parentId: null, x: 0, y: 0, collapsed: false, branchStyle: "tree-left", card: { documentId: "docA", page: null } },
+			{
+				id: "g",
+				parentId: null,
+				x: 0,
+				y: 0,
+				collapsed: false,
+				branchStyle: "tree-left",
+				card: { documentId: "docA", page: null },
+			},
 		];
 		const plan = autoCollectPlacement(nodes, { documentId: "docA", page: 2 }, "tree");
 		expect(plan.parentId).toBe("g");
@@ -919,7 +954,6 @@ describe("autoCollectPlacement 摘录自动入图落点（⑲）", () => {
 		expect(plan.childPos).toEqual({ x: -(NODE_WIDTH + GAP_X), y: 0 });
 	});
 });
-
 
 describe("snapDragPosition（58 拖拽对齐吸附 + 网格兜底）", () => {
 	it("无候选：两轴都回落 20px 网格取整，无参考线", () => {

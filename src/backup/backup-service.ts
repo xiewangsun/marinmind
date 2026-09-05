@@ -158,7 +158,10 @@ export function importBackupFromBytes(plugin: MarinMindPlugin, bytes: ArrayBuffe
  * → 组装 v2 内容走既有 doImport 整库替换链路。
  */
 async function doLegacyImport(plugin: MarinMindPlugin, legacy: LegacyBackupContent): Promise<void> {
-	const notice = new Notice("MarinMind：正在转换旧格式备份（SQLite → Markdown）…（大库可能卡顿数秒）", 0);
+	const notice = new Notice(
+		"MarinMind：正在转换旧格式备份（SQLite → Markdown）…（大库可能卡顿数秒）",
+		0,
+	);
 	try {
 		const { notes, warnings } = await legacyDbBytesToNotes(legacy.dbBytes);
 		notice.hide();
@@ -183,7 +186,9 @@ async function doLegacyImport(plugin: MarinMindPlugin, legacy: LegacyBackupConte
 	} catch (err) {
 		console.error("[MarinMind] 旧格式备份转换失败", err);
 		notice.hide();
-		new Notice(`MarinMind：旧格式备份导入失败：${err instanceof Error ? err.message : String(err)}`);
+		new Notice(
+			`MarinMind：旧格式备份导入失败：${err instanceof Error ? err.message : String(err)}`,
+		);
 	}
 }
 
@@ -232,7 +237,10 @@ async function doImport(plugin: MarinMindPlugin, content: BackupContent): Promis
 			}
 			try {
 				await ensureParentFolder(plugin.app, doc.path);
-				await plugin.app.vault.createBinary(doc.path, doc.bytes.slice().buffer as ArrayBuffer);
+				await plugin.app.vault.createBinary(
+					doc.path,
+					doc.bytes.slice().buffer as ArrayBuffer,
+				);
 				restored++;
 			} catch (err) {
 				console.warn(`[MarinMind] 恢复文档失败：${doc.path}`, err);
@@ -254,11 +262,16 @@ async function doImport(plugin: MarinMindPlugin, content: BackupContent): Promis
 		// 7) 内存中各视图仍持有旧数据快照，最干净的生效方式是整库重载
 		notice.hide();
 		if (Platform.isDesktopApp) {
-			new Notice(`MarinMind：导入完成（恢复 ${restored} 个文档，跳过 ${skipped} 个），正在重载…`, 6000);
+			new Notice(
+				`MarinMind：导入完成（恢复 ${restored} 个文档，跳过 ${skipped} 个），正在重载…`,
+				6000,
+			);
 			// App 类型未公开 commands 字段，做最小形状断言
-			(plugin.app as unknown as {
-				commands: { executeCommandById(id: string): unknown };
-			}).commands.executeCommandById("app:reload");
+			(
+				plugin.app as unknown as {
+					commands: { executeCommandById(id: string): unknown };
+				}
+			).commands.executeCommandById("app:reload");
 		} else {
 			// 移动端无 app:reload；窗口期内继续操作会用旧内存库覆盖导入数据，必须立即重启
 			new Notice(
@@ -286,10 +299,7 @@ async function collectNoteEntries(
 }
 
 /** 递归收集 md 文件（根相对路径）；目录不存在返回空 */
-async function collectMdFiles(
-	adapter: ListableStorageAdapter,
-	dir: string,
-): Promise<string[]> {
+async function collectMdFiles(adapter: ListableStorageAdapter, dir: string): Promise<string[]> {
 	const listed = await adapter.list(dir);
 	const files = listed.files.filter((f) => f.endsWith(".md"));
 	for (const sub of listed.folders) {

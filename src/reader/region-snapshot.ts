@@ -43,10 +43,9 @@ function encodeCanvas(canvas: HTMLCanvasElement): Promise<SnapshotImage> {
 					reject(new Error(`画布导出 ${useWebp ? "WebP" : "PNG"} 失败`));
 					return;
 				}
-				void blob.arrayBuffer().then(
-					(bytes) => resolve({ bytes, ext: useWebp ? "webp" : "png" }),
-					reject,
-				);
+				void blob
+					.arrayBuffer()
+					.then((bytes) => resolve({ bytes, ext: useWebp ? "webp" : "png" }), reject);
 			},
 			useWebp ? "image/webp" : "image/png",
 			useWebp ? WEBP_QUALITY : undefined,

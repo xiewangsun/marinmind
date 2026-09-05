@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { clientFromScreen, geomOf, viewportOrigin, type WindowGeom } from "../../src/reader/window-hit";
+import {
+	clientFromScreen,
+	geomOf,
+	viewportOrigin,
+	type WindowGeom,
+} from "../../src/reader/window-hit";
 
 /**
  * 构造典型桌面窗口几何（79-6 近似模型）：100,50 起，外框 1016×746、

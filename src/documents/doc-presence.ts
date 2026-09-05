@@ -10,7 +10,8 @@ import { isAbsoluteFsPath } from "../storage/paths";
  *
  * ㉟ 从 DocumentManagerModal 抽出（原 private resolvePresence）——主页文档页复用同一判定。
  */
-export type DocPresence = "ok" | "missing" | "external-ok" | "external-missing" | "external-unknown";
+export type DocPresence =
+	"ok" | "missing" | "external-ok" | "external-missing" | "external-unknown";
 
 /** 判定文档路径就位状态（库内 vault 解析 / 库外桌面 stat 探活 / 移动端库外不断言） */
 export async function resolveDocPresence(app: App, filePath: string): Promise<DocPresence> {

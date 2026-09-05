@@ -1,0 +1,14 @@
+# 构建产物与依赖
+main.js
+node_modules
+package-lock.json
+
+# 文档（散文/表格排版不经格式化器，保持手写原样）
+docs
+*.md
+
+# 会话/工具产物
+.claude
+.agents
+skills-lock.json
+versions.json

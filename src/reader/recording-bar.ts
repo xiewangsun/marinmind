@@ -38,11 +38,8 @@ export class RecordingBar {
 		const drop = this.el.createEl("button", { text: "丢弃" });
 		// R3（W-10）：录音不可恢复，丢弃前二次确认（镜像媒体预览「重录」先例）
 		drop.addEventListener("click", () => {
-			new ConfirmModal(
-				this.opts.app,
-				"丢弃录音",
-				"删除当前录音？此操作不可恢复。",
-				() => this.opts.onDiscard(),
+			new ConfirmModal(this.opts.app, "丢弃录音", "删除当前录音？此操作不可恢复。", () =>
+				this.opts.onDiscard(),
 			).open();
 		});
 		this.refresh();

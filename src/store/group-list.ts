@@ -128,7 +128,10 @@ export function addToGroupList(list: readonly string[], path: string): readonly 
 }
 
 /** 移除子树内全部路径（含自身；空树无变化原样返回） */
-export function removeSubtreeFromGroupList(list: readonly string[], path: string): readonly string[] {
+export function removeSubtreeFromGroupList(
+	list: readonly string[],
+	path: string,
+): readonly string[] {
 	const next = list.filter((p) => !inSubtree(p, path));
 	return next.length === list.length ? list : next;
 }

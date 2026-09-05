@@ -1,8 +1,4 @@
-import {
-	isBranchStyle,
-	type Mindmap,
-	type MindmapNode,
-} from "../types";
+import { isBranchStyle, type Mindmap, type MindmapNode } from "../types";
 import { compareSiblings } from "../mindmap/mindmap-graph";
 import { newId } from "../utils";
 import { MM_COMMENT_PREFIX, sanitizeFileName } from "./book-format";
@@ -56,10 +52,7 @@ const KNOWN_MINDMAP_FM_KEYS = new Set([
 ]);
 
 /** 解析一个脑图文件 */
-export function parseMindmapMd(
-	text: string,
-	opts: ParseMindmapOptions = {},
-): ParsedMindmapFile {
+export function parseMindmapMd(text: string, opts: ParseMindmapOptions = {}): ParsedMindmapFile {
 	const warnings: string[] = [];
 	const lines = text.split(/\r?\n/);
 
@@ -154,9 +147,10 @@ export function parseMindmapMd(
 
 		let json: Record<string, unknown>;
 		try {
-			json = JSON.parse(
-				rest.slice(commentIdx + MM_COMMENT_PREFIX.length, -3),
-			) as Record<string, unknown>;
+			json = JSON.parse(rest.slice(commentIdx + MM_COMMENT_PREFIX.length, -3)) as Record<
+				string,
+				unknown
+			>;
 		} catch {
 			warnings.push(`第 ${j + 1} 行：节点机器注释 JSON 损坏，已跳过`);
 			continue;
@@ -169,9 +163,10 @@ export function parseMindmapMd(
 
 		// 弹栈到父层级：父 = 深度恰小 1 的最近前驱；跨级跳跃按根处理（防御手编）
 		while (stack.length > 0 && stack[stack.length - 1].depth >= depth) stack.pop();
-		const parent = stack.length > 0 && stack[stack.length - 1].depth === depth - 1
-			? stack[stack.length - 1].node
-			: null;
+		const parent =
+			stack.length > 0 && stack[stack.length - 1].depth === depth - 1
+				? stack[stack.length - 1].node
+				: null;
 		if (depth > 0 && !parent) {
 			warnings.push(`第 ${j + 1} 行：缩进层级跳级，节点按根节点处理`);
 		}
@@ -184,7 +179,8 @@ export function parseMindmapMd(
 			x: typeof json.x === "number" ? json.x : 0,
 			y: typeof json.y === "number" ? json.y : 0,
 			collapsed: json.col === 1,
-			branchStyle: typeof json.style === "string" && isBranchStyle(json.style) ? json.style : null,
+			branchStyle:
+				typeof json.style === "string" && isBranchStyle(json.style) ? json.style : null,
 			// 61 子脑图：sub = 子图 id（悬空引用原样保留，读取侧 get 守卫自愈）
 			childMapId: typeof json.sub === "string" ? json.sub : null,
 			createdAt: typeof json.created === "number" ? json.created : 0,
@@ -269,7 +265,7 @@ export function serializeMindmapMd(
 
 /** YAML 值加引号（图名可能含冒号等危险字符） */
 function quoteYaml(v: string): string {
-	if (/[:#\[\]{}&*!|>'"%@`]/.test(v) || /^\s|\s$/.test(v) || v === "") {
+	if (/[:#[\]{}&*!|>'"%@`]/.test(v) || /^\s|\s$/.test(v) || v === "") {
 		return JSON.stringify(v);
 	}
 	return v;

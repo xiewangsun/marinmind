@@ -26,7 +26,9 @@ function card(partial: Partial<Card> = {}): Card {
 }
 
 /** 建节点（MindmapNodeWithCard 全字段） */
-function node(partial: Partial<MindmapNodeWithCard> & { id: string; cardId: string }): MindmapNodeWithCard {
+function node(
+	partial: Partial<MindmapNodeWithCard> & { id: string; cardId: string },
+): MindmapNodeWithCard {
 	return {
 		mapId: "m1",
 		parentId: null,
@@ -43,10 +45,8 @@ function node(partial: Partial<MindmapNodeWithCard> & { id: string; cardId: stri
 
 /** 从 svg 字符串取 viewBox 四元数值 */
 function viewBoxOf(svg: string): number[] {
-	return svg
-		.match(/viewBox="([^"]+)"/)!
-		[1].split(" ")
-		.map(Number);
+	const m = svg.match(/viewBox="([^"]+)"/)!;
+	return m[1].split(" ").map(Number);
 }
 
 describe("buildMapThumbnailSvg（71 脑图位置缩略图）", () => {
@@ -112,9 +112,7 @@ describe("buildMapThumbnailSvg（71 脑图位置缩略图）", () => {
 	});
 
 	it("标题转义：卡片文本含 XML 特殊字符不出废 XML（五实体转义）", () => {
-		const nodes = [
-			node({ id: "n1", cardId: "c1", card: card({ title: `a<b>&"c` }) }),
-		];
+		const nodes = [node({ id: "n1", cardId: "c1", card: card({ title: `a<b>&"c` }) })];
 		const svg = buildMapThumbnailSvg(nodes, null);
 		expect(svg).toContain("&lt;");
 		expect(svg).toContain("&amp;");

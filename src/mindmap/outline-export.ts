@@ -68,9 +68,16 @@ export function buildOutlineMarkdown(
  * fromCharCode 组装避免源码嵌字面控制字符）。
  */
 const INVALID_XML_CHARS_RE = new RegExp(
-	"[" + String.fromCharCode(0) + "-" + String.fromCharCode(8) +
-		String.fromCharCode(11) + String.fromCharCode(12) +
-		String.fromCharCode(14) + "-" + String.fromCharCode(31) + "]",
+	"[" +
+		String.fromCharCode(0) +
+		"-" +
+		String.fromCharCode(8) +
+		String.fromCharCode(11) +
+		String.fromCharCode(12) +
+		String.fromCharCode(14) +
+		"-" +
+		String.fromCharCode(31) +
+		"]",
 	"g",
 );
 
@@ -105,7 +112,9 @@ export function buildOutlineOpml(nodes: OutlineGraphNode[], mapTitle: string): s
 		const kids = (childrenMap.get(node.id) ?? []) as OutlineGraphNode[];
 		const text = escapeXmlAttr(outlineLineText(node.card));
 		// 有子级用开合标签承载嵌套；叶子自闭合（无空白文本节点，外部工具解析干净）
-		lines.push(kids.length > 0 ? `${pad}<outline text="${text}">` : `${pad}<outline text="${text}"/>`);
+		lines.push(
+			kids.length > 0 ? `${pad}<outline text="${text}">` : `${pad}<outline text="${text}"/>`,
+		);
 		for (const child of kids) {
 			walk(child, depth + 1);
 		}

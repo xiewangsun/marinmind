@@ -9,7 +9,6 @@ import { ReviewStatsModal } from "../review/review-stats-modal";
 import { copyExternalIntoVault } from "../documents/copy-into-vault";
 import { isAbsoluteFsPath, pageWordOf } from "../storage/paths";
 import { resolveDocPresence, type DocPresence } from "../documents/doc-presence";
-import { TextPromptModal } from "../reader/note-edit-modal";
 import { highlightFallbackColor, HIGHLIGHT_COLORS } from "../reader/highlight-colors";
 import { MSG_EXTERNAL_DOC_MOBILE } from "../constants";
 import {
@@ -18,7 +17,6 @@ import {
 	buildDeckTree,
 	cardPreview,
 	cardRowSummary,
-	CATEGORY_MAX_LENGTH,
 	distinctColors,
 	distinctTags,
 	EXCERPT_LABELS,
@@ -90,7 +88,9 @@ function statBrick(
 	label: string,
 	onClick?: () => void,
 ): void {
-	const brick = container.createDiv({ cls: onClick ? "marinmind-home-stat is-clickable" : "marinmind-home-stat" });
+	const brick = container.createDiv({
+		cls: onClick ? "marinmind-home-stat is-clickable" : "marinmind-home-stat",
+	});
 	brick.createDiv({ cls: "marinmind-home-stat-value", text: String(value) });
 	brick.createDiv({ cls: "marinmind-home-stat-label", text: label });
 	if (onClick) {
@@ -100,7 +100,12 @@ function statBrick(
 }
 
 /** ghost 操作按钮行 */
-function actionButton(container: HTMLElement, label: string, icon: string, onClick: () => void): void {
+function actionButton(
+	container: HTMLElement,
+	label: string,
+	icon: string,
+	onClick: () => void,
+): void {
 	const btn = container.createDiv({ cls: "marinmind-home-btn" });
 	const iconEl = btn.createSpan({ cls: "marinmind-home-btn-icon" });
 	setIcon(iconEl, icon);
@@ -238,7 +243,10 @@ async function openDocRecord(app: App, plugin: MarinMindPlugin, doc: BookDocumen
 		new Notice(MSG_EXTERNAL_DOC_MOBILE);
 		return;
 	}
-	new Notice(`「${doc.title}」的原文文件已失联，请到文档管理面板重关联（卡片与复习进度会保留）`, 6000);
+	new Notice(
+		`「${doc.title}」的原文文件已失联，请到文档管理面板重关联（卡片与复习进度会保留）`,
+		6000,
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -326,7 +334,10 @@ export function renderOverviewPage(container: HTMLElement, ctx: HomeRenderCtx): 
 // ---------------------------------------------------------------------------
 
 /** 文档页：左列分类文件夹树 + 右侧搜索框与文档列表（归档经右键菜单/拖拽） */
-export async function renderDocumentsPage(container: HTMLElement, ctx: HomeRenderCtx): Promise<void> {
+export async function renderDocumentsPage(
+	container: HTMLElement,
+	ctx: HomeRenderCtx,
+): Promise<void> {
 	const { plugin } = ctx;
 	const wrap = container.createDiv({ cls: "marinmind-home-page marinmind-home-page-docs" });
 	wrap.createDiv({ cls: "marinmind-home-page-title", text: "文档" });
@@ -352,7 +363,11 @@ export async function renderDocumentsPage(container: HTMLElement, ctx: HomeRende
 	const search = searchRow.createEl("input", {
 		cls: "marinmind-home-search",
 		// R3（W-04）：占位符不构成可访问名，补 aria-label
-		attr: { type: "text", placeholder: "搜索标题或路径…", "aria-label": "搜索文档（标题或路径）" },
+		attr: {
+			type: "text",
+			placeholder: "搜索标题或路径…",
+			"aria-label": "搜索文档（标题或路径）",
+		},
 	});
 	search.value = ctx.docQuery;
 	// ㊸ 文件夹栏整栏收起：单钮组就地切换（panel-left 图标名经 obsidian.asar 注册表验证；
@@ -397,13 +412,20 @@ export async function renderDocumentsPage(container: HTMLElement, ctx: HomeRende
 		rowsHost.empty();
 		if (filtered.length === 0) {
 			if (inCategory.length === 0) {
-				emptyHint(rowsHost, ctx.selectedCategory === "all" ? "书库为空——点「打开文档」加入第一本书。" : "该分类下暂无文档（右键文档或拖拽到左侧文件夹可归入）。");
+				emptyHint(
+					rowsHost,
+					ctx.selectedCategory === "all"
+						? "书库为空——点「打开文档」加入第一本书。"
+						: "该分类下暂无文档（右键文档或拖拽到左侧文件夹可归入）。",
+				);
 			} else {
 				emptyHint(rowsHost, `没有匹配「${ctx.docQuery.trim()}」的文档。`);
 			}
 			return;
 		}
-		const presences = await Promise.all(filtered.map((doc) => resolveDocPresence(plugin.app, doc.filePath)));
+		const presences = await Promise.all(
+			filtered.map((doc) => resolveDocPresence(plugin.app, doc.filePath)),
+		);
 		const ts = now();
 		if (plugin.settings.homeDocsView === "grid") {
 			// ㊵ 窗格：先铺占位瓷片，封面批量按需渲染（并发 ≤ 3；getDocCover 契约
@@ -499,7 +521,10 @@ function renderFolderTree(
 	const roots = injectCategoryPath(tree.roots, ctx.selectedCategory);
 	for (const node of roots) renderFolderNode(folders, ctx, node, docs, 0);
 
-	const createBtn = folders.createDiv({ cls: "marinmind-home-folder-create", text: "＋ 新建分类" });
+	const createBtn = folders.createDiv({
+		cls: "marinmind-home-folder-create",
+		text: "＋ 新建分类",
+	});
 	createBtn.addEventListener("click", () => promptNewCategory(ctx));
 	enableKeyboardActivation(createBtn);
 }
@@ -518,7 +543,8 @@ function renderFolderNode(
 		// 74 可达性：重命名/删除入口由右键（移动端长按）承载，hover 提示降低发现门槛
 		attr: { title: "右键或长按：重命名 / 删除" },
 	});
-	entry.style.paddingLeft = `${6 + depth * 14}px`;
+	// 94 批：第一层分类与「全部/未分类」同以 8px 顶格左对齐，子层每级再缩 14px
+	entry.style.paddingLeft = `${8 + depth * 14}px`;
 	entry.addEventListener("click", () => ctx.setSelectedCategory(node.fullName));
 	entry.addEventListener("contextmenu", (evt) => {
 		evt.preventDefault();
@@ -546,7 +572,12 @@ function promptNewCategory(ctx: HomeRenderCtx): void {
 }
 
 /** 分类文件夹右键菜单：重命名（级联子路径）/ 删除（子树文档移入未分类） */
-function showFolderMenu(ctx: HomeRenderCtx, node: CategoryNode, docs: readonly BookDocument[], evt: MouseEvent): void {
+function showFolderMenu(
+	ctx: HomeRenderCtx,
+	node: CategoryNode,
+	docs: readonly BookDocument[],
+	evt: MouseEvent,
+): void {
 	const category = node.fullName;
 	const menu = new Menu();
 	menu.addItem((item) =>
@@ -576,14 +607,18 @@ function showFolderMenu(ctx: HomeRenderCtx, node: CategoryNode, docs: readonly B
 					return c !== null && inPathSubtree(c, category);
 				});
 				// 76 清单内是否仍有子分类（空分组实体的"纯空组"判定另一半）
-				const hasChildren = ctx.plugin.store?.groupListHasChildren("folders", category) ?? false;
+				const hasChildren =
+					ctx.plugin.store?.groupListHasChildren("folders", category) ?? false;
 				const doDelete = (): void => {
 					for (const d of victims) {
 						ctx.plugin.documents.update(d.id, { category: null });
 					}
 					// 76 清单子树一并删（空分组实体本体在清单里）
 					ctx.plugin.store?.removeFoldersUnder(category);
-					if (typeof ctx.selectedCategory === "string" && inPathSubtree(ctx.selectedCategory, category)) {
+					if (
+						typeof ctx.selectedCategory === "string" &&
+						inPathSubtree(ctx.selectedCategory, category)
+					) {
 						ctx.setSelectedCategory("all");
 					} else {
 						ctx.refresh();
@@ -621,7 +656,9 @@ function renameCategory(ctx: HomeRenderCtx, oldName: string, newName: string): v
 	for (const d of docs) {
 		// 写回归一值（顺手收敛手编产生的空白变体）
 		const c = normalizeCategory(d.category!)!;
-		ctx.plugin.documents.update(d.id, { category: c === oldName ? newName : newName + c.slice(oldName.length) });
+		ctx.plugin.documents.update(d.id, {
+			category: c === oldName ? newName : newName + c.slice(oldName.length),
+		});
 	}
 	if (typeof ctx.selectedCategory === "string" && inPathSubtree(ctx.selectedCategory, oldName)) {
 		ctx.setSelectedCategory(newName + ctx.selectedCategory.slice(oldName.length));
@@ -779,14 +816,15 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 			item
 				.setTitle("复制入库")
 				.setIcon("copy-plus")
-				.onClick(() =>
-					void copyExternalIntoVault(plugin, doc.filePath).then((file) => {
-						if (file) {
-							new Notice(`已复制入库：${file.path}（卡片与复习进度保留）`);
-							plugin.externalWatcher?.sync();
-							ctx.refresh();
-						}
-					}),
+				.onClick(
+					() =>
+						void copyExternalIntoVault(plugin, doc.filePath).then((file) => {
+							if (file) {
+								new Notice(`已复制入库：${file.path}（卡片与复习进度保留）`);
+								plugin.externalWatcher?.sync();
+								ctx.refresh();
+							}
+						}),
 				),
 		);
 	}
@@ -807,11 +845,14 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 		// onClick 仍用完整路径
 		const pBrief = p.length > 40 ? `${p.slice(0, 40)}…` : p;
 		menu.addItem((item) =>
-			item.setTitle(pBrief).setIcon("folder").onClick(() => {
-				plugin.documents.update(doc.id, { category: p });
-				ctx.refresh();
-				new Notice(`已归入「${p}」`);
-			}),
+			item
+				.setTitle(pBrief)
+				.setIcon("folder")
+				.onClick(() => {
+					plugin.documents.update(doc.id, { category: p });
+					ctx.refresh();
+					new Notice(`已归入「${p}」`);
+				}),
 		);
 	}
 	menu.addItem((item) =>
@@ -896,7 +937,10 @@ function renderDeckTree(
 	const roots = injectCategoryPath(tree.roots, activeDeckPath(ctx.cardsFilter.deck));
 	for (const node of roots) renderDeckNode(folders, ctx, node, cards, 0);
 
-	const createBtn = folders.createDiv({ cls: "marinmind-home-folder-create", text: "＋ 新建卡组" });
+	const createBtn = folders.createDiv({
+		cls: "marinmind-home-folder-create",
+		text: "＋ 新建卡组",
+	});
 	createBtn.addEventListener("click", () => promptNewDeck(ctx));
 	enableKeyboardActivation(createBtn);
 }
@@ -915,7 +959,8 @@ function renderDeckNode(
 		// 74 可达性：重命名/删除入口由右键（移动端长按）承载，hover 提示降低发现门槛
 		attr: { title: "右键或长按：重命名 / 删除" },
 	});
-	entry.style.paddingLeft = `${6 + depth * 14}px`;
+	// 94 批：第一层卡组与「全部/未分组」同以 8px 顶格左对齐，子层每级再缩 14px
+	entry.style.paddingLeft = `${8 + depth * 14}px`;
 	entry.addEventListener("click", () => ctx.setCardsFilter({ deck: node.fullName }));
 	entry.addEventListener("contextmenu", (evt) => {
 		evt.preventDefault();
@@ -1025,7 +1070,9 @@ function renameDeck(ctx: HomeRenderCtx, oldName: string, newName: string): void 
 	for (const c of victims) {
 		// 写回归一值（顺手收敛存量空白变体）
 		const d = normalizeCategory(c.deck!)!;
-		ctx.plugin.cards.update(c.id, { deck: d === oldName ? newName : newName + d.slice(oldName.length) });
+		ctx.plugin.cards.update(c.id, {
+			deck: d === oldName ? newName : newName + d.slice(oldName.length),
+		});
 	}
 	// 选中态级联跟随（子树内的选中改指对应新路径），子树外仅刷新
 	const sel = ctx.cardsFilter.deck;
@@ -1102,11 +1149,14 @@ function showCardMenu(ctx: HomeRenderCtx, card: Card, evt: MouseEvent): void {
 		// 显示层 40 字截断（镜像文档菜单先例），onClick 仍用完整路径
 		const pBrief = p.length > 40 ? `${p.slice(0, 40)}…` : p;
 		menu.addItem((item) =>
-			item.setTitle(pBrief).setIcon("folder").onClick(() => {
-				plugin.cards.update(card.id, { deck: p });
-				ctx.refresh();
-				new Notice(`已归入「${p}」`);
-			}),
+			item
+				.setTitle(pBrief)
+				.setIcon("folder")
+				.onClick(() => {
+					plugin.cards.update(card.id, { deck: p });
+					ctx.refresh();
+					new Notice(`已归入「${p}」`);
+				}),
 		);
 	}
 	menu.addItem((item) =>
@@ -1180,7 +1230,6 @@ function bindCardActions(el: HTMLElement, ctx: HomeRenderCtx, card: Card): void 
 	});
 	enableCardDrag(el, card);
 }
-
 
 /**
  * 卡片页（73 两列化，镜像文档页）：统计砖全宽在前 + 左列卡组树 + 右列四维
@@ -1259,7 +1308,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 			color,
 			color === UNSET_COLOR
 				? "未设色"
-				: HIGHLIGHT_COLORS.find((c) => c.value === color)?.label ?? color,
+				: (HIGHLIGHT_COLORS.find((c) => c.value === color)?.label ?? color),
 		);
 	}
 	colorSel.setValue(ctx.cardsFilter.color ?? "");
@@ -1316,7 +1365,9 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 				else batchSelectedIds.add(id);
 			}
 			// 就地更新本页行勾选态（不整页重建）
-			for (const rowEl of listWrap.querySelectorAll<HTMLElement>(".marinmind-home-card-row")) {
+			for (const rowEl of listWrap.querySelectorAll<HTMLElement>(
+				".marinmind-home-card-row",
+			)) {
 				const id = rowEl.getAttribute("data-card-id");
 				if (id != null) applyBatchRowState(rowEl, batchSelectedIds.has(id));
 			}

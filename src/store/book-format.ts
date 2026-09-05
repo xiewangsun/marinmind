@@ -133,7 +133,7 @@ export function sanitizeFileName(name: string): string {
 
 /** YAML 值加引号（含 ": " 或首尾空白等危险形态时） */
 function yamlQuote(v: string): string {
-	if (/[:#\[\]{}&*!|>'"%@`]/.test(v) || /^\s|\s$/.test(v) || v === "") {
+	if (/[:#[\]{}&*!|>'"%@`]/.test(v) || /^\s|\s$/.test(v) || v === "") {
 		return JSON.stringify(v);
 	}
 	return v;
@@ -256,7 +256,8 @@ export function parseBookMd(text: string, opts: ParseBookOptions = {}): ParsedBo
 	const docId = fm.get("id")?.trim() || "";
 	if (!docId) warnings.push("frontmatter 缺 id（已自动生成，下次写入修复）");
 
-	const title = yamlUnquote(fm.get("title") ?? "") || opts.fileName?.replace(/\.md$/, "") || "未命名";
+	const title =
+		yamlUnquote(fm.get("title") ?? "") || opts.fileName?.replace(/\.md$/, "") || "未命名";
 	const doc: BookDocument = {
 		id: docId || newId(),
 		filePath: yamlUnquote(fm.get("file_path") ?? ""),
@@ -281,7 +282,16 @@ export function parseBookMd(text: string, opts: ParseBookOptions = {}): ParsedBo
 	const kind = fm.get("marinmind");
 	if (kind !== undefined && kind !== "book") {
 		warnings.push(`marinmind frontmatter 应为 book，实际为 ${kind}，按空书解析`);
-		return { claimed: false, doc, cards: [], reviews: [], bookmarks: [], links: [], extraFrontmatter, warnings };
+		return {
+			claimed: false,
+			doc,
+			cards: [],
+			reviews: [],
+			bookmarks: [],
+			links: [],
+			extraFrontmatter,
+			warnings,
+		};
 	}
 
 	// --- 正文：页节游走 ---
@@ -323,11 +333,30 @@ export function parseBookMd(text: string, opts: ParseBookOptions = {}): ParsedBo
 				warnings.push(`第 ${j + 1} 行：书签节内出现卡片注释，已忽略`);
 				continue;
 			}
-			parseCardComment(lines, j, page ?? null, doc.id, title, cards, reviews, links, warnings);
+			parseCardComment(
+				lines,
+				j,
+				page ?? null,
+				doc.id,
+				title,
+				cards,
+				reviews,
+				links,
+				warnings,
+			);
 		}
 	}
 
-	return { claimed: kind === "book", doc, cards, reviews, bookmarks, links, extraFrontmatter, warnings };
+	return {
+		claimed: kind === "book",
+		doc,
+		cards,
+		reviews,
+		bookmarks,
+		links,
+		extraFrontmatter,
+		warnings,
+	};
 }
 
 /** 解析一条卡片机器注释（lines[j] 即注释行；向上收集 block id 行与 callout 正文。
@@ -422,7 +451,8 @@ function parseCardComment(
 		// ㊹ 读取归一：blue 是四色化前文字摘录/AI 正文的历史值（视觉一直是黄），
 		// ㊹ 起 blue = 浅蓝真义——存量 blue 卡归一为 yellow（存量文件字节不动，
 		// 随该书下次实质变更顺带重写），参照 normalizeAssetRef 旧前缀归一先例
-		color: typeof json.color === "string" ? (json.color === "blue" ? "yellow" : json.color) : null,
+		color:
+			typeof json.color === "string" ? (json.color === "blue" ? "yellow" : json.color) : null,
 		// 文字摘录线型（77）：损坏/缺失/手写 underline 均归一 null（与序列化省键首尾一致）
 		lineStyle:
 			typeof json.line === "string" && isLineStyle(json.line) && json.line !== "underline"
@@ -483,7 +513,10 @@ function parseBookmarkLine(
 	const where = `第 ${j + 1} 行`;
 	let json: Record<string, unknown>;
 	try {
-		json = JSON.parse(lines[j].slice(MM_BM_COMMENT_PREFIX.length, -3)) as Record<string, unknown>;
+		json = JSON.parse(lines[j].slice(MM_BM_COMMENT_PREFIX.length, -3)) as Record<
+			string,
+			unknown
+		>;
 	} catch {
 		warnings.push(`${where}：书签机器注释 JSON 损坏，已跳过`);
 		return;
@@ -648,7 +681,11 @@ function serializeCard(
 	if (card.excerptRef) machine.ref = card.excerptRef;
 	// 语音时长秒（84-B）：仅合法数值落键（键序 ref 后，媒体语义相邻）；缺省省略——
 	// 存量卡字节不变（零写入契约，镜像 title 模式）
-	if (typeof card.durationSec === "number" && Number.isFinite(card.durationSec) && card.durationSec > 0) {
+	if (
+		typeof card.durationSec === "number" &&
+		Number.isFinite(card.durationSec) &&
+		card.durationSec > 0
+	) {
 		machine.dur = card.durationSec;
 	}
 	if (card.color) machine.color = card.color;

@@ -43,9 +43,9 @@ describe("cardTitle 节点标题推导", () => {
 	it("批注优先于摘录文字；媒体卡回退形态占位", () => {
 		expect(cardTitle(makeCard("a", { note: "批注", excerptText: "摘录" }))).toBe("批注");
 		expect(cardTitle(makeCard("b"))).toBe("摘录-b");
-		expect(
-			cardTitle(makeCard("c", { excerptType: "audio", excerptText: null })),
-		).toBe("（语音摘录）");
+		expect(cardTitle(makeCard("c", { excerptType: "audio", excerptText: null }))).toBe(
+			"（语音摘录）",
+		);
 		expect(
 			cardTitle(makeCard("d", { excerptType: "area", excerptText: null, note: null })),
 		).toBe("（区域摘录）");
@@ -65,9 +65,7 @@ describe("buildMapContext 脑图位置摘要（㉒ 溯源上下文·脑图栏）
 		const root2 = makeNode("n-root2", makeCard("root2"), null);
 		const mid = makeNode("n-mid", makeCard("mid"), root.id);
 		const self = makeNode("n-self", makeCard("self"), mid.id);
-		const children = [1, 2, 3, 4].map((i) =>
-			makeNode(`n-c${i}`, makeCard(`c${i}`), self.id),
-		);
+		const children = [1, 2, 3, 4].map((i) => makeNode(`n-c${i}`, makeCard(`c${i}`), self.id));
 		return { root, root2, mid, self, children };
 	}
 

@@ -172,10 +172,7 @@ export function buildDeckTree(
  * 全部已知卡组（76 设卡组选择器 items）：卡片实际卡组 ∪ 显式清单去重，拼音序。
  * 与 buildDeckTree 同源（卡片侧 distinct + 清单 union），保证选择器与左列树所见一致。
  */
-export function allKnownDecks(
-	cards: readonly Card[],
-	explicitDecks?: readonly string[],
-): string[] {
+export function allKnownDecks(cards: readonly Card[], explicitDecks?: readonly string[]): string[] {
 	const set = new Set<string>();
 	for (const card of cards) {
 		const d = deckPathOf(card);
@@ -394,7 +391,9 @@ export function formatRelativeTime(ts: number, nowMs: number): string {
 	const d = new Date(ts);
 	const n = new Date(nowMs);
 	const sameDay =
-		d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+		d.getFullYear() === n.getFullYear() &&
+		d.getMonth() === n.getMonth() &&
+		d.getDate() === n.getDate();
 	if (sameDay) return `${Math.floor(diff / 3_600_000)} 小时前`;
 	const yesterday = new Date(n);
 	yesterday.setDate(n.getDate() - 1);

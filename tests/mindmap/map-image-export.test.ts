@@ -22,7 +22,7 @@ describe("allocateExportPath 导出文件名分配（63）", () => {
 	});
 
 	it("非法文件名字符净化（wikilink 保留字符 [ ] # | 等）", () => {
-		const out = allocateExportPath('坏[名]字#号|斜杠', "opml", () => false);
+		const out = allocateExportPath("坏[名]字#号|斜杠", "opml", () => false);
 		expect(out.endsWith(".opml")).toBe(true);
 		for (const ch of ["[", "]", "#", "|"]) {
 			expect(out).not.toContain(ch);

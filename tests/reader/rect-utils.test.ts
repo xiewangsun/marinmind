@@ -295,7 +295,10 @@ describe("snapshotImgSize 快照图预留尺寸（R3 W-02：按包围盒取比�
 	it("无 rects（徽标锚定/兜底）与退化包围盒（零宽/零高）：回退 4:3", () => {
 		expect(snapshotImgSize({ rects: [] })).toEqual({ width: 400, height: 300 });
 		expect(
-			snapshotImgSize({ rects: [{ x: 0.2, y: 0.2, w: 0, h: 0.5 }], excerptType: "handwriting" }),
+			snapshotImgSize({
+				rects: [{ x: 0.2, y: 0.2, w: 0, h: 0.5 }],
+				excerptType: "handwriting",
+			}),
 		).toEqual({ width: 400, height: 300 });
 	});
 });

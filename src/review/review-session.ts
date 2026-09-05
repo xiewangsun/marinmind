@@ -28,6 +28,31 @@ export interface GradedStep {
 const UNDO_STACK_MAX = 20;
 
 /**
+ * 删除卡后迁移撤销栈内下标（103-B 纯函数，镜像 remove() 的重键算法）：
+ * - index 落在被删下标的步骤作废——其 graded 键已被 remove 丢弃，撤销无处落账
+ *   （步骤的 cardId 即被删卡，视图侧快照栈按 id 同步丢弃，双栈保持 1:1）
+ * - 其余步骤 index 减去"严格小于它的被删下标数"（存活条目整体前移）
+ * doomed 为升序（remove 内如此构造；此函数自防御再排序一次）。
+ */
+export function migrateGradedStepsForRemove(steps: GradedStep[], doomed: number[]): GradedStep[] {
+	if (doomed.length === 0) {
+		return steps;
+	}
+	const ds = [...doomed].sort((a, b) => a - b);
+	const before = (i: number): number => {
+		let n = 0;
+		for (const d of ds) {
+			if (d < i) n++;
+			else break;
+		}
+		return n;
+	};
+	return steps
+		.filter((step) => !ds.includes(step.index))
+		.map((step) => ({ ...step, index: step.index - before(step.index) }));
+}
+
+/**
  * 复习会话（纯逻辑，零 obsidian 依赖，vitest 可测）。
  *
  * 队列语义：
@@ -174,7 +199,8 @@ export class ReviewSession {
 			this.queue.push(card); // 本地队尾重现（同会话再考）
 		}
 		// 67 撤销栈：评分只发生在 index 且 index 单调递增 → 栈顶 index 恒为
-		// graded 的最大键（again 重现实例下标恒大于当时的 index），撤销无需 remove 的重键算法
+		// graded 的最大键（again 重现实例下标恒大于当时的 index）；remove 删卡时
+		// 栈内下标随 graded 同步重键（见 migrateGradedStepsForRemove），栈序保持有效
 		this.undoStack.push({ cardId: card.id, grade, index: this.index, requeued });
 		if (this.undoStack.length > UNDO_STACK_MAX) {
 			this.undoStack.shift();
@@ -197,7 +223,8 @@ export class ReviewSession {
 	 *
 	 * 不变量：grade() 只在 index 处发生且 index 单调递增 → 栈顶 index 恒为 graded
 	 * 最大键 → 弹栈即剥最近一层。防御一：requeued 步骤要求队尾恰为该卡——不符
-	 * （理论不可达，remove 清栈保住了这一点）则原样推回放弃撤销。
+	 * 则原样推回放弃撤销（103-B 起 remove 迁移栈下标而非清栈，交错 again + 删卡
+	 * 的极端时序仍可能击穿队尾前提——宁拒不赌，与外部状态异常同一处置）。
 	 */
 	undoLast(): GradedStep | null {
 		const step = this.undoStack.pop();
@@ -259,12 +286,11 @@ export class ReviewSession {
 	 * 下标迁移：删除后存活条目整体前移——graded（按队列下标键）重键、index/position
 	 * 各减去"严格小于自身的被删下标数"（index 恰指被删卡时迁移后落在下一张待考卡；
 	 * position 恰指被删卡时停原位显示移入该槽的下一张；position 在完成屏时恰迁到新 total）。
+	 * 撤销栈（103-B）随 graded 同一算法迁移下标——被删卡的步骤作废，其余前移，
+	 * 会话撤销能力跨删卡存续（视图侧快照栈按 cardId 同步丢弃保持双栈 1:1）。
 	 * revealed 仅在显示的卡变了时复位（删别处的卡不打断当前翻面态）。
 	 */
 	remove(cardId: string): boolean {
-		// 0. 67 清撤销栈：删除的 graded 重键破坏栈内 index 有效性——撤销栈浅
-		// （≤20）而删除是罕见中断，放弃栈保正确性（取舍见类注释）
-		this.undoStack.length = 0;
 		// 1. 捕获被删下标（升序）；doomed 只在此处读队列，之后才变异
 		const doomed: number[] = [];
 		this.queue.forEach((c, i) => {
@@ -284,7 +310,8 @@ export class ReviewSession {
 		};
 		// 3. splice 前记录当前显示的卡（判定翻面态是否需要复位）
 		const prevShownId = this.queue[this.position]?.id;
-		// 4. graded 整体重键（被删实例的条目丢弃，存活条目下标前移；一次性重建防边读边写）
+		// 4. graded 整体重键（被删实例的条目丢弃，存活条目下标前移；一次性重建防边读边写）；
+		//    撤销栈（103-B）同一算法迁移：被删卡的步骤作废，其余 index 前移
 		const migrated = new Map<number, ReviewGrade>();
 		for (const [i, g] of this.graded) {
 			if (!doomed.includes(i)) {
@@ -294,6 +321,11 @@ export class ReviewSession {
 		this.graded.clear();
 		for (const [i, g] of migrated) {
 			this.graded.set(i, g);
+		}
+		const keptSteps = migrateGradedStepsForRemove(this.undoStack, doomed);
+		this.undoStack.length = 0;
+		for (const step of keptSteps) {
+			this.undoStack.push(step);
 		}
 		// 5. 队列按 doomed 降序 splice（先删高下标，低下标不受影响）
 		for (let k = doomed.length - 1; k >= 0; k--) {

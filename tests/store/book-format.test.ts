@@ -187,7 +187,7 @@ describe("book-format 序列化与解析", () => {
 		for (const category of [
 			"学习", // 普通：裸写
 			"工作: 重点", // 冒号 → JSON.stringify
-			'带"引号\'的', // 引号
+			"带\"引号'的", // 引号
 			"  首尾空白  ", // yamlQuote 会因首尾空白加引号，trim 后解析取值
 		]) {
 			const input = bookInput({ doc: doc({ category }) });
@@ -226,10 +226,7 @@ describe("book-format 序列化与解析", () => {
 		const text = serializeBookMd(bookInput({ doc: doc({ category: null }) }));
 		expect(text).not.toContain("category:");
 		// 手编文件里的空值分类（category: 后空白）解析归未分类
-		const handEdited = text.replace(
-			"title: 书籍A",
-			"title: 书籍A\ncategory: ",
-		);
+		const handEdited = text.replace("title: 书籍A", "title: 书籍A\ncategory: ");
 		const parsed = parseBookMd(handEdited, { fileName: "书籍A.md" });
 		expect(parsed.doc.category).toBeNull();
 	});
@@ -261,10 +258,7 @@ describe("book-format 序列化与解析", () => {
 		expect(parsed.extraFrontmatter).toEqual([]); // 已知字段认领
 
 		// 手编空值（collect_map_id: 后空白）解析归 null = 回默认同名图
-		const handEmpty = textNull.replace(
-			"title: 书籍A",
-			"title: 书籍A\ncollect_map_id: ",
-		);
+		const handEmpty = textNull.replace("title: 书籍A", "title: 书籍A\ncollect_map_id: ");
 		expect(parseBookMd(handEmpty, { fileName: "书籍A.md" }).doc.collectMapId).toBeNull();
 	});
 	it("七种形态卡片 + 书签往返：解析还原数据，二次序列化字节相同", () => {
@@ -435,24 +429,49 @@ describe("book-format 序列化与解析", () => {
 	});
 
 	it("链接只存于持有方（较小 id 一侧），解析重建规范化链接", () => {
-		const a = card({ id: "aaaaaaaa-0000-4000-8000-000000000001", excerptType: "text", excerptText: "A" });
-		const b = card({ id: "bbbbbbbb-0000-4000-8000-000000000002", excerptType: "text", excerptText: "B" });
+		const a = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000001",
+			excerptType: "text",
+			excerptText: "A",
+		});
+		const b = card({
+			id: "bbbbbbbb-0000-4000-8000-000000000002",
+			excerptType: "text",
+			excerptText: "B",
+		});
 		const foreign = "ffffffff-0000-4000-8000-000000000009"; // 另一本书里的卡
 		const links: CardLink[] = [
 			{ id: linkId(a.id, b.id), sourceId: b.id, targetId: a.id, createdAt: 1700000009000 },
-			{ id: linkId(a.id, foreign), sourceId: a.id, targetId: foreign, createdAt: 1700000010000 },
+			{
+				id: linkId(a.id, foreign),
+				sourceId: a.id,
+				targetId: foreign,
+				createdAt: 1700000010000,
+			},
 		];
 		const text = serializeBookMd(bookInput({ cards: [a, b], links }));
 		// 链接只出现在 a（较小 id）的机器注释里（按注释首 token 定位行，避免 to 字段误中）
 		const commentOf = (id: string) =>
 			text.split("\n").find((l) => l.startsWith("<!--mm ") && l.includes(`"id":"${id}"`))!;
-		expect(commentOf(a.id)).toContain(`"links":[{"to":"${b.id}","at":1700000009000},{"to":"${foreign}","at":1700000010000}]`);
+		expect(commentOf(a.id)).toContain(
+			`"links":[{"to":"${b.id}","at":1700000009000},{"to":"${foreign}","at":1700000010000}]`,
+		);
 		expect(commentOf(b.id)).not.toContain("links");
 
 		const parsed = parseBookMd(text, { fileName: "书籍A.md" });
 		expect(parsed.links).toHaveLength(2);
-		expect(parsed.links[0]).toEqual({ id: linkId(a.id, b.id), sourceId: a.id, targetId: b.id, createdAt: 1700000009000 });
-		expect(parsed.links[1]).toEqual({ id: linkId(a.id, foreign), sourceId: a.id, targetId: foreign, createdAt: 1700000010000 });
+		expect(parsed.links[0]).toEqual({
+			id: linkId(a.id, b.id),
+			sourceId: a.id,
+			targetId: b.id,
+			createdAt: 1700000009000,
+		});
+		expect(parsed.links[1]).toEqual({
+			id: linkId(a.id, foreign),
+			sourceId: a.id,
+			targetId: foreign,
+			createdAt: 1700000010000,
+		});
 	});
 
 	it("按书自动转闪卡 auto_flashcard 往返（㊷）：true 序列化在 collect_map_id 后，false 省略整行", () => {
@@ -522,7 +541,11 @@ describe("book-format 序列化与解析", () => {
 	});
 
 	it("遮挡 occlusions 机器层往返（㊷）：occ 键还原，无遮挡卡不输出该键（零写入）", () => {
-		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000001", excerptType: "text", excerptText: "无遮挡" });
+		const plain = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000001",
+			excerptType: "text",
+			excerptText: "无遮挡",
+		});
 		const occluded = card({
 			id: "aaaaaaaa-0000-4000-8000-000000000002",
 			excerptType: "area",
@@ -544,7 +567,9 @@ describe("book-format 序列化与解析", () => {
 
 		const parsed = parseBookMd(text, { fileName: "书籍A.md" });
 		expect(parsed.warnings).toEqual([]);
-		expect(parsed.cards.find((c) => c.id === occluded.id)!.occlusions).toEqual(occluded.occlusions);
+		expect(parsed.cards.find((c) => c.id === occluded.id)!.occlusions).toEqual(
+			occluded.occlusions,
+		);
 		expect(parsed.cards.find((c) => c.id === plain.id)!.occlusions).toEqual([]); // 缺键回填默认
 
 		// 二次序列化字节相同（确定性）
@@ -560,7 +585,11 @@ describe("book-format 序列化与解析", () => {
 	});
 
 	it("标题 title 机器层往返（㊺）：title 键还原，无标题卡不输出该键（零写入）", () => {
-		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000003", excerptType: "text", excerptText: "无标题" });
+		const plain = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000003",
+			excerptType: "text",
+			excerptText: "无标题",
+		});
 		const titled = card({
 			id: "aaaaaaaa-0000-4000-8000-000000000004",
 			excerptType: "text",
@@ -580,7 +609,10 @@ describe("book-format 序列化与解析", () => {
 		expect(parsed.cards.find((c) => c.id === plain.id)!.title).toBeNull(); // 缺键回填 null
 		// 损坏值（非字符串）按无标题处理不拖垮整卡
 		const broken = text.replace('"title":"我的标题"', '"title":123');
-		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === titled.id)!.title).toBeNull();
+		expect(
+			parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === titled.id)!
+				.title,
+		).toBeNull();
 
 		// 二次序列化字节相同（确定性）
 		const again = serializeBookMd({
@@ -595,7 +627,11 @@ describe("book-format 序列化与解析", () => {
 	});
 
 	it("卡组 deck 机器层往返：deck 键还原（title 之后），未分组卡不输出该键（零写入）", () => {
-		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000005", excerptType: "text", excerptText: "未分组" });
+		const plain = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000005",
+			excerptType: "text",
+			excerptText: "未分组",
+		});
 		const decked = card({
 			id: "aaaaaaaa-0000-4000-8000-000000000006",
 			excerptType: "text",
@@ -617,7 +653,10 @@ describe("book-format 序列化与解析", () => {
 		expect(parsed.cards.find((c) => c.id === plain.id)!.deck).toBeNull(); // 缺键回填 null
 		// 损坏值（非字符串）按未分组处理不拖垮整卡
 		const broken = text.replace('"deck":"考研单词"', '"deck":123');
-		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === decked.id)!.deck).toBeNull();
+		expect(
+			parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === decked.id)!
+				.deck,
+		).toBeNull();
 
 		// 二次序列化字节相同（确定性）
 		const again = serializeBookMd({
@@ -632,7 +671,11 @@ describe("book-format 序列化与解析", () => {
 	});
 
 	it("文字摘录线型 line 机器层往返（77）：squiggle/strikethrough 才落键（deck 之后），缺省/underline 省键（零写入）", () => {
-		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000015", excerptType: "text", excerptText: "默认下划线" });
+		const plain = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000015",
+			excerptType: "text",
+			excerptText: "默认下划线",
+		});
 		const squiggled = card({
 			id: "aaaaaaaa-0000-4000-8000-000000000016",
 			excerptType: "text",
@@ -655,9 +698,15 @@ describe("book-format 序列化与解析", () => {
 		expect(parsed.cards.find((c) => c.id === plain.id)!.lineStyle).toBeNull(); // 缺键回填 null
 		// 损坏值（非字符串）与非法值（不在名单）均按 null 处理不拖垮整卡
 		const broken = text.replace('"line":"squiggle"', '"line":123');
-		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === squiggled.id)!.lineStyle).toBeNull();
+		expect(
+			parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === squiggled.id)!
+				.lineStyle,
+		).toBeNull();
 		const bogus = text.replace('"line":"squiggle"', '"line":"wavy"');
-		expect(parseBookMd(bogus, { fileName: "书籍A.md" }).cards.find((c) => c.id === squiggled.id)!.lineStyle).toBeNull();
+		expect(
+			parseBookMd(bogus, { fileName: "书籍A.md" }).cards.find((c) => c.id === squiggled.id)!
+				.lineStyle,
+		).toBeNull();
 		// 手编 underline 归一 null（与序列化省键首尾一致——内存规范形无 underline 值）
 		const handWritten = text.replace('"line":"squiggle"', '"line":"underline"');
 		const normalized = parseBookMd(handWritten, { fileName: "书籍A.md" });
@@ -686,7 +735,11 @@ describe("book-format 序列化与解析", () => {
 	});
 
 	it("目录章节骨架 outline 机器层往返（55）：occ 后 outline:true 键还原，普通卡不输出该键（零写入）", () => {
-		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000007", excerptType: "text", excerptText: "普通摘录" });
+		const plain = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000007",
+			excerptType: "text",
+			excerptText: "普通摘录",
+		});
 		const chapter = card({
 			id: "aaaaaaaa-0000-4000-8000-000000000008",
 			excerptType: "text",
@@ -708,7 +761,10 @@ describe("book-format 序列化与解析", () => {
 		expect(parsed.cards.find((c) => c.id === plain.id)!.outline).toBeFalsy(); // 缺键 = 普通卡
 		// 损坏值（非 true）按普通卡处理不拖垮整卡
 		const broken = text.replace('"outline":true', '"outline":"yes"');
-		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === chapter.id)!.outline).toBeFalsy();
+		expect(
+			parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === chapter.id)!
+				.outline,
+		).toBeFalsy();
 
 		// 二次序列化字节相同（确定性）
 		const again = serializeBookMd({
@@ -723,7 +779,11 @@ describe("book-format 序列化与解析", () => {
 	});
 
 	it("书名分组卡 group 机器层往返与存量推导（81）：outline 后 group:true 键，普通卡不输出（零写入）", () => {
-		const plain = card({ id: "aaaaaaaa-0000-4000-8000-000000000017", excerptType: "text", excerptText: "普通摘录" });
+		const plain = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000017",
+			excerptType: "text",
+			excerptText: "普通摘录",
+		});
 		const group = card({
 			id: "aaaaaaaa-0000-4000-8000-000000000018",
 			excerptType: "text",
@@ -772,13 +832,20 @@ describe("book-format 序列化与解析", () => {
 
 		// 损坏值（非 true）不拖垮整卡——组卡形态（page null + 《书名》）由推导兜底仍识别
 		const broken = text.replace('"group":true', '"group":"yes"');
-		expect(parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === group.id)!.group).toBe(true);
+		expect(
+			parseBookMd(broken, { fileName: "书籍A.md" }).cards.find((c) => c.id === group.id)!
+				.group,
+		).toBe(true);
 	});
 });
 
 describe("book-format 手编回灌（可读层提取规则）", () => {
 	function baseText(): string {
-		const c1 = card({ id: "aaaaaaaa-0000-4000-8000-000000000001", excerptType: "text", excerptText: "原文内容" });
+		const c1 = card({
+			id: "aaaaaaaa-0000-4000-8000-000000000001",
+			excerptType: "text",
+			excerptText: "原文内容",
+		});
 		const c2 = card({
 			id: "aaaaaaaa-0000-4000-8000-000000000002",
 			excerptType: "photo",
@@ -831,8 +898,16 @@ function moveCardBlock(text: string, from: number, to: number): string {
 describe("book-format 容错", () => {
 	function twoCardText(): string {
 		const cards = [
-			card({ id: "aaaaaaaa-0000-4000-8000-000000000001", excerptType: "text", excerptText: "好卡" }),
-			card({ id: "aaaaaaaa-0000-4000-8000-000000000002", excerptType: "text", excerptText: "坏卡" }),
+			card({
+				id: "aaaaaaaa-0000-4000-8000-000000000001",
+				excerptType: "text",
+				excerptText: "好卡",
+			}),
+			card({
+				id: "aaaaaaaa-0000-4000-8000-000000000002",
+				excerptType: "text",
+				excerptText: "坏卡",
+			}),
 		];
 		return serializeBookMd(bookInput({ cards }));
 	}
@@ -849,10 +924,7 @@ describe("book-format 容错", () => {
 	});
 
 	it("缺块锚点行：卡片仍恢复（warning 提示）", () => {
-		const text = twoCardText().replace(
-			`^card-aaaaaaaa-0000-4000-8000-000000000002\n`,
-			"",
-		);
+		const text = twoCardText().replace(`^card-aaaaaaaa-0000-4000-8000-000000000002\n`, "");
 		const parsed = parseBookMd(text, { fileName: "书籍A.md" });
 		expect(parsed.cards).toHaveLength(2);
 		expect(parsed.warnings.some((w) => w.includes("块锚点"))).toBe(true);
@@ -899,7 +971,9 @@ describe("book-format 容错", () => {
 			excerptType: "text",
 			excerptText: "#1 排名第一\n普通行",
 		});
-		const parsed = parseBookMd(serializeBookMd(bookInput({ cards: [c] })), { fileName: "书籍A.md" });
+		const parsed = parseBookMd(serializeBookMd(bookInput({ cards: [c] })), {
+			fileName: "书籍A.md",
+		});
 		expect(parsed.cards[0].excerptText).toBe("#1 排名第一\n普通行");
 		expect(parsed.cards[0].tags).toEqual([]);
 	});
@@ -914,7 +988,9 @@ describe("book-format 容错", () => {
 
 describe("sanitizeFileName", () => {
 	it("替换 Obsidian 非法与 wikilink 保留字符", () => {
-		expect(sanitizeFileName('a/b\\c:d*e?f"g<h>i|j#k^l[m]n')).toBe("a b c d e f g h i j k l m n");
+		expect(sanitizeFileName('a/b\\c:d*e?f"g<h>i|j#k^l[m]n')).toBe(
+			"a b c d e f g h i j k l m n",
+		);
 	});
 
 	it("折叠空白、去首尾、限长 100", () => {

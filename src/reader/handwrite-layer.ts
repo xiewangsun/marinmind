@@ -26,6 +26,13 @@ const ERASE_RADIUS_PX = 12;
  */
 export class HandwriteLayer {
 	private readonly root: HTMLElement;
+	/** bind 后的指针处理器引用（注册/解绑同源，101 修） */
+	private readonly handlers: {
+		pointerdown: (evt: PointerEvent) => void;
+		pointermove: (evt: PointerEvent) => void;
+		pointerup: (evt: PointerEvent) => void;
+		pointercancel: (evt: PointerEvent) => void;
+	};
 	private readonly canvas: HTMLCanvasElement;
 	private readonly ctx: CanvasRenderingContext2D | null;
 	private readonly ro: ResizeObserver | null;
@@ -58,10 +65,19 @@ export class HandwriteLayer {
 			this.ctx.lineJoin = "round";
 		}
 
-		this.root.addEventListener("pointerdown", this.onPointerDown);
-		this.root.addEventListener("pointermove", this.onPointerMove);
-		this.root.addEventListener("pointerup", this.onPointerUp);
-		this.root.addEventListener("pointercancel", this.onPointerCancel);
+		// 101 修：处理器显式 bind（镜像 ExcerptLayer.handlers 模式）——原型方法
+		// 直接注册时事件回调里的 this 是 DOM 元素而非层实例，this.mode 恒
+		// undefined，onPointerDown 首行守卫直接早退——画布从未收到过任何一笔
+		this.handlers = {
+			pointerdown: this.onPointerDown.bind(this),
+			pointermove: this.onPointerMove.bind(this),
+			pointerup: this.onPointerUp.bind(this),
+			pointercancel: this.onPointerCancel.bind(this),
+		};
+		this.root.addEventListener("pointerdown", this.handlers.pointerdown);
+		this.root.addEventListener("pointermove", this.handlers.pointermove);
+		this.root.addEventListener("pointerup", this.handlers.pointerup);
+		this.root.addEventListener("pointercancel", this.handlers.pointercancel);
 
 		// 尺寸变化（缩放/窗口 resize）→ 重设画布并按归一化模型全量重绘
 		this.ro =
@@ -167,6 +183,11 @@ export class HandwriteLayer {
 	destroy(): void {
 		this.destroyed = true;
 		this.ro?.disconnect();
+		// 101 修：bind 后持有同引用可显式解绑（此前未 bind 既错又无法解绑）
+		this.root.removeEventListener("pointerdown", this.handlers.pointerdown);
+		this.root.removeEventListener("pointermove", this.handlers.pointermove);
+		this.root.removeEventListener("pointerup", this.handlers.pointerup);
+		this.root.removeEventListener("pointercancel", this.handlers.pointercancel);
 		this.root.remove();
 	}
 

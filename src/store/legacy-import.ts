@@ -40,7 +40,9 @@ export async function openLegacyDb(
 	let wasmBinary: Uint8Array | undefined;
 	if (typeof require === "function") {
 		try {
-			// esbuild CJS 产物会内联解析此相对 require（binary loader 打包 .wasm）
+			// esbuild CJS 产物会内联解析此相对 require（binary loader 打包 .wasm）；
+			// 刻意的运行时 require——vitest 等 ESM 环境走 catch 降级
+			// eslint-disable-next-line @typescript-eslint/no-require-imports
 			wasmBinary = (require("../db/wasm-bytes") as { default: Uint8Array }).default;
 		} catch {
 			// vitest 等 ESM 环境：require 形态存在但解析不了相对模块——交给 sql.js 自行定位
@@ -148,7 +150,9 @@ export function convertLegacyDb(db: MarinMindDatabase): LegacyImportData & { war
 		updated_at: number;
 	}
 	const documents: BookDocument[] = db
-		.all<DocumentRow>("SELECT id, title, file_path, created_at, updated_at FROM documents ORDER BY created_at, id")
+		.all<DocumentRow>(
+			"SELECT id, title, file_path, created_at, updated_at FROM documents ORDER BY created_at, id",
+		)
 		.map((r) => ({
 			id: r.id,
 			filePath: r.file_path,
@@ -200,19 +204,19 @@ export function convertLegacyDb(db: MarinMindDatabase): LegacyImportData & { war
 			updatedAt: r.updated_at,
 		}));
 
-// 81 书名分组卡标记：旧库组卡（同书 page null + 文本恰为《书名》）导入即标记，
-// 与 book-format 解析层推导同源——否则导入落盘的 md 首载前仍漏进卡片视角
-const titleById = new Map(documents.map((d) => [d.id, d.title]));
-for (const c of cards) {
-	if (
-		c.page == null &&
-		c.documentId != null &&
-		c.excerptType === "text" &&
-		c.excerptText === `《${titleById.get(c.documentId) ?? ""}》`
-	) {
-		c.group = true;
+	// 81 书名分组卡标记：旧库组卡（同书 page null + 文本恰为《书名》）导入即标记，
+	// 与 book-format 解析层推导同源——否则导入落盘的 md 首载前仍漏进卡片视角
+	const titleById = new Map(documents.map((d) => [d.id, d.title]));
+	for (const c of cards) {
+		if (
+			c.page == null &&
+			c.documentId != null &&
+			c.excerptType === "text" &&
+			c.excerptText === `《${titleById.get(c.documentId) ?? ""}》`
+		) {
+			c.group = true;
+		}
 	}
-}
 
 	interface LinkRow {
 		id: string;
@@ -221,8 +225,15 @@ for (const c of cards) {
 		created_at: number;
 	}
 	const links: CardLink[] = db
-		.all<LinkRow>("SELECT id, source_id, target_id, created_at FROM card_links ORDER BY created_at, id")
-		.map((r) => ({ id: r.id, sourceId: r.source_id, targetId: r.target_id, createdAt: r.created_at }));
+		.all<LinkRow>(
+			"SELECT id, source_id, target_id, created_at FROM card_links ORDER BY created_at, id",
+		)
+		.map((r) => ({
+			id: r.id,
+			sourceId: r.source_id,
+			targetId: r.target_id,
+			createdAt: r.created_at,
+		}));
 
 	interface ReviewRow {
 		card_id: string;

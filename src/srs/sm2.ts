@@ -20,13 +20,10 @@ const QUALITY: Record<ReviewGrade, number> = { again: 2, hard: 3, good: 4, easy:
  *
  * 输入输出均为纯数据（ReviewState），后续可无缝替换为 FSRS 等算法。
  */
-export function nextReviewState(
-	prev: ReviewState,
-	grade: ReviewGrade,
-	nowMs: number,
-): ReviewState {
+export function nextReviewState(prev: ReviewState, grade: ReviewGrade, nowMs: number): ReviewState {
 	const q = QUALITY[grade];
-	let { ease, intervalDays, repetitions, lapses } = prev;
+	let { ease, intervalDays, repetitions } = prev;
+	const { lapses } = prev;
 
 	if (q < 3) {
 		// 复习失败：清空进度，进入重学

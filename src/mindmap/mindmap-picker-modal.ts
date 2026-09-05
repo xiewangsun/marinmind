@@ -54,9 +54,7 @@ export class MindmapPickerModal extends FuzzySuggestModal<Entry> {
 			// 书籍默认脑图（㉗ 自动入图目标）带 📖 徽标——用户摘录后据此找图
 			const isBookMap = match.item.documentId != null;
 			const nodeCount = this.plugin.mindmaps.countNodes(match.item.id);
-			title.textContent = isBookMap
-				? `📖 ${match.item.name}`
-				: match.item.name;
+			title.textContent = isBookMap ? `📖 ${match.item.name}` : match.item.name;
 			dir.textContent = isBookMap
 				? `${nodeCount} 个节点 · 书籍脑图（该书摘录自动入图）`
 				: `${nodeCount} 个节点`;

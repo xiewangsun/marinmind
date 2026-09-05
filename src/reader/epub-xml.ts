@@ -28,10 +28,6 @@ interface ParseCtx {
 
 const WS = " \t\r\n";
 
-function isWs(ch: string | undefined): boolean {
-	return ch !== undefined && WS.includes(ch);
-}
-
 /** XML 名字字符：字母/数字/_-.: + 非 ASCII 宽松放行（带音标/CJK） */
 function isNameChar(ch: string | undefined): boolean {
 	if (ch === undefined) {
@@ -375,7 +371,12 @@ const NAMED_ENTITIES: Record<string, string> = {
 function codePointText(digits: string, radix: number, whole: string): string {
 	const code = parseInt(digits, radix);
 	// 码位合法性：>0、≤0x10FFFF、非代理区；非法原样保留
-	if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) {
+	if (
+		!Number.isFinite(code) ||
+		code <= 0 ||
+		code > 0x10ffff ||
+		(code >= 0xd800 && code <= 0xdfff)
+	) {
 		return whole;
 	}
 	return String.fromCodePoint(code);

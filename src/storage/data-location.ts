@@ -23,10 +23,7 @@ export async function resolveDataLocation(app: App, rawDir: string): Promise<Res
 }
 
 /** 解析备份目录设置值（规则同数据目录；目录不存在时由导出写操作自建，这里顺手确保） */
-export async function resolveBackupLocation(
-	app: App,
-	rawDir: string,
-): Promise<ResolvedLocation> {
+export async function resolveBackupLocation(app: App, rawDir: string): Promise<ResolvedLocation> {
 	return resolveLocation(app, rawDir);
 }
 

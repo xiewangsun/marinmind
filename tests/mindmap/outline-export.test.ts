@@ -30,13 +30,20 @@ function makeCard(over: Partial<Card> & Pick<Card, "id">): Card {
 }
 
 /** 大纲节点工厂：id 同卡 id 简化（测试里两者无区分需求） */
-function outlineNode(id: string, parentId: string | null, card: Card, order?: number): OutlineGraphNode {
+function outlineNode(
+	id: string,
+	parentId: string | null,
+	card: Card,
+	order?: number,
+): OutlineGraphNode {
 	return { id, parentId, x: 0, y: 0, card, ...(order != null ? { order } : {}) };
 }
 
 describe("outlineLineText 大纲行文本（54）", () => {
 	it("取值优先级：标题 > 批注 > 摘录文字 > 形态占位", () => {
-		expect(outlineLineText(makeCard({ id: "a", title: "T", note: "N", excerptText: "E" }))).toBe("T");
+		expect(
+			outlineLineText(makeCard({ id: "a", title: "T", note: "N", excerptText: "E" })),
+		).toBe("T");
 		expect(outlineLineText(makeCard({ id: "a", note: "N", excerptText: "E" }))).toBe("N");
 		expect(outlineLineText(makeCard({ id: "a", excerptText: "E" }))).toBe("E");
 		expect(outlineLineText(makeCard({ id: "a", excerptType: "photo" }))).toBe("（照片摘录）");
@@ -113,11 +120,7 @@ describe("buildOutlineOpml OPML 2.0 大纲（63）", () => {
 	});
 
 	it("text 属性 XML 五实体转义（& < > 双引号 单引号）", () => {
-		const r = outlineNode(
-			"r",
-			null,
-			makeCard({ id: "c1", title: `A & B <C> "D" 'E'` }),
-		);
+		const r = outlineNode("r", null, makeCard({ id: "c1", title: `A & B <C> "D" 'E'` }));
 		const opml = buildOutlineOpml([r], `图&名`);
 		expect(opml).toContain('<outline text="A &amp; B &lt;C&gt; &quot;D&quot; &apos;E&apos;"/>');
 		expect(opml).toContain("<title>图&amp;名</title>");

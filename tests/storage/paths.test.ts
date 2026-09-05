@@ -89,7 +89,9 @@ describe("normalizeAssetRef（旧 excerptRef 兼容）", () => {
 		expect(normalizeAssetRef("assets/x.png")).toBe("assets/x.png");
 	});
 	it("非本目录路径不误剥", () => {
-		expect(normalizeAssetRef("foo/.marinmind/assets/x.png")).toBe("foo/.marinmind/assets/x.png");
+		expect(normalizeAssetRef("foo/.marinmind/assets/x.png")).toBe(
+			"foo/.marinmind/assets/x.png",
+		);
 		expect(normalizeAssetRef(".marinmind/other.txt")).toBe(".marinmind/other.txt");
 	});
 });

@@ -31,7 +31,15 @@ export const VIEW_PAD = 12;
 /** XML 属性/文本五实体转义（dom-snapshot ㊽-2 同教训：标题含 & < > 即整份 XML 报废） */
 function esc(s: string): string {
 	return s.replace(/[&<>"']/g, (ch) =>
-		ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : ch === ">" ? "&gt;" : ch === '"' ? "&quot;" : "&#39;",
+		ch === "&"
+			? "&amp;"
+			: ch === "<"
+				? "&lt;"
+				: ch === ">"
+					? "&gt;"
+					: ch === '"'
+						? "&quot;"
+						: "&#39;",
 	);
 }
 
@@ -81,7 +89,9 @@ export function buildMapThumbnailSvg(
 		if (style === "frame") {
 			if (!framedParents.has(parent.id)) {
 				framedParents.add(parent.id);
-				const visChildren = (childrenMap.get(parent.id) ?? []).filter((c) => visible.has(c.id));
+				const visChildren = (childrenMap.get(parent.id) ?? []).filter((c) =>
+					visible.has(c.id),
+				);
 				frameRects.push(frameRectFor(nodeRect(parent), visChildren.map(nodeRect)));
 			}
 			continue; // frame 不画连线（edgePath 对 frame 也返回 null，双保险省一次调用）

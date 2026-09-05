@@ -73,9 +73,7 @@ describe("附件仓 AttachmentStore", () => {
 	it("超过 20MB 上限时抛错且不落盘", async () => {
 		const adapter = new MemoryAdapter();
 		const store = new AttachmentStore(adapter);
-		await expect(store.save(bytesOf(20 * 1024 * 1024 + 1), "png")).rejects.toThrow(
-			/20MB/,
-		);
+		await expect(store.save(bytesOf(20 * 1024 * 1024 + 1), "png")).rejects.toThrow(/20MB/);
 		expect(adapter.files.size).toBe(0);
 	});
 
@@ -89,8 +87,6 @@ describe("附件仓 AttachmentStore", () => {
 
 	it("remove 不存在的路径静默通过（删除卡无附件时不抛）", async () => {
 		const store = new AttachmentStore(new MemoryAdapter());
-		await expect(
-			store.remove(`${ASSETS_SUBDIR}/不存在的附件.webm`),
-		).resolves.toBeUndefined();
+		await expect(store.remove(`${ASSETS_SUBDIR}/不存在的附件.webm`)).resolves.toBeUndefined();
 	});
 });

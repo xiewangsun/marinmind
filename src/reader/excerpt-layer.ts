@@ -1,5 +1,6 @@
 import type { Card, DocRect, NormPoint } from "../types";
 import { Platform, setIcon } from "obsidian";
+import { setIconSafe } from "../ui/icon-resolve";
 import {
 	activeMindmapViews,
 	clearMindmapDropHints,
@@ -54,6 +55,8 @@ export interface ExcerptLayerCallbacks {
 	onRelocateDraw?(pageNumber: number, rect: DocRect): void;
 	/** 点击已有遮挡块（删除该块 / 清除全部 / 预览开关菜单，㊷） */
 	onOcclusionClick?(card: Card, index: number, evt: MouseEvent): void;
+	/** 留白胶囊 grip 拖动结束（101 修遮挡正文）：新锚点写回卡片（rects 整体替换） */
+	onBlankMove?(cardId: string, rect: DocRect): void;
 	/** 读取媒体附件（手写 PNG 回显为 <img>） */
 	readAttachment(ref: string): Promise<ArrayBuffer>;
 }
@@ -62,17 +65,11 @@ export interface ExcerptLayerCallbacks {
 const CARD_DRAG_THRESHOLD = 5;
 /** ghost 文本截断长度 */
 const GHOST_TEXT_LIMIT = 60;
-/** 最小套索路径像素长度（避免抖动产生无效套索） */
-const MIN_LASSO_PATH_LENGTH = 12;
-
 /** 矩形数组逐项相等（84-D：syncCard 判 photo 展示框是否变化，变了整组重摆） */
 function sameRects(a: DocRect[], b: DocRect[]): boolean {
 	return (
 		a.length === b.length &&
-		a.every(
-			(r, i) =>
-				r.x === b[i].x && r.y === b[i].y && r.w === b[i].w && r.h === b[i].h,
-		)
+		a.every((r, i) => r.x === b[i].x && r.y === b[i].y && r.w === b[i].w && r.h === b[i].h)
 	);
 }
 
@@ -250,7 +247,9 @@ export class ExcerptLayer {
 			el.classList.add("marinmind-excerpt-highlight");
 			// ㊹ 形态类：文字=下划线（逐行矩形天然逐行下划线），区域=边框
 			// （含 polygon 缺失的存量套索旧卡；photo/audio 不走此路径）
-			el.classList.add(card.excerptType === "text" ? "marinmind-hl-text" : "marinmind-hl-area");
+			el.classList.add(
+				card.excerptType === "text" ? "marinmind-hl-text" : "marinmind-hl-area",
+			);
 			el.dataset.cardId = card.id;
 			// 颜色变体挂 data-color：每色定义 --mm-hl-line/--mm-hl-tint 两变量供形态规则消费
 			el.dataset.color = highlightFallbackColor(card);
@@ -319,6 +318,14 @@ export class ExcerptLayer {
 		if (card.rects[0].x > 0.8) {
 			el.style.transform = "translateX(-100%)";
 		}
+		// 101 拖动重摆 grip：专属起笔（stopPropagation 不进拖卡入图状态机），
+		// 拖完把新锚点经 onBlankMove 写库——胶囊可挪离正文（修遮挡）
+		const grip = el.createEl("span", {
+			cls: "marinmind-blank-grip",
+			attr: { title: "拖动调整位置" },
+		});
+		setIconSafe(grip, "grip-vertical", "grip", "ellipsis");
+		grip.addEventListener("pointerdown", (evt) => this.beginChipDrag(evt, el, card));
 		const label = card.note ?? card.excerptText ?? "留白";
 		const labelEl = el.createSpan({ cls: "marinmind-blank-label" });
 		labelEl.setText(label); // 截断交给 CSS ellipsis（折叠单行 / 展开多行）
@@ -347,6 +354,101 @@ export class ExcerptLayer {
 		);
 		this.pageView.overlayEl.appendChild(el);
 		this.highlightEls.set(card.id, [el]);
+	}
+
+	/** 留白胶囊拖动重摆状态（101）：grip 起笔跟手，松手归一化新锚点回调写库 */
+	private chipDrag: {
+		pointerId: number;
+		card: Card;
+		el: HTMLElement;
+		startClient: { x: number; y: number };
+		startLeft: number;
+		startTop: number;
+		moved: boolean;
+	} | null = null;
+
+	/**
+	 * 留白胶囊拖动起笔（101 修遮挡正文）：capture 锁 grip，位移超阈值后跟手改
+	 * left/top（overlay 内像素，页内钳制）；松手把胶囊左上角归一化为新锚点
+	 * （尺寸沿用原锚点）经 onBlankMove 写库，cardBus changed → syncCard 重摆。
+	 * 纯点 grip（未超阈）无动作——capture 吞 click 不弹菜单。
+	 */
+	private beginChipDrag(evt: PointerEvent, el: HTMLElement, card: Card): void {
+		if (evt.button !== 0 || this.chipDrag) {
+			return;
+		}
+		evt.stopPropagation(); // grip 专属动作：不冒泡进 overlay 的拖卡入图状态机
+		const grip = evt.currentTarget as HTMLElement;
+		grip.setPointerCapture(evt.pointerId);
+		this.chipDrag = {
+			pointerId: evt.pointerId,
+			card,
+			el,
+			startClient: { x: evt.clientX, y: evt.clientY },
+			startLeft: el.offsetLeft,
+			startTop: el.offsetTop,
+			moved: false,
+		};
+		const onMove = (me: PointerEvent): void => {
+			const d = this.chipDrag;
+			if (!d || me.pointerId !== d.pointerId) {
+				return;
+			}
+			const dx = me.clientX - d.startClient.x;
+			const dy = me.clientY - d.startClient.y;
+			if (!d.moved) {
+				if (dx * dx + dy * dy < CARD_DRAG_THRESHOLD * CARD_DRAG_THRESHOLD) {
+					return;
+				}
+				d.moved = true;
+				el.classList.add("is-dragging");
+			}
+			// 页内钳制：胶囊完整留在 overlay 里（overflow:hidden 裁不到）
+			const host = this.pageView.overlayEl;
+			const maxX = Math.max(0, host.clientWidth - el.offsetWidth);
+			const maxY = Math.max(0, host.clientHeight - el.offsetHeight);
+			el.style.left = `${Math.min(Math.max(0, d.startLeft + dx), maxX)}px`;
+			el.style.top = `${Math.min(Math.max(0, d.startTop + dy), maxY)}px`;
+		};
+		const finish = (commit: boolean): void => {
+			grip.removeEventListener("pointermove", onMove);
+			grip.removeEventListener("pointerup", onUp);
+			grip.removeEventListener("pointercancel", onCancel);
+			const d = this.chipDrag;
+			this.chipDrag = null;
+			if (!d) {
+				return;
+			}
+			el.classList.remove("is-dragging");
+			// 吞掉紧随的 click（拖完/纯点 grip 都不弹胶囊菜单）；capture 且 once
+			el.addEventListener(
+				"click",
+				(ce) => {
+					ce.stopPropagation();
+					ce.preventDefault();
+				},
+				{ capture: true, once: true },
+			);
+			if (!commit || !d.moved) {
+				return;
+			}
+			const host = this.pageView.overlayEl;
+			const w = Math.max(1, host.clientWidth);
+			const h = Math.max(1, host.clientHeight);
+			const anchor = d.card.rects[0];
+			// 左上角归一化即新锚点（offsetLeft 不受 translateX(-100%) 影响）；尺寸沿用
+			this.cb.onBlankMove?.(d.card.id, {
+				x: Math.min(1, Math.max(0, el.offsetLeft / w)),
+				y: Math.min(1, Math.max(0, el.offsetTop / h)),
+				w: anchor.w,
+				h: anchor.h,
+			});
+		};
+		const onUp = (): void => finish(true);
+		const onCancel = (): void => finish(false);
+		grip.addEventListener("pointermove", onMove);
+		grip.addEventListener("pointerup", onUp);
+		grip.addEventListener("pointercancel", onCancel);
 	}
 
 	/** 套索摘录回显：包围盒 div + 内嵌 SVG 描边原始轮廓（㊹ MN3 式线稿——只描线不填充）。
@@ -429,9 +531,11 @@ export class ExcerptLayer {
 	 */
 	syncCard(card: Card): void {
 		if (this.cardsById.has(card.id)) {
-			// 84-D photo 展示框：rects 变化（定位/取消定位）整组重摆（镜像遮挡重摆语义）
-			const cached = this.cardsById.get(card.id)!;
-			if (card.excerptType === "photo" && !sameRects(cached.rects, card.rects)) {
+			// 84-D photo 展示框 / 101 留白胶囊：rects 变化（定位/拖动重摆）整组重摆
+			if (
+				(card.excerptType === "photo" || card.excerptType === "blank") &&
+				!sameRects(this.cardsById.get(card.id)!.rects, card.rects)
+			) {
 				this.removeHighlight(card.id);
 				this.addHighlight(card);
 				return;
@@ -495,24 +599,21 @@ export class ExcerptLayer {
 
 	/** 遮挡编辑模式开关（㊷）：只在目标卡所在页生效（页归一化矩形跨页无意义） */
 	setOcclusionTarget(card: Card | null): void {
-		this.occlusionTarget =
-			card && card.page === this.pageView.pageNumber ? card : null;
+		this.occlusionTarget = card && card.page === this.pageView.pageNumber ? card : null;
 		this.cancelDrag();
 		this.applyOverlayCapture();
 	}
 
 	/** 照片重定位模式开关（84-D）：只在目标卡所在页生效，拖框即新展示框 */
 	setRelocateTarget(card: Card | null): void {
-		this.relocateTarget =
-			card && card.page === this.pageView.pageNumber ? card : null;
+		this.relocateTarget = card && card.page === this.pageView.pageNumber ? card : null;
 		this.cancelDrag();
 		this.applyOverlayCapture();
 	}
 
 	/** 文字遮罩模式开关（74）：只在目标卡所在页生效；overlay 不接管指针（放行原生划选） */
 	setOcclusionTextTarget(card: Card | null): void {
-		this.occlusionTextTarget =
-			card && card.page === this.pageView.pageNumber ? card : null;
+		this.occlusionTextTarget = card && card.page === this.pageView.pageNumber ? card : null;
 		this.applyOverlayCapture();
 	}
 
@@ -584,8 +685,8 @@ export class ExcerptLayer {
 			if (!this.lasso) {
 				this.lasso = new LassoTracker(this.pageView);
 				this.lasso.setCommitCallback((page, polygon, bbox) =>
-				this.cb.onCreateLassoCard(page, polygon, bbox),
-			);
+					this.cb.onCreateLassoCard(page, polygon, bbox),
+				);
 			}
 		} else {
 			this.lasso?.destroy();
@@ -642,10 +743,7 @@ export class ExcerptLayer {
 		// 高亮（整行盒盖在文本上方）覆盖的文字才能起笔原生选区。overlay 本体
 		// 不参与 capture 计算（保持 pointer-events:none 穿透，且无 excerpt-on 的
 		// user-select:none——两者都会阻断原生划选）
-		overlay.classList.toggle(
-			"marinmind-occlusion-text-on",
-			this.occlusionTextTarget != null,
-		);
+		overlay.classList.toggle("marinmind-occlusion-text-on", this.occlusionTextTarget != null);
 	}
 	/** 留白点击监听器（挂/摘时用同一引用，防泄漏） */
 	private pendingBlankClick: ((evt: MouseEvent) => void) | null = null;
@@ -749,9 +847,7 @@ export class ExcerptLayer {
 		}
 		// 非摘录模式：按住高亮预备拖卡入脑图。
 		// 不 preventDefault：一旦抑制，部分浏览器会连带抑制后续 click，普通点击弹菜单会失效
-		const hl = (evt.target as HTMLElement).closest<HTMLElement>(
-			".marinmind-excerpt-highlight",
-		);
+		const hl = (evt.target as HTMLElement).closest<HTMLElement>(".marinmind-excerpt-highlight");
 		if (hl?.dataset.cardId) {
 			if (evt.pointerType === "touch") {
 				// 79-7 触摸端：不立即捕获（立即捕获 + 阈值升级会与滚动手势抢输入源），
@@ -1028,11 +1124,9 @@ export class ExcerptLayer {
 		ghost.appendChild(color);
 		const text = document.createElement("div");
 		text.className = "marinmind-drag-ghost-text";
-		const raw =
-			card?.note ?? card?.excerptText ?? shapeFallbackText(card?.excerptType);
-		text.textContent = raw.length > GHOST_TEXT_LIMIT
-			? `${raw.slice(0, GHOST_TEXT_LIMIT)}…`
-			: raw;
+		const raw = card?.note ?? card?.excerptText ?? shapeFallbackText(card?.excerptType);
+		text.textContent =
+			raw.length > GHOST_TEXT_LIMIT ? `${raw.slice(0, GHOST_TEXT_LIMIT)}…` : raw;
 		ghost.appendChild(text);
 		document.body.appendChild(ghost);
 		this.ghost = ghost;

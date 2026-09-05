@@ -8,7 +8,15 @@ import { cardPreview, cardPreviewBlocks, EXCERPT_LABELS, formatRelativeTime } fr
 import { highlightFallbackColor } from "../reader/highlight-colors";
 import { renderExcerptVisual } from "../reader/excerpt-visual";
 import { snapshotImgSize } from "../reader/rect-utils";
-import { deleteCardCascade, promptCardDeck, promptCardEdit, promptCardTags } from "./card-actions";
+import {
+	deleteCardCascade,
+	promptCardDeck,
+	promptCardAiComment,
+	promptCardGen,
+	promptCardLinks,
+	promptCardEdit,
+	promptCardTags,
+} from "./card-actions";
 import { ConfirmModal } from "../mindmap/confirm-modal";
 
 /**
@@ -54,7 +62,9 @@ export class CardPreviewModal extends Modal {
 		contentEl.dataset.color = highlightFallbackColor(this.card);
 
 		// 卡片头（91 批重排）：标题 + 徽标行（形态胶囊在前、出处随后单行省略）
-		const doc = this.card.documentId ? this.plugin.documents.get(this.card.documentId) : undefined;
+		const doc = this.card.documentId
+			? this.plugin.documents.get(this.card.documentId)
+			: undefined;
 		contentEl.createDiv({ cls: "marinmind-card-preview-title", text: cardPreview(this.card) });
 		const badges = contentEl.createDiv({ cls: "marinmind-card-preview-badges" });
 		badges.createSpan({
@@ -101,20 +111,29 @@ export class CardPreviewModal extends Modal {
 		// 低频动作收 ⋯ 菜单——与阅读器工具行/脑图 header 的溢出菜单同一范式
 		const actions = contentEl.createDiv({ cls: "marinmind-card-preview-actions" });
 		if (this.card.documentId) {
-			new ButtonComponent(actions).setIcon("arrow-up-right").setButtonText("跳原文").onClick(() => {
-				this.close();
-				void this.plugin.openCardSource(this.card);
-			});
+			new ButtonComponent(actions)
+				.setIcon("arrow-up-right")
+				.setButtonText("跳原文")
+				.onClick(() => {
+					this.close();
+					void this.plugin.openCardSource(this.card);
+				});
 		}
 		// 65 编辑批注起步，78 统一标题/批注双字段（与脑图节点编辑器同源）——
 		// 复习/预览发现要改不必回脑图，同一单源共享
-		new ButtonComponent(actions).setIcon("pencil").setButtonText("标题/批注").onClick(() => {
-			promptCardEdit(this.app, this.plugin, this.freshCard());
-		});
+		new ButtonComponent(actions)
+			.setIcon("pencil")
+			.setButtonText("标题/批注")
+			.onClick(() => {
+				promptCardEdit(this.app, this.plugin, this.freshCard());
+			});
 		// ㊻-A 复制互链（任何卡可复制）
-		new ButtonComponent(actions).setIcon("link").setButtonText("复制链接").onClick(() => {
-			void this.plugin.copyCardLink(this.card, "link");
-		});
+		new ButtonComponent(actions)
+			.setIcon("link")
+			.setButtonText("复制链接")
+			.onClick(() => {
+				void this.plugin.copyCardLink(this.card, "link");
+			});
 		new ButtonComponent(actions)
 			.setIcon("more-horizontal")
 			.setButtonText("⋯")
@@ -137,66 +156,115 @@ export class CardPreviewModal extends Modal {
 		const menu = new Menu();
 		// ㊻-A 复制嵌入互链
 		menu.addItem((mi) =>
-			mi.setTitle("复制嵌入").setIcon("copy").onClick(() => {
-				void this.plugin.copyCardLink(this.card, "embed");
-			}),
+			mi
+				.setTitle("复制嵌入")
+				.setIcon("copy")
+				.onClick(() => {
+					void this.plugin.copyCardLink(this.card, "embed");
+				}),
 		);
 		// 卡组批（73）：打标签 / 设卡组——与复习视图 ⋯ 菜单经 card-actions 单源共享
 		menu.addItem((mi) =>
-			mi.setTitle("打标签").setIcon("tags").onClick(() => {
-				promptCardTags(this.app, this.plugin, this.freshCard());
-			}),
+			mi
+				.setTitle("打标签")
+				.setIcon("tags")
+				.onClick(() => {
+					promptCardTags(this.app, this.plugin, this.freshCard());
+				}),
 		);
 		menu.addItem((mi) =>
-			mi.setTitle("设卡组").setIcon("layers").onClick(() => {
-				promptCardDeck(this.app, this.plugin, this.freshCard());
-			}),
+			mi
+				.setTitle("设卡组")
+				.setIcon("layers")
+				.onClick(() => {
+					promptCardDeck(this.app, this.plugin, this.freshCard());
+				}),
 		);
+		// 97 AI 评论：有摘录文字即可解释（与阅读器高亮菜单 card-actions 单源共享）
+		if ((this.card.excerptText ?? "").trim().length > 0) {
+			menu.addItem((mi) =>
+				mi
+					.setTitle("AI 补充解释")
+					.setIcon("sparkles")
+					.onClick(() => {
+						promptCardAiComment(this.app, this.plugin, this.freshCard());
+					}),
+			);
+			// 99 AI 制卡：摘录文字为材料出 QA/填空卡（有锚点继承回链）
+			menu.addItem((mi) =>
+				mi
+					.setTitle("AI 制卡…")
+					.setIcon("list-checks")
+					.onClick(() => {
+						promptCardGen(this.app, this.plugin, this.freshCard());
+					}),
+			);
+		}
+		// 99 相关卡片（AI 推荐）：候选按同文档收集，无文档归属的卡在弹窗内说明
+		if (this.card.documentId != null) {
+			menu.addItem((mi) =>
+				mi
+					.setTitle("相关卡片（AI）…")
+					.setIcon("git-compare")
+					.onClick(() => {
+						promptCardLinks(this.app, this.plugin, this.freshCard());
+					}),
+			);
+		}
 		// 71 photo 快照遮挡：预览弹窗是 photo 卡唯一遮挡编辑面（阅读器无页矩形
 		// 无入口）——菜单项文案随 occEdit 现读，点选翻转态并整体重画视觉主体
 		if (this.card.excerptType === "photo") {
 			menu.addItem((mi) =>
-				mi.setTitle(this.occEdit ? "完成遮挡" : "编辑遮挡").setIcon("eye-off").onClick(() => {
-					this.occEdit = !this.occEdit;
-					this.rerenderBody();
-				}),
+				mi
+					.setTitle(this.occEdit ? "完成遮挡" : "编辑遮挡")
+					.setIcon("eye-off")
+					.onClick(() => {
+						this.occEdit = !this.occEdit;
+						this.rerenderBody();
+					}),
 			);
 		}
 		// 84-C 重录语音：删旧卡（含附件）+ 立即开始全局录音（锚定原卡归属，
 		// 不在阅读器也能重录）。批注/标签/复习进度随旧卡丢弃（语音卡通常无此负担）。
 		if (this.card.excerptType === "audio") {
 			menu.addItem((mi) =>
-				mi.setTitle("重录").setIcon("mic").onClick(() => {
-					const fresh = this.freshCard();
-					new ConfirmModal(
-						this.app,
-						"重录语音",
-						"将删除当前语音卡片（含批注、标签与复习进度），并立即开始新录音。继续？",
-						() => {
-							deleteCardCascade(this.plugin, fresh);
-							this.close();
-							void this.plugin.startGlobalRecording({
-								documentId: fresh.documentId,
-								page: fresh.page,
-							});
-						},
-					).open();
-				}),
+				mi
+					.setTitle("重录")
+					.setIcon("mic")
+					.onClick(() => {
+						const fresh = this.freshCard();
+						new ConfirmModal(
+							this.app,
+							"重录语音",
+							"将删除当前语音卡片（含批注、标签与复习进度），并立即开始新录音。继续？",
+							() => {
+								deleteCardCascade(this.plugin, fresh);
+								this.close();
+								void this.plugin.startGlobalRecording({
+									documentId: fresh.documentId,
+									page: fresh.page,
+								});
+							},
+						).open();
+					}),
 			);
 		}
 		menu.addSeparator();
 		menu.addItem((mi) =>
-			mi.setTitle("删除").setIcon("trash-2").onClick(() => {
-				new ConfirmModal(
-					this.app,
-					"删除卡片",
-					"将同时删除附件、双向链接与脑图中的对应节点，且无法恢复。",
-					() => {
-						deleteCardCascade(this.plugin, this.freshCard());
-						this.close(); // 卡已删，弹窗随之关闭；主页列表刷新由 cardBus 防抖订阅完成
-					},
-				).open();
-			}),
+			mi
+				.setTitle("删除")
+				.setIcon("trash-2")
+				.onClick(() => {
+					new ConfirmModal(
+						this.app,
+						"删除卡片",
+						"将同时删除附件、双向链接与脑图中的对应节点，且无法恢复。",
+						() => {
+							deleteCardCascade(this.plugin, this.freshCard());
+							this.close(); // 卡已删，弹窗随之关闭；主页列表刷新由 cardBus 防抖订阅完成
+						},
+					).open();
+				}),
 		);
 		menu.showAtMouseEvent(evt);
 	}
@@ -227,7 +295,10 @@ export class CardPreviewModal extends Modal {
 			this.objectUrl = result.objectUrl;
 		}
 		if (!result.rendered) {
-			host.createDiv({ cls: "marinmind-card-preview-fallback", text: "（摘录图不可用——附件缺失或原文文件无法读取）" });
+			host.createDiv({
+				cls: "marinmind-card-preview-fallback",
+				text: "（摘录图不可用——附件缺失或原文文件无法读取）",
+			});
 		}
 	}
 
@@ -252,14 +323,20 @@ export class CardPreviewModal extends Modal {
 		const card = this.freshCard();
 		const ref = card.excerptRef;
 		if (!ref) {
-			host.createDiv({ cls: "marinmind-card-preview-fallback", text: "（照片附件缺失，无法编辑遮挡）" });
+			host.createDiv({
+				cls: "marinmind-card-preview-fallback",
+				text: "（照片附件缺失，无法编辑遮挡）",
+			});
 			return;
 		}
 		let bytes: ArrayBuffer;
 		try {
 			bytes = await this.plugin.attachments.read(ref);
 		} catch {
-			host.createDiv({ cls: "marinmind-card-preview-fallback", text: "（照片附件读取失败，无法编辑遮挡）" });
+			host.createDiv({
+				cls: "marinmind-card-preview-fallback",
+				text: "（照片附件读取失败，无法编辑遮挡）",
+			});
 			return;
 		}
 		if (!host.isConnected) {
@@ -284,7 +361,10 @@ export class CardPreviewModal extends Modal {
 			text: "在图上拖框添加遮挡；点击遮挡块删除该块。",
 		});
 		if (card.occlusions.length > 0) {
-			const clear = host.createEl("button", { cls: "marinmind-review-link", text: "清除全部遮挡" });
+			const clear = host.createEl("button", {
+				cls: "marinmind-review-link",
+				text: "清除全部遮挡",
+			});
 			clear.addEventListener("click", () => {
 				this.plugin.cards.update(card.id, { occlusions: [] });
 				this.rerenderBody();
@@ -296,7 +376,10 @@ export class CardPreviewModal extends Modal {
 	private syncOccBlocks(wrap: HTMLElement, card: Card): void {
 		wrap.findAll(".marinmind-photo-occ-block").forEach((el) => el.remove());
 		card.occlusions.forEach((occ, i) => {
-			const block = wrap.createDiv({ cls: "marinmind-photo-occ-block", attr: { title: "点击删除此遮挡" } });
+			const block = wrap.createDiv({
+				cls: "marinmind-photo-occ-block",
+				attr: { title: "点击删除此遮挡" },
+			});
 			block.style.left = `${occ.x * 100}%`;
 			block.style.top = `${occ.y * 100}%`;
 			block.style.width = `${occ.w * 100}%`;

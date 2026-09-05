@@ -1,4 +1,4 @@
-import { Modal } from "obsidian";
+import { Modal, setIcon } from "obsidian";
 import type { App } from "obsidian";
 import type { DocSearchHit, PdfSearchLine } from "./doc-search";
 import { highlightSnippet, searchTexts, TOTAL_HIT_CAP } from "./doc-search";
@@ -11,8 +11,7 @@ const PDF_YIELD_PAGES = 8;
 const EPUB_YIELD_CHAPTERS = 4;
 
 /** 块级文本元素选择器（md 预览 / EPUB 净化后的通用块；innermost 判定见收集器） */
-const BLOCK_SELECTOR =
-	"p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, dd, dt, td, th, figcaption";
+const BLOCK_SELECTOR = "p, h1, h2, h3, h4, h5, h6, li, blockquote, pre, dd, dt, td, th, figcaption";
 
 /**
  * 收集容器内的块级文本元素（89-D；EPUB 源解析 / MD·EPUB 渲染后定位三路共用）：
@@ -21,8 +20,7 @@ const BLOCK_SELECTOR =
 export function collectBlockEls(root: Element): HTMLElement[] {
 	const all = Array.from(root.querySelectorAll(BLOCK_SELECTOR)) as HTMLElement[];
 	return all.filter(
-		(el) =>
-			!el.querySelector(BLOCK_SELECTOR) && (el.textContent ?? "").trim().length > 0,
+		(el) => !el.querySelector(BLOCK_SELECTOR) && (el.textContent ?? "").trim().length > 0,
 	);
 }
 
@@ -71,7 +69,10 @@ export class DocSearchModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.titleEl.setText("搜索文档");
+		// 93 批：标题美化为放大镜 icon + 文案（居中小号弱化，CSS 见 -title 类）
+		this.titleEl.addClass("marinmind-search-modal-title");
+		setIcon(this.titleEl, "search");
+		this.titleEl.createSpan({ text: "搜索文档" });
 		const { contentEl } = this;
 		// 布局类与脑图节点搜索弹窗共用（89-C 泛化的 .marinmind-search-modal 系列）
 		contentEl.addClass("marinmind-search-modal");
@@ -148,9 +149,7 @@ export class DocSearchModal extends Modal {
 		}
 		this.renderResults(); // 91 批一次性整表上屏（替换"搜索中…"占位）
 		this.countEl.setText(
-			truncated
-				? `已达上限，仅显示前 ${this.hits.length} 条`
-				: `${this.hits.length} 条匹配`,
+			truncated ? `已达上限，仅显示前 ${this.hits.length} 条` : `${this.hits.length} 条匹配`,
 		);
 	}
 
@@ -166,7 +165,11 @@ export class DocSearchModal extends Modal {
 				return true;
 			}
 			if (lines && lines.length > 0) {
-				const { hits } = searchTexts(page, lines.map((l) => l.text), q);
+				const { hits } = searchTexts(
+					page,
+					lines.map((l) => l.text),
+					q,
+				);
 				this.hits.push(...hits);
 			}
 			if (this.hits.length >= TOTAL_HIT_CAP) {
@@ -218,8 +221,8 @@ export class DocSearchModal extends Modal {
 
 	/**
 	 * 一次性渲染全部命中（91 批去流式）：扫描期只更进度行，结束后整表上屏；
-	 * 首项默认选中。行结构 = 徽标置顶行（item 直接子级）+ 摘要两行截断块
-	 * （不再借用 picker-title 单行省略配方），命中词经 highlightSnippet 高亮。
+	 * 首项默认选中。92 批行式重排：摘要在前左对齐占主行，页码徽标行尾右对齐
+	 * 同行，命中词经 highlightSnippet 高亮。
 	 */
 	private renderResults(): void {
 		this.listEl.empty();
@@ -227,12 +230,12 @@ export class DocSearchModal extends Modal {
 			const item = this.listEl.createDiv({
 				cls: `marinmind-search-modal-item${index === 0 ? " is-selected" : ""}`,
 			});
+			const snip = item.createDiv({ cls: "marinmind-search-modal-snippet" });
+			snip.innerHTML = highlightSnippet(this.query, hit.snippet); // 安全 HTML 单源（已转义+mark）
 			item.createDiv({
 				cls: "marinmind-search-modal-badge",
 				text: this.host.docSearchHitLabel(hit),
 			});
-			const snip = item.createDiv({ cls: "marinmind-search-modal-snippet" });
-			snip.innerHTML = highlightSnippet(this.query, hit.snippet); // 安全 HTML 单源（已转义+mark）
 			item.addEventListener("click", () => this.pick(index));
 			item.addEventListener("mouseenter", () => {
 				if (this.selected !== index) {

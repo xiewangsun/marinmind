@@ -78,7 +78,7 @@ export function isHeadingText(text: string): boolean {
 		return false;
 	}
 	// 全大写拉丁短行（INTRODUCTION / PART I；标题排版惯例）
-	if (/^[A-Z][A-Z0-9 ,.&'()\-]{2,}$/.test(t)) {
+	if (/^[A-Z][A-Z0-9 ,.&'()-]{2,}$/.test(t)) {
 		return true;
 	}
 	if (
@@ -100,7 +100,10 @@ export function isHeadingText(text: string): boolean {
 
 /** 居中短行判定（章节大标题常独立居中；图注/表注以 图/表/Figure/Table 起头排除，㉕） */
 function isCenteredHeading(line: Line, pageW: number): boolean {
-	if (line.text.length > CENTERED_TEXT_MAX || /^(?:[图表例]|Figure|Fig\.?|Table)/i.test(line.text)) {
+	if (
+		line.text.length > CENTERED_TEXT_MAX ||
+		/^(?:[图表例]|Figure|Fig\.?|Table)/i.test(line.text)
+	) {
 		return false;
 	}
 	if (line.x1 - line.x0 > 0.7 * pageW) {
@@ -116,9 +119,7 @@ function median(values: number[]): number {
 	}
 	const sorted = [...values].sort((a, b) => a - b);
 	const mid = Math.floor(sorted.length / 2);
-	return sorted.length % 2 === 1
-		? sorted[mid]
-		: (sorted[mid - 1] + sorted[mid]) / 2;
+	return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 /** 聚类后的一行（成员按 x 排序已合并） */
@@ -178,29 +179,31 @@ function clusterLines(items: LayoutItem[]): Line[] {
 			runs.push(run);
 		}
 	}
-	return runs.map((members) => {
-		const row = [...members].sort((a, b) => a.x - b.x);
-		let text = "";
-		let prevEnd = row[0].x;
-		let h = 0;
-		for (const it of row) {
-			// 词间空格：间距显著（latin 词距）才补空格，CJK 字符间零间距自然直连
-			if (text && it.x - prevEnd > WORD_GAP * Math.max(it.h, h)) {
-				text += " ";
+	return runs
+		.map((members) => {
+			const row = [...members].sort((a, b) => a.x - b.x);
+			let text = "";
+			let prevEnd = row[0].x;
+			let h = 0;
+			for (const it of row) {
+				// 词间空格：间距显著（latin 词距）才补空格，CJK 字符间零间距自然直连
+				if (text && it.x - prevEnd > WORD_GAP * Math.max(it.h, h)) {
+					text += " ";
+				}
+				text += it.str;
+				prevEnd = it.x + it.w;
+				h = Math.max(h, it.h);
 			}
-			text += it.str;
-			prevEnd = it.x + it.w;
-			h = Math.max(h, it.h);
-		}
-		return {
-			text: text.replace(/\s+/g, " ").trim(),
-			x0: Math.min(...row.map((it) => it.x)),
-			x1: Math.max(...row.map((it) => it.x + it.w)),
-			yTop: Math.min(...row.map((it) => it.yTop)),
-			yBot: Math.max(...row.map((it) => it.yTop + it.h)),
-			h,
-		};
-	}).filter((line) => line.text !== "");
+			return {
+				text: text.replace(/\s+/g, " ").trim(),
+				x0: Math.min(...row.map((it) => it.x)),
+				x1: Math.max(...row.map((it) => it.x + it.w)),
+				yTop: Math.min(...row.map((it) => it.yTop)),
+				yBot: Math.max(...row.map((it) => it.yTop + it.h)),
+				h,
+			};
+		})
+		.filter((line) => line.text !== "");
 }
 
 /** 相邻行水平重叠量（0 = 不相交） */

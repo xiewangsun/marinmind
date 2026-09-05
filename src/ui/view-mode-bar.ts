@@ -2,11 +2,11 @@ import { Menu } from "obsidian";
 import type MarinMindPlugin from "../main";
 import { resolveIcon, setIconSafe } from "./icon-resolve";
 
-/** 视图模式：单文档 / 单脑图 / 文档·脑图联动（MarginNote 学习集三视图，⑰） */
-export type ViewMode = "doc" | "map" | "linked";
+/** 视图模式：单文档 / 单脑图 / 联动·文档左 / 联动·脑图左（⑰ 三态 + 93 批四档拆分） */
+export type ViewMode = "doc" | "map" | "linked" | "linked-swapped";
 
 /** 循环顺序（左键点击按此顺序推进） */
-const MODE_ORDER: readonly ViewMode[] = ["doc", "map", "linked"];
+const MODE_ORDER: readonly ViewMode[] = ["doc", "map", "linked", "linked-swapped"];
 
 /** 切换按钮定义：icons 为兜底候选链（90 批：低版本 Obsidian 缺名时降级） */
 const MODE_DEFS: ReadonlyArray<{
@@ -17,25 +17,36 @@ const MODE_DEFS: ReadonlyArray<{
 }> = [
 	{ mode: "doc", label: "文档", hint: "单文档视图：隐藏脑图窗格", icons: ["book-open"] },
 	{ mode: "map", label: "脑图", hint: "单脑图视图：隐藏文档窗格", icons: ["git-fork"] },
-	{ mode: "linked", label: "联动", hint: "联动视图：文档 + 脑图并排，点击互相定位", icons: ["columns-2", "columns"] },
+	{
+		mode: "linked",
+		label: "左文档右脑图",
+		hint: "联动视图：文档居左，点击互相定位",
+		icons: ["columns-2", "columns"],
+	},
+	{
+		mode: "linked-swapped",
+		label: "左脑图右文档",
+		hint: "联动视图：脑图居左，点击互相定位",
+		icons: ["flip-horizontal-2", "flip-horizontal"],
+	},
 ];
 
 /**
- * 三态视图模式循环按钮（90 批 MN3 式单 icon 化）：阅读器工具行与脑图头部共用。
- * - 左键：按 文档→脑图→联动→文档 循环，icon 实时反映当前视图；
- * - 右键：弹出三项直选菜单（当前项打勾），可一步跳转目标视图。
+ * 四态视图模式循环按钮（90 批 MN3 式单 icon 化；93 批联动拆分左右两档）：
+ * 阅读器工具行与脑图头部共用。
+ * - 左键：按 文档→脑图→左文档右脑图→左脑图右文档→文档 循环，icon 实时反映当前视图；
+ * - 右键：弹出四项直选菜单（当前项打勾），可一步跳转目标视图。
  * 当前模式经 plugin.onViewModeChange 订阅同步——模式由工作区实际布局推导
  * （setViewMode 切换、手动关标签等外部变化都会刷新）；
  * 返回 off 供视图销毁/重建时退订防泄漏。
  */
-export function createViewModeBar(
-	plugin: MarinMindPlugin,
-): { el: HTMLElement; off: () => void } {
+export function createViewModeBar(plugin: MarinMindPlugin): { el: HTMLElement; off: () => void } {
 	const btn = document.createElement("button");
 	btn.type = "button";
 	btn.className = "marinmind-tool-btn marinmind-view-mode-btn";
 
-	// 左键循环：doc→map→linked→doc（getViewMode 两侧皆无时返回 "linked"，indexOf 不为 -1）
+	// 左键循环：doc→map→linked→linked-swapped→doc（getViewMode 两侧皆无时返回
+	// "linked"，indexOf 不为 -1）
 	btn.addEventListener("click", () => {
 		const cur = plugin.getViewMode();
 		const next = MODE_ORDER[(MODE_ORDER.indexOf(cur) + 1) % MODE_ORDER.length];

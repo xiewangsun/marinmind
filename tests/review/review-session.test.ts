@@ -441,14 +441,43 @@ describe("ReviewSession 撤销评分（67：undoLast 回退会话态，DB 回退
 		expect(s.stats.again).toBe(1); // 状态零回退
 	});
 
-	it("remove 清栈：删卡后撤销不可用（删除的 graded 重键破坏栈内 index 有效性）", () => {
+	it("remove 迁移撤销栈（103-B）：被删卡步骤作废，其余步骤下标前移可继续撤销", () => {
+		const s = new ReviewSession([makeCard("a"), makeCard("b"), makeCard("c")], makeSpy());
+		s.reveal();
+		s.grade("good"); // a @0
+		s.reveal();
+		s.grade("hard"); // b @1
+		expect(s.undoDepth).toBe(2);
+		expect(s.remove("a")).toBe(true); // doomed=[0]，b/c 前移
+		expect(s.undoDepth).toBe(1); // a 的步骤作废，b 的保留
+		const step = s.undoLast();
+		expect(step?.cardId).toBe("b"); // 撤销落回迁移后的 b（现 @0）
+		expect(step?.index).toBe(0);
+		expect(s.current?.id).toBe("b");
+		expect(s.gradedAt).toBeUndefined(); // graded 键随撤销清除
+	});
+
+	it("remove 迁移：删后置卡不影响前置步骤（before=0 原样保留）", () => {
+		const s = new ReviewSession([makeCard("a"), makeCard("b"), makeCard("c")], makeSpy());
+		s.reveal();
+		s.grade("good"); // a @0
+		s.reveal();
+		s.grade("good"); // b @1
+		expect(s.remove("c")).toBe(true); // doomed=[2] 在两步之后
+		expect(s.undoDepth).toBe(2);
+		expect(s.undoLast()?.cardId).toBe("b"); // 下标不受影响
+		expect(s.undoLast()?.cardId).toBe("a");
+	});
+
+	it("remove 迁移：删除 again 卡时其重现实例与栈内步骤一并作废", () => {
 		const s = new ReviewSession([makeCard("a"), makeCard("b")], makeSpy());
 		s.reveal();
-		s.grade("good");
-		expect(s.undoDepth).toBe(1);
-		expect(s.remove("a")).toBe(true);
-		expect(s.undoDepth).toBe(0);
-		expect(s.undoLast()).toBeNull();
+		s.grade("again"); // a @0 requeued → 队列 [a,b,a']
+		s.reveal();
+		s.grade("good"); // b @1
+		expect(s.remove("a")).toBe(true); // doomed=[0,2]
+		expect(s.undoDepth).toBe(1); // 只剩 b 的步骤
+		expect(s.undoLast()?.cardId).toBe("b");
 	});
 
 	it("栈深截断 20：第 21 次评分丢弃最旧步骤，仍可连续撤销 20 次", () => {

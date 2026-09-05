@@ -66,10 +66,7 @@ export function collectTargetOf(
  * 与「添加到脑图」开关无关（开关只管摘录是否入图）；固定根生效时照建
  * （同名图是该书的家，摘录仍优先落固定根）。
  */
-export function ensureBookMindmap(
-	host: AutoCollectHost,
-	documentId: string,
-): string | null {
+export function ensureBookMindmap(host: AutoCollectHost, documentId: string): string | null {
 	const doc = host.documents.get(documentId);
 	if (!doc) {
 		return null;
@@ -316,12 +313,7 @@ export function autoAddCard(host: AutoCollectHost, card: Card): string | null {
 	// 起始位置不晚于摘录锚点的最近章节分支下而非组卡直挂——早于首章的摘录
 	// （前言等）与无框架图维持组卡直挂。md 同页按 y 分章、pdf/epub 纯 page 比较。
 	// nodes 是组卡确保前拉的快照：框架已建时组卡必已存在，章节卡不受快照影响
-	const chapter = chapterParentFor(
-		nodes,
-		card.documentId,
-		card.page,
-		jumpAnchorY(card.rects),
-	);
+	const chapter = chapterParentFor(nodes, card.documentId, card.page, jumpAnchorY(card.rects));
 	const pos = chapter
 		? suggestChildPosition(
 				chapter,

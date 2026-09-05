@@ -38,8 +38,18 @@ describe("buildSessionRows（70 复习卡片组列表）", () => {
 			card({ id: "free1" }), // 自由卡片
 			card({ id: "p3", documentId: "d1", page: 3 }),
 			card({ id: "nopage", documentId: "d1", page: null }),
-			card({ id: "p1-low", documentId: "d1", page: 1, rects: [{ x: 0, y: 0.8, w: 0.2, h: 0.02 }] }),
-			card({ id: "p1-high", documentId: "d1", page: 1, rects: [{ x: 0, y: 0.2, w: 0.2, h: 0.02 }] }),
+			card({
+				id: "p1-low",
+				documentId: "d1",
+				page: 1,
+				rects: [{ x: 0, y: 0.8, w: 0.2, h: 0.02 }],
+			}),
+			card({
+				id: "p1-high",
+				documentId: "d1",
+				page: 1,
+				rects: [{ x: 0, y: 0.2, w: 0.2, h: 0.02 }],
+			}),
 			card({ id: "d2p1", documentId: "d2", page: 1 }),
 		];
 		const rows = buildSessionRows(queue, "document");
@@ -100,8 +110,12 @@ describe("buildSessionRows（70 复习卡片组列表）", () => {
 		expect(
 			buildSessionRows(queue, "queue", { documentId: null }).map((r) => r.card.id),
 		).toEqual(["c"]);
-		expect(buildSessionRows(queue, "queue", { color: "yellow" }).map((r) => r.index)).toEqual([0, 2]);
-		expect(buildSessionRows(queue, "queue", { color: null }).map((r) => r.card.id)).toEqual(["b"]);
+		expect(buildSessionRows(queue, "queue", { color: "yellow" }).map((r) => r.index)).toEqual([
+			0, 2,
+		]);
+		expect(buildSessionRows(queue, "queue", { color: null }).map((r) => r.card.id)).toEqual([
+			"b",
+		]);
 	});
 
 	it("组合：筛选 + 排序叠加（先筛后序，全空结果合法返回空数组）", () => {
@@ -111,7 +125,9 @@ describe("buildSessionRows（70 复习卡片组列表）", () => {
 			card({ id: "x", documentId: "d2", page: 1, color: "red" }),
 		];
 		expect(
-			buildSessionRows(queue, "document", { documentId: "d1", color: "red" }).map((r) => r.card.id),
+			buildSessionRows(queue, "document", { documentId: "d1", color: "red" }).map(
+				(r) => r.card.id,
+			),
 		).toEqual(["a", "b"]);
 		expect(buildSessionRows(queue, "text", { documentId: "d1", color: "yellow" })).toEqual([]);
 	});

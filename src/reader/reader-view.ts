@@ -3,7 +3,7 @@ import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import { resolveIcon, setIconSafe } from "../ui/icon-resolve";
 import { imageExtOf, pickImageFiles, preparePhotoBytes } from "../attachments/media-import";
-import { promptCardEdit } from "../home/card-actions";
+import { promptCardEdit, promptCardAiComment, promptCardGen } from "../home/card-actions";
 import { MindmapPickerModal } from "../mindmap/mindmap-picker-modal";
 import { ConfirmModal } from "../mindmap/confirm-modal";
 import { collectTargetOf, fixedRootDocOf } from "../mindmap/auto-collect";
@@ -16,7 +16,13 @@ import type { Card, DocRect, LineStyle, NormPoint } from "../types";
 import { LINE_STYLES, LINE_STYLE_LABELS } from "../types";
 import { AudioRecorder, audioDurationSec, formatDurSec } from "./audio-recorder";
 import { AutoExcerptModal } from "./auto-excerpt-modal";
-import { epubChapterTitleOf, entryText, epubOutline, parseEpub, type EpubBook } from "./epub-document";
+import {
+	epubChapterTitleOf,
+	entryText,
+	epubOutline,
+	parseEpub,
+	type EpubBook,
+} from "./epub-document";
 import { EpubSession, type EpubLinkTarget } from "./epub-session";
 import { RecordingBar } from "./recording-bar";
 import { ExcerptLayer, flashEl, type ExcerptTool, type ReaderTool } from "./excerpt-layer";
@@ -52,6 +58,11 @@ import {
 } from "../translate/translate-engine";
 import { translateText } from "../translate/translate-service";
 import { TranslateModal } from "../translate/translate-modal";
+import { AiActionModal } from "../ai/ai-action-modal";
+import { AiCardgenModal } from "../ai/ai-cardgen-modal";
+import { AiOutlineModal } from "../ai/ai-outline-modal";
+import { aiActionTitle, buildAiActionMessages, type AiMenuAction } from "../ai/ai-prompts";
+import { AiSummaryModal } from "../ai/ai-summary-modal";
 import { createViewModeBar } from "../ui/view-mode-bar";
 import { mapLimit } from "../utils";
 
@@ -139,10 +150,20 @@ const TOOLBAR_TOOLS: ReadonlyArray<{
 	hint: string;
 }> = [
 	{ tool: "hand", icon: "hand", title: "手型", hint: "只读浏览，拖拽平移页面" },
-	{ tool: "select", icon: "text-cursor-input", title: "选择", hint: "划选文字以复制（不生成卡片）" },
+	{
+		tool: "select",
+		icon: "text-cursor-input",
+		title: "选择",
+		hint: "划选文字以复制（不生成卡片）",
+	},
 	{ tool: "text", icon: "highlighter", title: "文字", hint: "划选文字生成卡片（默认）" },
 	// 90 批 MN3 对照：矩形摘录=虚线选框（box-select）；square-dashed/square 为缺名兜底
-	{ tool: "area", icon: resolveIcon(["box-select", "square-dashed", "square"]), title: "矩形", hint: "拖拽框选规则区域" },
+	{
+		tool: "area",
+		icon: resolveIcon(["box-select", "square-dashed", "square"]),
+		title: "矩形",
+		hint: "拖拽框选规则区域",
+	},
 	{ tool: "lasso", icon: "lasso", title: "套索", hint: "自由圈选不规则区域" },
 	{ tool: "blank", icon: "sticky-note", title: "留白", hint: "点击页面空白处添加备注" },
 ];
@@ -352,6 +373,16 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		return this.docKind === "epub" ? "章" : "页";
 	}
 
+	/**
+	 * 文档级事件宿主（bindDocEvents 记录，unbindDocEvents 解绑用；
+	 * popout 迁移随 contentEl.ownerDocument 切换——85-A 模式）
+	 */
+	private docEventsDoc: Document | null = null;
+	/** 文档级事件处理器（箭头字段持有 this 绑定，绑/解同一引用） */
+	private readonly onDocEsc = (evt: KeyboardEvent): void => this.handleEsc(evt);
+	private readonly onDocUndo = (evt: KeyboardEvent): void => this.handleUndoShortcut(evt);
+	private readonly onDocPaste = (evt: ClipboardEvent): void => this.onPaste(evt);
+
 	constructor(leaf: WorkspaceLeaf, plugin: MarinMindPlugin) {
 		super(leaf);
 		this.plugin = plugin;
@@ -376,63 +407,13 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			}
 		});
 
-		// Esc 快速退出当前工具（回到文字摘录）/ 手写模式。
-		// 仅本视图是激活 leaf 时响应；弹窗/菜单/输入态打开时让位（它们自己消费 Esc）——
-		// keydown 挂 document（contentEl 是 div 不可聚焦），同 review-view 的模式
-		this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
-			if (evt.key !== "Escape" || evt.ctrlKey || evt.metaKey || evt.altKey || evt.shiftKey) {
-				return;
-			}
-			if (this.app.workspace.activeLeaf !== this.leaf) {
-				return;
-			}
-			const target = evt.target as HTMLElement | null;
-			if (target?.closest?.(".modal-container, .menu, input, textarea, [contenteditable]")) {
-				return;
-			}
-			// 划选工具栏最先退出（75）：Esc 只关工具栏不清选区（选区可继续用于复制等）
-			if (this.selectionToolbar?.visible) {
-				this.selectionToolbar.hide();
-				return;
-			}
-			// 文字遮罩模式优先退出（74）：瞬态模式，先于拖框遮挡处理
-			if (this.occlusionTextTarget) {
-				this.stopOcclusionTextEdit();
-				return;
-			}
-			// 遮挡编辑模式优先退出（㊷）：瞬态模式，Esc 先退出它再考虑工具切换
-			if (this.occlusionEditTarget) {
-				this.stopOcclusionEdit();
-				return;
-			}
-			// 照片重定位模式（84-D）：同为瞬态拖框模式，同级退出
-			if (this.photoRelocateTarget) {
-				this.stopPhotoRelocate();
-				return;
-			}
-			if (this.activeTool !== "text") {
-				this.setReaderTool("text");
-			} else if (this.handwriteMode) {
-				this.setHandwriteMode(false);
-			}
-		});
-
-		// 84-A 手写撤销快捷键：Ctrl/Cmd+Z 仅在手写模式 + 本视图激活时拦截，否则让位
-		// Obsidian 自身撤销；弹窗/菜单/输入态同样让位（与 Esc 链同一套守卫）。
-		this.registerDomEvent(document, "keydown", (evt: KeyboardEvent) => {
-			if (evt.key !== "z" || !(evt.ctrlKey || evt.metaKey) || evt.shiftKey || evt.altKey) {
-				return;
-			}
-			if (!this.handwriteMode || this.app.workspace.activeLeaf !== this.leaf) {
-				return;
-			}
-			const target = evt.target as HTMLElement | null;
-			if (target?.closest?.(".modal-container, .menu, input, textarea, [contenteditable]")) {
-				return;
-			}
-			evt.preventDefault();
-			this.undoHandwrite();
-		});
+		// 103-D 文档级键盘/粘贴事件（Esc 工具退出、Ctrl+Z 手写撤销、照片粘贴）：
+		// 绑 contentEl.ownerDocument（onOpen 时 bindDocEvents）——85-A 同修法，
+		// registerDomEvent(document,…) 绑死主窗口：popout 弹出窗口内不可用，
+		// 且视图迁 popout 时 onClose→onOpen 重跑会累积重复处理器。
+		// 各处理器的 activeLeaf/弹窗让位守卫语义不变（见 onEscKeydown 等方法）
+		// 卸载兜底：popout 迁移等路径若漏调 onClose 的显式解绑，卸载时兜底清理
+		this.register(() => this.unbindDocEvents());
 
 		// 手型工具：拖拽平移滚动容器（只读浏览）。事件挂 contentEl 冒泡捕获——
 		// overlay（hand-on 类）拦截指针后事件逐层冒泡到 scrollEl/contentEl；
@@ -477,8 +458,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		this.registerDomEvent(this.contentEl, "pointerup", endPan);
 		this.registerDomEvent(this.contentEl, "pointercancel", endPan);
 
-		// 照片摘录三入口之二：粘贴（挂 document，仅本视图激活时响应）与拖入
-		this.registerDomEvent(document, "paste", (evt) => this.onPaste(evt));
+		// 照片摘录三入口之二：拖入（粘贴入口在 bindDocEvents 绑 ownerDocument）
 		this.registerDomEvent(this.contentEl, "dragover", (evt) => evt.preventDefault());
 		this.registerDomEvent(this.contentEl, "drop", (evt) => this.onDrop(evt));
 
@@ -515,9 +495,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				) {
 					this.currentFilePath = file.path;
 					// 90 批：工具行行首文件名标题跟随
-					this.readerTitleEl?.querySelector(".marinmind-reader-title-text")?.setText(
-						file.basename,
-					);
+					this.readerTitleEl
+						?.querySelector(".marinmind-reader-title-text")
+						?.setText(file.basename);
 				}
 			}),
 		);
@@ -569,9 +549,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (this.currentFilePath === oldPath) {
 			this.currentFilePath = newPath;
 			// 90 批：工具行行首文件名标题跟随（仅换文本节点，不动图标）
-			this.readerTitleEl?.querySelector(".marinmind-reader-title-text")?.setText(
-				fsBasename(newPath),
-			);
+			this.readerTitleEl
+				?.querySelector(".marinmind-reader-title-text")
+				?.setText(fsBasename(newPath));
 		}
 	}
 
@@ -583,7 +563,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	}
 
 	async onOpen(): Promise<void> {
-		// 就绪标记先置（后续 setState 走就地加载分支）；数据层就绪检查在 loadFromPath 内
+		// 103-D 文档级事件绑 contentEl.ownerDocument（popout 内可用；重复 onOpen
+		// 幂等——bindDocEvents 先解后绑）。就绪标记先置（后续 setState 走就地加载
+		// 分支）；数据层就绪检查在 loadFromPath 内
+		this.bindDocEvents();
 		this.viewOpened = true;
 		const pending = this.pendingFile;
 		this.pendingFile = null;
@@ -670,10 +653,14 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			try {
 				book = parseEpub(new Uint8Array(buf));
 			} catch (e) {
-				throw new Error(`EPUB 解析失败：${e instanceof Error ? e.message : String(e)}`);
+				throw new Error(`EPUB 解析失败：${e instanceof Error ? e.message : String(e)}`, {
+					cause: e,
+				});
 			}
 			this.epub = book;
-			this.epubSession = new EpubSession(book, (target, evt) => this.handleEpubLink(target, evt));
+			this.epubSession = new EpubSession(book, (target, evt) =>
+				this.handleEpubLink(target, evt),
+			);
 			title = book.title ?? fsBasename(filePath);
 			this.outlineEntries = epubOutline(book);
 		} else {
@@ -865,6 +852,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			onOcclusionDraw: (page, rect) => this.onOcclusionDraw(page, rect),
 			onRelocateDraw: (page, rect) => this.onRelocateDraw(page, rect),
 			onOcclusionClick: (card, index, evt) => this.onOcclusionClick(card, index, evt),
+			// 101 留白胶囊拖动重摆：新锚点写库（cardBus changed → syncCard 整组重摆）
+			onBlankMove: (cardId, rect) => {
+				this.plugin.cards.update(cardId, { rects: [rect] });
+			},
 			readAttachment: (ref) => this.plugin.attachments.read(ref),
 		});
 		layer.setTool(this.activeTool);
@@ -884,7 +875,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (echo) {
 			this.echoCardsByPage.delete(n);
 			layer.setCards(echo);
-			const media = echo.filter((c) => c.excerptType === "photo" || c.excerptType === "audio");
+			const media = echo.filter(
+				(c) => c.excerptType === "photo" || c.excerptType === "audio",
+			);
 			if (media.length > 0) {
 				this.mediaCardsByPage.set(n, media);
 				this.updateMediaBadge(n);
@@ -1068,6 +1061,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	}
 
 	protected async onClose(): Promise<void> {
+		this.unbindDocEvents(); // 文档级事件显式解绑（幂等）
 		// 80 阅读位置记忆：关标签前落库当前页（先于 cleanupContent，理由同 openPath）
 		this.flushLastPage();
 		// 联动互关（㊿）：先于 cleanupContent 捕获路径（防御性——当前实现不清
@@ -1670,8 +1664,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		// header/节点编辑器/主页入口四处对齐，语义沿革见评估报告 E-19 与 P2-1 表）
 		setIcon(reviewBtn, "graduation-cap");
 		// ㊷ 阅读器入口默认只复习当前书（复习界面徽标可切全部书籍）
-		reviewBtn.addEventListener("click", () =>
-			void this.plugin.openReview(this.docId ?? undefined),
+		reviewBtn.addEventListener(
+			"click",
+			() => void this.plugin.openReview(this.docId ?? undefined),
 		);
 		// 文档内搜索（89-D，MN3 搜索一级入口）：当前文档全文检索，点击结果跳页定位
 		const searchBtn = row.createEl("button", {
@@ -1759,9 +1754,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		// 摘录目标脑图（㊴）+ 自动转闪卡开关（㊷）：仅在文档就绪时提供
 		const docId = this.currentDocId;
 		const doc =
-			docId != null && this.plugin.store
-				? this.plugin.documents.get(docId)
-				: undefined;
+			docId != null && this.plugin.store ? this.plugin.documents.get(docId) : undefined;
 		if (doc) {
 			menu.addSeparator();
 			const target = collectTargetOf(this.collectHost(), doc.id);
@@ -1784,6 +1777,36 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 					.setIcon("zap")
 					.setChecked(doc.autoFlashcard)
 					.onClick(() => this.toggleAutoFlashcard()),
+			);
+		}
+		// AI 组（98）：文档级 AI——助手面板（右停靠，三形态通用）与摘要（留白卡）。
+		// 守卫与文档搜索同口径（docSearchKind 非空 = 骨架就绪有可提取文本）
+		if (this.docSearchKind() != null) {
+			menu.addSeparator();
+			menu.addItem((mi) =>
+				mi
+					.setTitle("AI 助手…")
+					.setIcon("sparkles")
+					.onClick(() => {
+						void this.plugin.openAiChat();
+					}),
+			);
+			menu.addItem((mi) =>
+				mi
+					.setTitle("AI 摘要…")
+					.setIcon("scroll-text")
+					.onClick(() => {
+						new AiSummaryModal(this.app, this.plugin, this).open();
+					}),
+			);
+			// 100 AI 大纲建框架：全文 → LLM 层级大纲 → 建入摘录目标图（归章语义同目录建框架）
+			menu.addItem((mi) =>
+				mi
+					.setTitle("AI 大纲建框架…")
+					.setIcon("list-tree")
+					.onClick(() => {
+						new AiOutlineModal(this.app, this.plugin, this).open();
+					}),
 			);
 		}
 		menu.showAtMouseEvent(evt);
@@ -1910,6 +1933,18 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	}
 
 	/**
+	 * 页级跳转（98 AI 助手页引用 chip）：pdf 跳页 / epub 跳章（内含章骨架
+	 * 渲染）；md 单页无动作。公开给 ai-chat-view（点击时刻现找阅读器调用）。
+	 */
+	async revealPage(page: number): Promise<void> {
+		if (!this.scrollEl || this.docKind === "md") {
+			return;
+		}
+		await this.jumpToPage(page);
+		this.syncLastPageBaseline(); // 82：定位位移不算阅读进度
+	}
+
+	/**
 	 * PDF 命中定位：jumpToPage 骨架/尺寸就绪 → 滚到行（落视口上部约 1/4，
 	 * 与 locateCard 同款数学）→ 页容器叠 absolute 闪烁框（不动 DOM 文本锚点）。
 	 */
@@ -1991,18 +2026,14 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		}
 		const next = !doc.autoFlashcard;
 		this.plugin.documents.update(docId, { autoFlashcard: next });
-		new Notice(
-			next ? "本书新摘录将自动转为闪卡" : "本书新摘录不再自动转为闪卡",
-		);
+		new Notice(next ? "本书新摘录将自动转为闪卡" : "本书新摘录不再自动转为闪卡");
 	}
 
 	/** 摘录目标脑图菜单：当前目标 + 切回默认 + 选择其他图（每本书独立记住） */
 	private openMapTargetMenu(evt: MouseEvent): void {
 		const docId = this.currentDocId;
 		const doc =
-			docId != null && this.plugin.store
-				? this.plugin.documents.get(docId)
-				: undefined;
+			docId != null && this.plugin.store ? this.plugin.documents.get(docId) : undefined;
 		if (!doc) {
 			return;
 		}
@@ -2047,16 +2078,16 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			);
 		}
 		menu.addItem((mi) =>
-			mi.setTitle("选择其他脑图…").setIcon("share-2").onClick(() => {
-				new MindmapPickerModal(this.app, this.plugin, (map) => {
-					// 选到本书同名图 = 等价回默认（存 null：frontmatter 省略该行，
-					// 与"同名图是默认值"的语义一致，改名跟随逻辑也统一）
-					this.setCollectTarget(
-						map.documentId === doc.id ? null : map.id,
-						map.name,
-					);
-				}).open();
-			}),
+			mi
+				.setTitle("选择其他脑图…")
+				.setIcon("share-2")
+				.onClick(() => {
+					new MindmapPickerModal(this.app, this.plugin, (map) => {
+						// 选到本书同名图 = 等价回默认（存 null：frontmatter 省略该行，
+						// 与"同名图是默认值"的语义一致，改名跟随逻辑也统一）
+						this.setCollectTarget(map.documentId === doc.id ? null : map.id, map.name);
+					}).open();
+				}),
 		);
 		menu.showAtMouseEvent(evt);
 	}
@@ -2353,11 +2384,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		try {
 			// 凭据缺失在此抛出 → 错误态展示（侧栏常驻，比一闪而过的 Notice 合适）
 			const call = resolveEngineCall(this.plugin.settings);
-			const out = await translateText(
-				snap.text,
-				this.plugin.settings.translateTarget,
-				call,
-			);
+			const out = await translateText(snap.text, this.plugin.settings.translateTarget, call);
 			if (token !== this.ttToken || !els.result.isConnected) {
 				return;
 			}
@@ -2389,13 +2416,11 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		els.result.removeClass("is-loading");
 		els.result.addClass("marinmind-tr-error");
 		els.result.createDiv({ text: message });
-		const retry = els.result
-			.createDiv({ cls: "marinmind-tr-retry" })
-			.createEl("button", {
-				cls: "marinmind-tt-btn",
-				text: "重试",
-				attr: { type: "button" },
-			});
+		const retry = els.result.createDiv({ cls: "marinmind-tr-retry" }).createEl("button", {
+			cls: "marinmind-tt-btn",
+			text: "重试",
+			attr: { type: "button" },
+		});
 		retry.addEventListener("click", () => void this.runSidebarTranslate());
 	}
 
@@ -2403,10 +2428,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	 * 翻译页签公共入口（83-E）：存快照并切到翻译页签；toggleOpen 时未开侧栏先开
 	 * （工具栏「翻译」钮语义——划选→侧栏即时不建卡，与高亮菜单弹窗双入口分离）。
 	 */
-	private pushTranslateToSidebar(
-		snap: SelectionSnapshot,
-		opts?: { toggleOpen?: boolean },
-	): void {
+	private pushTranslateToSidebar(snap: SelectionSnapshot, opts?: { toggleOpen?: boolean }): void {
 		if (opts?.toggleOpen && !this.tocPanel) {
 			this.toggleToc();
 		}
@@ -2497,11 +2519,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	 * 页码解析失败的条目置灰不可点。**条目用 div 非 button**——Obsidian/主题对
 	 * button 的 flex 居中默认样式会把文字节点居中、且带默认盒样式（方框）。
 	 */
-	private renderOutlineEntry(
-		container: HTMLElement,
-		entry: OutlineEntry,
-		depth: number,
-	): void {
+	private renderOutlineEntry(container: HTMLElement, entry: OutlineEntry, depth: number): void {
 		const key = `${entry.title}|${entry.page ?? ""}`;
 		const open = depth < 1 && !this.tocCollapsedKeys.has(key);
 		const row = container.createDiv({ cls: "marinmind-toc-item" });
@@ -2711,9 +2729,15 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (on && this.isReflowDoc) {
 			return; // ㊻-B md 文档无手写层（超高画布不可行），按钮已隐藏此处防御
 		}
+		if (on) {
+			// 101 修：先退摘录工具**再**置位——此前先置 handwriteMode=true 再调
+			// setReaderTool，当前非 text 工具时其互斥出口（handwriteMode → 关模式）
+			// 会递归把模式关回：按钮点亮、工具条出现，但建层时模式已是 false，
+			// 画布 pointer-events:none 完全穿透，表现为"手写不生效"
+			this.setReaderTool("text"); // 已是 text 时幂等跳过
+		}
 		this.handwriteMode = on;
 		if (on) {
-			this.setReaderTool("text"); // 已是 text 时幂等跳过
 			for (const n of this.visiblePages) {
 				this.ensureHandwriteLayer(n);
 			}
@@ -2818,7 +2842,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 					return;
 				}
 				const ref = await this.plugin.attachments.save(result.png, "png");
-				const card = this.plugin.cards.create({
+				this.plugin.cards.create({
 					documentId: docId,
 					page,
 					rects: [result.bbox],
@@ -2888,10 +2912,94 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		return best?.pageNumber ?? 1;
 	}
 
+	// ---------- 文档级事件（103-D：Esc / Ctrl+Z / 粘贴，绑 ownerDocument） ----------
+
+	/** 绑定文档级事件（onOpen 调用；先解后绑保证重复 onOpen 幂等） */
+	private bindDocEvents(): void {
+		this.unbindDocEvents();
+		const doc = this.contentEl.ownerDocument;
+		doc.addEventListener("keydown", this.onDocEsc);
+		doc.addEventListener("keydown", this.onDocUndo);
+		doc.addEventListener("paste", this.onDocPaste);
+		this.docEventsDoc = doc;
+	}
+
+	/** 解绑文档级事件（onClose 调用；this.register 兜底防泄漏） */
+	private unbindDocEvents(): void {
+		if (this.docEventsDoc) {
+			this.docEventsDoc.removeEventListener("keydown", this.onDocEsc);
+			this.docEventsDoc.removeEventListener("keydown", this.onDocUndo);
+			this.docEventsDoc.removeEventListener("paste", this.onDocPaste);
+			this.docEventsDoc = null;
+		}
+	}
+
+	/**
+	 * Esc 快速退出当前工具（回到文字摘录）/ 手写模式。
+	 * 仅本视图是激活 leaf 时响应；弹窗/菜单/输入态打开时让位（它们自己消费 Esc）；
+	 * 瞬态模式（划选工具栏/文字遮罩/遮挡编辑/照片重定位）优先逐级退出。
+	 */
+	private handleEsc(evt: KeyboardEvent): void {
+		if (evt.key !== "Escape" || evt.ctrlKey || evt.metaKey || evt.altKey || evt.shiftKey) {
+			return;
+		}
+		if (this.app.workspace.activeLeaf !== this.leaf) {
+			return;
+		}
+		const target = evt.target as HTMLElement | null;
+		if (target?.closest?.(".modal-container, .menu, input, textarea, [contenteditable]")) {
+			return;
+		}
+		// 划选工具栏最先退出（75）：Esc 只关工具栏不清选区（选区可继续用于复制等）
+		if (this.selectionToolbar?.visible) {
+			this.selectionToolbar.hide();
+			return;
+		}
+		// 文字遮罩模式优先退出（74）：瞬态模式，先于拖框遮挡处理
+		if (this.occlusionTextTarget) {
+			this.stopOcclusionTextEdit();
+			return;
+		}
+		// 遮挡编辑模式优先退出（㊷）：瞬态模式，Esc 先退出它再考虑工具切换
+		if (this.occlusionEditTarget) {
+			this.stopOcclusionEdit();
+			return;
+		}
+		// 照片重定位模式（84-D）：同为瞬态拖框模式，同级退出
+		if (this.photoRelocateTarget) {
+			this.stopPhotoRelocate();
+			return;
+		}
+		if (this.activeTool !== "text") {
+			this.setReaderTool("text");
+		} else if (this.handwriteMode) {
+			this.setHandwriteMode(false);
+		}
+	}
+
+	/**
+	 * 84-A 手写撤销快捷键：Ctrl/Cmd+Z 仅在手写模式 + 本视图激活时拦截，否则让位
+	 * Obsidian 自身撤销；弹窗/菜单/输入态同样让位（与 Esc 链同一套守卫）。
+	 */
+	private handleUndoShortcut(evt: KeyboardEvent): void {
+		if (evt.key !== "z" || !(evt.ctrlKey || evt.metaKey) || evt.shiftKey || evt.altKey) {
+			return;
+		}
+		if (!this.handwriteMode || this.app.workspace.activeLeaf !== this.leaf) {
+			return;
+		}
+		const target = evt.target as HTMLElement | null;
+		if (target?.closest?.(".modal-container, .menu, input, textarea, [contenteditable]")) {
+			return;
+		}
+		evt.preventDefault();
+		this.undoHandwrite();
+	}
+
 	// ---------- 照片摘录（粘贴 / 拖入 / 按钮选图） ----------
 
 	private onPaste(evt: ClipboardEvent): void {
-		// 挂 document：必须限定本视图激活，否则别的标签复制图片也会被吞
+		// 挂文档（103-D 起 ownerDocument）：必须限定本视图激活，否则别的标签复制图片也会被吞
 		if (this.app.workspace.activeLeaf !== this.leaf) {
 			return;
 		}
@@ -3142,11 +3250,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			});
 			// 83 拖框即识：开关开启时建卡即自动识别（新卡无摘录文字，天然不触发
 			// 覆盖确认；引擎层串行队列保证连续拖框依次识别互不串进度）
-			if (
-				this.plugin.settings.ocrOnAreaExcerpt &&
-				!Platform.isMobile &&
-				!this.isReflowDoc
-			) {
+			if (this.plugin.settings.ocrOnAreaExcerpt && !Platform.isMobile && !this.isReflowDoc) {
 				void this.ocrCard(card);
 			}
 		});
@@ -3268,35 +3372,39 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 
 	/** 留白点击回调：弹 TextPromptModal 收集文字，确认后落卡 */
 	private promptBlankNote(point: { page: number; localX: number; localY: number }): void {
-		new TextPromptModal(this.app, {
-			title: "留白备注",
-			initialText: "",
-			placeholder: "输入留白备注文字…",
-		}, (note: string | null) => {
-			const text = note?.trim();
-			if (!text || this.activeTool !== "blank" || !this.currentDocId) {
-				return;
-			}
-			// 用 6x6px 的最小锚点矩形（避免空 rects 无法精确定位）
-			const pv = this.pageViewByNumber.get(point.page);
-			if (!pv) {
-				return;
-			}
-			const pageW = pv.displayWidth;
-			const pageH = pv.displayHeight;
-			const half = 3;
-			const cx = Math.min(pageW - half, Math.max(half, point.localX));
-			const cy = Math.min(pageH - half, Math.max(half, point.localY));
-			const anchor: DocRect = {
-				x: (cx - half) / Math.max(1, pageW),
-				y: (cy - half) / Math.max(1, pageH),
-				w: (2 * half) / Math.max(1, pageW),
-				h: (2 * half) / Math.max(1, pageH),
-			};
-			this.createBlankCard(point.page, anchor, text);
-			new Notice("留白备注已保存");
-			// 工具保持激活（MarginNote 式连续摘录），可继续点击添加下一条留白备注
-		}).open();
+		new TextPromptModal(
+			this.app,
+			{
+				title: "留白备注",
+				initialText: "",
+				placeholder: "输入留白备注文字…",
+			},
+			(note: string | null) => {
+				const text = note?.trim();
+				if (!text || this.activeTool !== "blank" || !this.currentDocId) {
+					return;
+				}
+				// 用 6x6px 的最小锚点矩形（避免空 rects 无法精确定位）
+				const pv = this.pageViewByNumber.get(point.page);
+				if (!pv) {
+					return;
+				}
+				const pageW = pv.displayWidth;
+				const pageH = pv.displayHeight;
+				const half = 3;
+				const cx = Math.min(pageW - half, Math.max(half, point.localX));
+				const cy = Math.min(pageH - half, Math.max(half, point.localY));
+				const anchor: DocRect = {
+					x: (cx - half) / Math.max(1, pageW),
+					y: (cy - half) / Math.max(1, pageH),
+					w: (2 * half) / Math.max(1, pageW),
+					h: (2 * half) / Math.max(1, pageH),
+				};
+				this.createBlankCard(point.page, anchor, text);
+				new Notice("留白备注已保存");
+				// 工具保持激活（MarginNote 式连续摘录），可继续点击添加下一条留白备注
+			},
+		).open();
 	}
 
 	/**
@@ -3407,10 +3515,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			return;
 		}
 		const pageBox = this.pageViewByNumber.get(page)!.el.getBoundingClientRect();
-		const merged = mergeTextOcclusions(
-			latest.occlusions,
-			rectsRelativeToPage(boxes, pageBox),
-		);
+		const merged = mergeTextOcclusions(latest.occlusions, rectsRelativeToPage(boxes, pageBox));
 		if (merged.length === latest.occlusions.length) {
 			new Notice("该段文字已遮罩");
 			return;
@@ -3463,9 +3568,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			excerptText: text,
 			color: this.plugin.settings.excerptColors.text, // ㊹ 跟随文字工具当前色系
 			// 77 线型跟随全局设置（underline 归一 null：序列化省键 + 内存规范形）
-			lineStyle: this.plugin.settings.excerptLineStyle !== "underline"
-				? this.plugin.settings.excerptLineStyle
-				: null,
+			lineStyle:
+				this.plugin.settings.excerptLineStyle !== "underline"
+					? this.plugin.settings.excerptLineStyle
+					: null,
 		});
 		sel.removeAllRanges();
 	}
@@ -3525,6 +3631,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			showBookmark: this.docKind !== "md",
 			// 77 线型：菜单打开/刷新 title 时刻取值（设置变化即时反映）
 			currentLineStyle: () => this.plugin.settings.excerptLineStyle,
+			// 97 AI：自定义指令菜单打开时刻取值（设置弹窗增删即时反映）
+			customAiPrompts: () => this.plugin.settings.aiCustomPrompts,
 			actions: {
 				onExcerpt: (snap: SelectionSnapshot, color?: HighlightColorValue) => {
 					// 色点 = 该点颜色；摘录钮（color 缺省）= 当前文字工具色
@@ -3536,9 +3644,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 						excerptText: snap.text,
 						color: color ?? this.plugin.settings.excerptColors.text,
 						// 77 线型跟随全局设置（underline 归一 null：序列化省键 + 内存规范形）
-						lineStyle: this.plugin.settings.excerptLineStyle !== "underline"
-							? this.plugin.settings.excerptLineStyle
-							: null,
+						lineStyle:
+							this.plugin.settings.excerptLineStyle !== "underline"
+								? this.plugin.settings.excerptLineStyle
+								: null,
 					});
 					// 回显走 cardBus 事件回环（无 Notice——高亮即反馈，与旧直接建卡一致；
 					// 自动入图/自动闪卡 Notice 由 main.ts 既有订阅承接）
@@ -3554,6 +3663,25 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 					// 83-E 划选改译入侧栏（即时对照不建卡；引擎/凭据问题在侧栏内
 					// 展示错误态）；点已有高亮的 openTranslate 仍走弹窗——双入口分离
 					this.pushTranslateToSidebar(snap, { toggleOpen: true });
+				},
+				onAiAction: (snap: SelectionSnapshot, action: AiMenuAction) => {
+					// 97 划选 AI 操作（解释/总结/改写/自定义）：结果弹窗流式展示，
+					// 可转为卡片（原文下方留白）——docId 在打开时刻捕获（弹窗内
+					// 换文档不误挂，镜像 75 批 onTranslate 的捕获语义）
+					this.openAiAction(snap, action);
+				},
+				onAiCardgen: (snap: SelectionSnapshot) => {
+					// 99 划选 AI 制卡：材料=划选文本，锚点=选区页相对矩形——
+					// 生成的卡继承回链（自动入图归章 + 跳原文）。docId 打开时刻
+					// 捕获（镜像 onAiAction）
+					const docId = this.currentDocId;
+					if (!docId) {
+						return;
+					}
+					new AiCardgenModal(this.app, this.plugin, {
+						sourceText: snap.text,
+						anchor: { documentId: docId, page: snap.page, rects: snap.rects },
+					}).open();
 				},
 				onCopy: (text: string) => {
 					void (async () => {
@@ -3584,18 +3712,19 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 					const internalPlugins = (
 						this.app as unknown as {
 							internalPlugins?: {
-								getPluginById?: (
-									id: string,
-								) => {
-									instance?: {
-										openGlobalSearch?: (query: string) => void;
-									};
-								} | undefined;
+								getPluginById?: (id: string) =>
+									| {
+											instance?: {
+												openGlobalSearch?: (query: string) => void;
+											};
+									  }
+									| undefined;
 							};
 						}
 					).internalPlugins;
-					const openGlobalSearch = internalPlugins?.getPluginById?.("global-search")
-						?.instance?.openGlobalSearch;
+					const openGlobalSearch =
+						internalPlugins?.getPluginById?.("global-search")?.instance
+							?.openGlobalSearch;
 					if (typeof openGlobalSearch === "function") {
 						openGlobalSearch(text);
 					} else {
@@ -3613,10 +3742,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			if (r.width <= 0 || r.height <= 0) {
 				continue; // getClientRects 可能产生零尺寸行
 			}
-			const pv = this.pageByPoint(
-				r.left + r.width / 2,
-				r.top + r.height / 2,
-			);
+			const pv = this.pageByPoint(r.left + r.width / 2, r.top + r.height / 2);
 			if (!pv) {
 				continue;
 			}
@@ -3735,7 +3861,11 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				continue;
 			}
 			const seg = line.slice(s, e + 1);
-			const lineText = seg.map((c) => c.ch).join("").replace(/\s+/g, " ").trim();
+			const lineText = seg
+				.map((c) => c.ch)
+				.join("")
+				.replace(/\s+/g, " ")
+				.trim();
 			if (!lineText) {
 				continue;
 			}
@@ -3925,7 +4055,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 						if (evt instanceof MouseEvent) {
 							picker.showAtMouseEvent(evt);
 						} else {
-							picker.showAtPosition({ x: window.innerWidth / 2, y: window.innerHeight / 3 });
+							picker.showAtPosition({
+								x: window.innerWidth / 2,
+								y: window.innerHeight / 3,
+							});
 						}
 					}),
 			);
@@ -3963,14 +4096,35 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		// 翻译：有摘录文字即可译（文字摘录 / OCR 过的区域、手写卡；MN4 内置翻译对齐）
 		if ((card.excerptText ?? "").trim().length > 0) {
 			menu.addItem((item) =>
-				item.setTitle("翻译").setIcon("languages").onClick(() => this.openTranslate(card)),
+				item
+					.setTitle("翻译")
+					.setIcon("languages")
+					.onClick(() => this.openTranslate(card)),
+			);
+			// 97 AI 评论：流式解释摘录内容，「填入批注」经人手确认后落库
+			// （card-actions 单源共享——卡片预览 ⋯ 菜单同一动作）
+			menu.addItem((item) =>
+				item
+					.setTitle("AI 补充解释")
+					.setIcon("sparkles")
+					.onClick(() => promptCardAiComment(this.app, this.plugin, card)),
+			);
+			// 99 AI 制卡：摘录文字为材料出 QA/填空卡，继承本文档锚点（自动入图归章）
+			menu.addItem((item) =>
+				item
+					.setTitle("AI 制卡…")
+					.setIcon("list-checks")
+					.onClick(() => promptCardGen(this.app, this.plugin, card)),
 			);
 		}
 		// 84-D 照片重定位：把照片以虚线展示框锚定到当前页某处（MN 式"贴"到页面）；
 		// 已定位可取消（rects 清空回页角徽标锚定，跳转降级路径随之恢复）
 		if (card.excerptType === "photo" && card.page != null) {
 			menu.addItem((item) =>
-				item.setTitle("定位到页面…").setIcon("crosshair").onClick(() => this.startPhotoRelocate(card)),
+				item
+					.setTitle("定位到页面…")
+					.setIcon("crosshair")
+					.onClick(() => this.startPhotoRelocate(card)),
 			);
 			if (card.rects.length > 0) {
 				menu.addItem((item) =>
@@ -4005,7 +4159,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			menu.addItem((item) =>
 				item
 					.setTitle(
-						this.occlusionSnapLines ? "遮挡行吸附（当前开，点击关）" : "遮挡行吸附（拖框吸附整文字行）",
+						this.occlusionSnapLines
+							? "遮挡行吸附（当前开，点击关）"
+							: "遮挡行吸附（拖框吸附整文字行）",
 					)
 					.setIcon("magnet")
 					.onClick(() => {
@@ -4024,7 +4180,11 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				);
 				menu.addItem((item) =>
 					item
-						.setTitle(this.occlusionPreview ? "遮挡预览（当前开，点击关）" : "遮挡预览（模拟复习遮挡）")
+						.setTitle(
+							this.occlusionPreview
+								? "遮挡预览（当前开，点击关）"
+								: "遮挡预览（模拟复习遮挡）",
+						)
 						.setIcon("eye")
 						.onClick(() => this.toggleOcclusionPreview()),
 				);
@@ -4032,7 +4192,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		}
 		// 脑图组
 		menu.addItem((item) =>
-			item.setTitle("加入思维导图…").setIcon(ADD_TO_MINDMAP_ICON).onClick(() => this.addToMindmap(card)),
+			item
+				.setTitle("加入思维导图…")
+				.setIcon(ADD_TO_MINDMAP_ICON)
+				.onClick(() => this.addToMindmap(card)),
 		);
 		// 危险操作
 		menu.addSeparator();
@@ -4194,7 +4357,11 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		}
 		menu.addItem((item) =>
 			item
-				.setTitle(this.occlusionPreview ? "遮挡预览（当前开，点击关）" : "遮挡预览（模拟复习遮挡）")
+				.setTitle(
+					this.occlusionPreview
+						? "遮挡预览（当前开，点击关）"
+						: "遮挡预览（模拟复习遮挡）",
+				)
 				.setIcon("eye")
 				.onClick(() => this.toggleOcclusionPreview()),
 		);
@@ -4438,9 +4605,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 						? this.plugin.settings.excerptLineStyle
 						: null,
 			});
-			new Notice(
-				`已识别 ${lines.length} 行文字并创建文字摘录卡（跳原文/入图/转闪卡均可用）`,
-			);
+			new Notice(`已识别 ${lines.length} 行文字并创建文字摘录卡（跳原文/入图/转闪卡均可用）`);
 		} catch (err) {
 			console.error("[MarinMind] 整页 OCR 失败", err);
 			// 85-C：失败提示按就绪态分流（镜像区域识别）
@@ -4522,6 +4687,50 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		new Notice("译文已存为留白（原文下方）");
 	}
 
+	/**
+	 * 划选 AI 操作（97）：结果弹窗流式展示，「转为卡片」把 AI 结果存为原文
+	 * 正下方的留白卡（镜像 saveTranslationFromSelection 路径——自动入图/跨
+	 * 标签同步由 cardBus 事件回环白赚）。docId 打开时刻捕获（弹窗内换文档
+	 * 不误挂）；未配置预设由 sendChat 内 resolveAiPreset 抛中文错在弹窗展示。
+	 */
+	private openAiAction(snap: SelectionSnapshot, action: AiMenuAction): void {
+		const docId = this.currentDocId;
+		new AiActionModal(this.app, {
+			title: aiActionTitle(action),
+			sourceText: snap.text,
+			messages: buildAiActionMessages(action, snap.text),
+			settings: this.plugin.settings,
+			onUsage: (usage) => this.plugin.addAiUsage(usage),
+			apply: {
+				label: "转为卡片",
+				onApply: (text) => {
+					if (!docId) {
+						new Notice("原文文档已关闭，无法定位");
+						return;
+					}
+					this.saveAiResultFromSelection(docId, snap, text);
+				},
+			},
+		}).open();
+	}
+
+	/** AI 结果落留白（97）：锚点取选区行矩形正下方，色随留白工具当前色系 */
+	private saveAiResultFromSelection(
+		docId: string,
+		snap: SelectionSnapshot,
+		result: string,
+	): void {
+		this.plugin.cards.create({
+			documentId: docId,
+			page: snap.page,
+			rects: [translationAnchor(snap.rects)],
+			excerptType: "blank",
+			excerptText: result,
+			color: this.plugin.settings.excerptColors.blank,
+		});
+		new Notice("AI 结果已存为留白（原文下方）");
+	}
+
 	/** 把卡片加入脑图：选图器（可就地新建）→ 根节点区顺延落位为根节点 */
 	private addToMindmap(card: Card): void {
 		new MindmapPickerModal(this.app, this.plugin, (map) => {
@@ -4532,9 +4741,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			const pos = suggestRootPosition(roots);
 			const added = this.plugin.mindmaps.addNode(map.id, card.id, null, pos.x, pos.y);
 			new Notice(
-				added
-					? `已加入脑图《${map.name}》（根节点区顺延落位）`
-					: "该卡片已在此图中",
+				added ? `已加入脑图《${map.name}》（根节点区顺延落位）` : "该卡片已在此图中",
 			);
 		}).open();
 	}

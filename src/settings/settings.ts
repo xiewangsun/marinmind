@@ -7,8 +7,24 @@ import {
 	type TranslateEngineId,
 } from "../translate/translate-engine";
 import { isHighlightColor, type HighlightColorValue } from "../reader/highlight-colors";
-import { isLinkDirection, isLineStyle, type LineStyle, type LinkDirection } from "../types";
+import {
+	isLinkDirection,
+	isLineStyle,
+	isSrsScheduler,
+	type LineStyle,
+	type LinkDirection,
+	type SrsScheduler,
+} from "../types";
 import { isAbsoluteFsPath, normalizeFsDir, normalizeVaultDir } from "../storage/paths";
+import {
+	EMPTY_AI_USAGE,
+	sanitizeAiCustomPrompts,
+	sanitizeAiPresets,
+	sanitizeAiUsage,
+	type AiCustomPrompt,
+	type AiPreset,
+	type AiUsage,
+} from "../ai/ai-provider";
 
 /**
  * 隐藏侧缓存（79-3）：单窗格模式切走（detach）的一侧状态，随 data.json
@@ -105,6 +121,18 @@ export interface MarinMindSettings {
 	/** 每批复习张数（68 due 分批）：到期复习卡的每次拉取上限（新卡不占此限） */
 	reviewBatchSize: number;
 	/**
+	 * 间隔重复调度算法（103，默认 sm2）："sm2" Anki 简化版 / "fsrs" FSRS-4.5。
+	 * 切换即时生效（下次评分走新算法）；SM-2 存量卡切 fsrs 后首次评分惰性迁移
+	 * 记忆状态（stability/difficulty），切回 sm2 同样零迁移成本——双向可退。
+	 */
+	scheduler: SrsScheduler;
+	/**
+	 * 累计复习基线（103 口径统一，null = 未迁移）：一次性迁移时把
+	 * max(0, SM-2 聚合 − 复习日志已记总数) 定格于此，此后「累计复习」 =
+	 * 基线 + 日志总和（与今日/连续/热力图同源，两口径合一）。
+	 */
+	reviewStatsBaseline: number | null;
+	/**
 	 * 划选工具栏（75，默认开）：text 工具下划选文字弹出浮动工具栏
 	 * （四色点摘录/翻译/复制/书签/搜索）；关闭后恢复 75 之前的
 	 * 「划选松开即直接建卡」旧路径。
@@ -127,6 +155,29 @@ export interface MarinMindSettings {
 	 * 形状守卫见 loadSettings——损坏子字段弃用，不入脏值。
 	 */
 	workspaceHidden: WorkspaceHiddenState | null;
+	/**
+	 * AI 模型预设列表（96）：每项 Base URL + API Key + 模型名（OpenAI 兼容
+	 * 端点：DeepSeek / 智谱 / OpenAI / oneapi 系中转站等），可配多个在设置页
+	 * 切换启用。凭据明文存 data.json（与翻译凭据同惯例，设置页 desc 有提示）。
+	 */
+	aiPresets: AiPreset[];
+	/** 当前启用的预设 id（96）：空串 = 未启用（AI 功能入口统一守卫提示先配置） */
+	aiActivePresetId: string;
+	/** 采样温度（96，默认 0.3，钳 0-2）：制卡/整理等结构化输出场景偏低更稳 */
+	aiTemperature: number;
+	/** 流式输出（96）："auto"（默认）fetch+SSE 流式、CORS 失败自动降级非流式；"off" 强制非流式 */
+	aiStream: "auto" | "off";
+	/**
+	 * 单次请求上下文 token 预算（96，默认 24000，钳 2000-200000）：文档问答/
+	 * 摘要的分块裁剪上限（估算值——CJK 字符 ×1 + 其余 ÷4）。
+	 */
+	aiMaxContextTokens: number;
+	/** AI 制卡自动转闪卡（96，默认开）：生成的卡片直接 enable 进入复习队列 */
+	aiAutoFlashcard: boolean;
+	/** 划选 AI 操作的自定义项（96）：label 进划选 AI 菜单、prompt 为指令模板 */
+	aiCustomPrompts: AiCustomPrompt[];
+	/** 累计用量（96）：请求次数与 token 数（流式为估算值），设置页展示 + 可清零 */
+	aiUsage: AiUsage;
 }
 
 export const DEFAULT_SETTINGS: MarinMindSettings = {
@@ -151,10 +202,20 @@ export const DEFAULT_SETTINGS: MarinMindSettings = {
 	excerptColors: { text: "yellow", area: "yellow", lasso: "yellow", blank: "yellow" },
 	reviewNewPerDay: 0,
 	reviewBatchSize: 20,
+	scheduler: "sm2",
+	reviewStatsBaseline: null,
 	selectionToolbar: true,
 	excerptLineStyle: "underline",
 	linkDirection: "both",
 	workspaceHidden: null,
+	aiPresets: [],
+	aiActivePresetId: "",
+	aiTemperature: 0.3,
+	aiStream: "auto",
+	aiMaxContextTokens: 24000,
+	aiAutoFlashcard: true,
+	aiCustomPrompts: [],
+	aiUsage: EMPTY_AI_USAGE,
 };
 
 /**
@@ -167,6 +228,17 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
 		return fallback;
 	}
 	return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+/**
+ * 浮点字段钳制（96 AI 温度）：语义同 clampInt 但不取整——温度 0.3 取整会变 0。
+ */
+function clampFloat(value: unknown, fallback: number, min: number, max: number): number {
+	const n = typeof value === "number" ? value : Number(value);
+	if (!Number.isFinite(n)) {
+		return fallback;
+	}
+	return Math.min(max, Math.max(min, n));
 }
 
 /**
@@ -193,8 +265,27 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 	}
 	merged.excerptColors = colors;
 	// 65 复习设置两个标量：浅合并天然兼容，钳制防手编 data.json 越界值
-	merged.reviewNewPerDay = clampInt(merged.reviewNewPerDay, DEFAULT_SETTINGS.reviewNewPerDay, 0, 999);
-	merged.reviewBatchSize = clampInt(merged.reviewBatchSize, DEFAULT_SETTINGS.reviewBatchSize, 5, 200);
+	merged.reviewNewPerDay = clampInt(
+		merged.reviewNewPerDay,
+		DEFAULT_SETTINGS.reviewNewPerDay,
+		0,
+		999,
+	);
+	merged.reviewBatchSize = clampInt(
+		merged.reviewBatchSize,
+		DEFAULT_SETTINGS.reviewBatchSize,
+		5,
+		200,
+	);
+	// 103 调度算法：枚举外值回默认 sm2；累计基线 null = 未迁移（数字负值按 0 收）
+	merged.scheduler = isSrsScheduler((raw as { scheduler?: unknown } | null)?.scheduler)
+		? merged.scheduler
+		: "sm2";
+	const rawBaseline = (raw as { reviewStatsBaseline?: unknown } | null)?.reviewStatsBaseline;
+	merged.reviewStatsBaseline =
+		typeof rawBaseline === "number" && Number.isFinite(rawBaseline)
+			? Math.max(0, Math.round(rawBaseline))
+			: null;
 	// 77 线型标量：手编 data.json 非法值回默认下划线（防脏值流进 dataset/CSS）
 	merged.excerptLineStyle = isLineStyle(
 		(raw as { excerptLineStyle?: unknown } | null)?.excerptLineStyle,
@@ -202,7 +293,9 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 		? merged.excerptLineStyle
 		: "underline";
 	// 79-1 联动方向：非法值回默认双向（镜像线型守卫）
-	merged.linkDirection = isLinkDirection((raw as { linkDirection?: unknown } | null)?.linkDirection)
+	merged.linkDirection = isLinkDirection(
+		(raw as { linkDirection?: unknown } | null)?.linkDirection,
+	)
 		? merged.linkDirection
 		: "both";
 	// 83 OCR 三标量：语言表外值回默认中英混排、布尔脏值回默认关（镜像既有守卫风格）
@@ -226,15 +319,13 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 	)
 		? merged.translateEngine
 		: "google";
-	const rawCred = raw as
-		| {
-				translateBaiduAppid?: unknown;
-				translateBaiduSecret?: unknown;
-				translateYoudaoAppid?: unknown;
-				translateYoudaoAppSecret?: unknown;
-				translateDeeplKey?: unknown;
-		  }
-		| null;
+	const rawCred = raw as {
+		translateBaiduAppid?: unknown;
+		translateBaiduSecret?: unknown;
+		translateYoudaoAppid?: unknown;
+		translateYoudaoAppSecret?: unknown;
+		translateDeeplKey?: unknown;
+	} | null;
 	const trimStr = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 	merged.translateBaiduAppid = trimStr(rawCred?.translateBaiduAppid);
 	merged.translateBaiduSecret = trimStr(rawCred?.translateBaiduSecret);
@@ -246,6 +337,34 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 	merged.workspaceHidden = sanitizeWorkspaceHidden(
 		(raw as { workspaceHidden?: unknown } | null)?.workspaceHidden,
 	);
+	// 96 AI 设置：预设/自定义 prompt 形状守卫（坏项丢弃）、标量钳制、
+	// 枚举与布尔脏值回默认（镜像既有守卫风格）；启用 id 指向已丢坏项时
+	// sanitizeAiPresets 后 find 落空，resolveAiPreset 会引导重新启用
+	const rawAi = raw as {
+		aiActivePresetId?: unknown;
+		aiTemperature?: unknown;
+		aiStream?: unknown;
+		aiMaxContextTokens?: unknown;
+		aiAutoFlashcard?: unknown;
+		aiPresets?: unknown;
+		aiCustomPrompts?: unknown;
+		aiUsage?: unknown;
+	} | null;
+	merged.aiPresets = sanitizeAiPresets(rawAi?.aiPresets);
+	merged.aiActivePresetId =
+		typeof rawAi?.aiActivePresetId === "string" ? rawAi.aiActivePresetId.trim() : "";
+	merged.aiTemperature = clampFloat(merged.aiTemperature, DEFAULT_SETTINGS.aiTemperature, 0, 2);
+	merged.aiStream = rawAi?.aiStream === "off" ? "off" : "auto";
+	merged.aiMaxContextTokens = clampInt(
+		merged.aiMaxContextTokens,
+		DEFAULT_SETTINGS.aiMaxContextTokens,
+		2000,
+		200000,
+	);
+	merged.aiAutoFlashcard =
+		typeof rawAi?.aiAutoFlashcard === "boolean" ? rawAi.aiAutoFlashcard : true;
+	merged.aiCustomPrompts = sanitizeAiCustomPrompts(rawAi?.aiCustomPrompts);
+	merged.aiUsage = sanitizeAiUsage(rawAi?.aiUsage);
 	return merged;
 }
 
@@ -276,9 +395,7 @@ function sanitizeWorkspaceHidden(value: unknown): WorkspaceHiddenState | null {
 }
 
 /** 目录输入校验结果 */
-export type DirValidation =
-	| { ok: true; normalized: string }
-	| { ok: false; reason: string };
+export type DirValidation = { ok: true; normalized: string } | { ok: false; reason: string };
 
 /**
  * 目录设置输入校验（纯函数）：

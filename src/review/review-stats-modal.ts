@@ -5,9 +5,9 @@ import {
 	flashcardCount,
 	heatmapCells,
 	futureDueBuckets,
+	loggedReviewTotal,
 	reviewLogDayKey,
 	streakFromLog,
-	totalReviewsApprox,
 } from "../store/review-log";
 
 /**
@@ -15,11 +15,15 @@ import {
  * 未来 7 天到期分布条形。**快照渲染**——onOpen 取一次数据，打开期间不实时刷新
  * （复习结束后重开即新；面板是回顾性视图，无需订阅 cardBus/reviews 变更）。
  *
- * 口径脚注：今日/连续/热力图取复习日志（当日聚合），累计复习为 SM-2 字段近似
- * （Σ repetitions+lapses——日志只从启用日起记，历史以调度字段回推）。
+ * 口径（103-C 统一）：全部指标同源于复习日志——「累计复习」= 历史基线
+ * （插件启动时一次性迁移的日志前历史量，存设置 reviewStatsBaseline）
+ * + 日志总和；不再直接展示 SM-2 字段近似。
  */
 export class ReviewStatsModal extends Modal {
-	constructor(app: App, private readonly plugin: MarinMindPlugin) {
+	constructor(
+		app: App,
+		private readonly plugin: MarinMindPlugin,
+	) {
 		super(app);
 	}
 
@@ -42,7 +46,12 @@ export class ReviewStatsModal extends Modal {
 		const today = log[todayKey]?.reviews ?? 0;
 		this.brick(bricks, String(today), "今日复习");
 		this.brick(bricks, `${streakFromLog(log, todayKey)} 天`, "连续复习");
-		this.brick(bricks, String(totalReviewsApprox(store.reviews.values())), "累计复习（近似）");
+		// 103-C 口径统一：基线（日志前历史，一次性迁移）+ 日志总和——与今日/连续同源
+		this.brick(
+			bricks,
+			String((this.plugin.settings.reviewStatsBaseline ?? 0) + loggedReviewTotal(log)),
+			"累计复习",
+		);
 		this.brick(bricks, String(flashcardCount(store.reviews.values())), "闪卡数");
 
 		// 库统计行（吸收原 showStats Notice 内容：文档/卡片/脑图）
@@ -56,8 +65,7 @@ export class ReviewStatsModal extends Modal {
 		const grid = contentEl.createDiv({ cls: "marinmind-stats-heatmap" });
 		for (const cell of heatmapCells(log, nowMs, 13)) {
 			// R3（W-15）：title 仅悬停可见，补 aria-label 供读屏逐格播报；未来格纯装饰隐藏
-			const label =
-				cell.count > 0 ? `${cell.dateKey} · 复习 ${cell.count} 张` : cell.dateKey;
+			const label = cell.count > 0 ? `${cell.dateKey} · 复习 ${cell.count} 张` : cell.dateKey;
 			const el = grid.createDiv({
 				cls: `marinmind-stats-cell${cell.future ? " is-future" : ` lv${cell.level}`}`,
 				attr: cell.future ? { "aria-hidden": "true" } : { "aria-label": label },
@@ -75,14 +83,15 @@ export class ReviewStatsModal extends Modal {
 		buckets.forEach((n, i) => {
 			const col = chart.createDiv({ cls: "marinmind-stats-bar-col" });
 			const track = col.createDiv({ cls: "marinmind-stats-bar-track" });
-			track.createDiv({ cls: "marinmind-stats-bar" }).style.height = `${Math.round((n / max) * 100)}%`;
+			track.createDiv({ cls: "marinmind-stats-bar" }).style.height =
+				`${Math.round((n / max) * 100)}%`;
 			col.createDiv({ cls: "marinmind-stats-bar-count", text: n > 0 ? String(n) : "" });
 			col.createDiv({ cls: "marinmind-stats-bar-label", text: i === 0 ? "今天" : `+${i}` });
 		});
 
 		contentEl.createDiv({
 			cls: "marinmind-stats-footnote",
-			text: "今日/连续/热力图取自复习日志；累计复习按 SM-2 调度字段近似（含重来）。统计为打开时快照，重开面板刷新。",
+			text: "全部指标取自复习日志；「累计复习」= 日志启用前的历史基线 + 日志总和。统计为打开时快照，重开面板刷新。",
 		});
 	}
 

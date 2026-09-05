@@ -49,9 +49,7 @@ describe("cardLinkTarget 链接目标拼接", () => {
 
 describe("buildCardLink / buildCardEmbed 文本形态", () => {
 	it("链接带别名（cardTitle 同源），嵌入无别名前缀 !", () => {
-		expect(buildCardLink("MarinMind/书#^card-a", "标题")).toBe(
-			"[[MarinMind/书#^card-a|标题]]",
-		);
+		expect(buildCardLink("MarinMind/书#^card-a", "标题")).toBe("[[MarinMind/书#^card-a|标题]]");
 		expect(buildCardEmbed("MarinMind/书#^card-a")).toBe("![[MarinMind/书#^card-a]]");
 	});
 
@@ -63,8 +61,9 @@ describe("buildCardLink / buildCardEmbed 文本形态", () => {
 
 describe("buildCardCopyText 入口整合", () => {
 	it("link 模式 = wikilink（标题推导 cardTitle 优先级）", () => {
-		expect(buildCardCopyText("link", "MarinMind", "书.md", makeCard("c", { note: "批注" })))
-			.toBe("[[MarinMind/书#^card-c|批注]]");
+		expect(
+			buildCardCopyText("link", "MarinMind", "书.md", makeCard("c", { note: "批注" })),
+		).toBe("[[MarinMind/书#^card-c|批注]]");
 	});
 
 	it("embed 模式 = 嵌入语法（无别名）", () => {

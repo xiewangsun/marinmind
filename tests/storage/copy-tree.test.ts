@@ -70,9 +70,9 @@ describe("copyTree", () => {
 		expect([...dst.files.keys()].sort()).toEqual(
 			["assets/a.png", "assets/sub/b.png", "marinmind.db"].sort(),
 		);
-		expect(Array.from(new Uint8Array((await dst.readBinary("marinmind.db")) as ArrayBuffer))).toEqual(
-			[1, 2],
-		);
+		expect(
+			Array.from(new Uint8Array((await dst.readBinary("marinmind.db")) as ArrayBuffer)),
+		).toEqual([1, 2]);
 	});
 
 	it("只复制指定子树（relDir 非）", async () => {

@@ -59,11 +59,16 @@ export function planExternalReconcile(input: {
 	dirFilesBefore: Map<string, Set<string>>;
 }): ExternalReconcileDecision[] {
 	const { records, exists, dirFiles, dirFilesBefore } = input;
-	const decisions: ExternalReconcileDecision[] = records.map((_, i) => ({ kind: "none", index: i }));
+	const decisions: ExternalReconcileDecision[] = records.map((_, i) => ({
+		kind: "none",
+		index: i,
+	}));
 
 	// 全部记录的 basename 集合（小写归一）：与任一记录同名的新文件不算候选——
 	// 它更可能是另一条记录的跨目录移动，归属不明宁拒不赌
-	const recordedBasenames = new Set(records.map((r) => externalBasename(r.filePath).toLowerCase()));
+	const recordedBasenames = new Set(
+		records.map((r) => externalBasename(r.filePath).toLowerCase()),
+	);
 
 	// 按父目录分组失联记录（同目录内配对判定）
 	const missingByDir = new Map<string, number[]>();

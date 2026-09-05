@@ -1,5 +1,10 @@
 import type { DocRect, NormPoint } from "../types";
-import { cropRegionSnapshot, pixelRect, type PixelRect, type SnapshotImage } from "./region-snapshot";
+import {
+	cropRegionSnapshot,
+	pixelRect,
+	type PixelRect,
+	type SnapshotImage,
+} from "./region-snapshot";
 
 /**
  * reflow 文档（㊻-B md / ㊼ epub）的区域/套索内容快照（㊽）：把页容器 DOM 栅格化
@@ -96,9 +101,16 @@ const HARMFUL_ATTRS = new Set(["srcset", "sizes", "loading", "decoding"]);
  * 源码文件里嵌入字面控制字符会被部分工具链静默破坏。
  */
 const INVALID_XML_CHARS_RE = new RegExp(
-	"[" + String.fromCharCode(0) + "-" + String.fromCharCode(8) +
-		String.fromCharCode(11) + String.fromCharCode(12) +
-		String.fromCharCode(14) + "-" + String.fromCharCode(31) + "]",
+	"[" +
+		String.fromCharCode(0) +
+		"-" +
+		String.fromCharCode(8) +
+		String.fromCharCode(11) +
+		String.fromCharCode(12) +
+		String.fromCharCode(14) +
+		"-" +
+		String.fromCharCode(31) +
+		"]",
 	"g",
 );
 
@@ -515,7 +527,10 @@ function loadMirrorImage(url: string): Promise<HTMLImageElement> {
 		// 钩子就位后才赋 src（先挂后载，防漏网竞态）
 		img.onload = () => ok();
 		img.onerror = () => fail(new Error("SVG 镜像图加载失败"));
-		const timer = window.setTimeout(() => fail(new Error("SVG 镜像图加载超时")), SVG_IMAGE_TIMEOUT_MS);
+		const timer = window.setTimeout(
+			() => fail(new Error("SVG 镜像图加载超时")),
+			SVG_IMAGE_TIMEOUT_MS,
+		);
 		img.src = url;
 	});
 }

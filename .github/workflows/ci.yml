@@ -1,0 +1,42 @@
+# 持续集成：push / PR 全量验证（lint → 格式 → 测试 → 构建）
+# 与本地验证链一致（npm run lint / format:check / test / build），任一步红即拦截
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同分支新 push 取消旧跑（省额度；历史结果可在 Actions 页面回看）
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖（npm ci，按 lock 精确还原）
+        run: npm ci
+
+      - name: ESLint 静态检查
+        run: npm run lint
+
+      - name: Prettier 格式检查
+        run: npm run format:check
+
+      - name: 单元测试（vitest 全量）
+        run: npm test
+
+      - name: 构建（tsc 类型检查 + esbuild 打包）
+        run: npm run build

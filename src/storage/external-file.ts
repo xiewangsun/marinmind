@@ -33,12 +33,15 @@ export async function readExternalBinary(absPath: string): Promise<ArrayBuffer> 
 	} catch (err) {
 		const code = (err as NodeJS.ErrnoException).code;
 		if (code === "ENOENT") {
-			throw new Error(`库外文件不存在：${absPath}`);
+			throw new Error(`库外文件不存在：${absPath}`, { cause: err });
 		}
 		if (code === "EACCES" || code === "EPERM") {
-			throw new Error(`无权限读取库外文件：${absPath}`);
+			throw new Error(`无权限读取库外文件：${absPath}`, { cause: err });
 		}
-		throw new Error(`读取库外文件失败：${absPath}（${err instanceof Error ? err.message : String(err)}）`);
+		throw new Error(
+			`读取库外文件失败：${absPath}（${err instanceof Error ? err.message : String(err)}）`,
+			{ cause: err },
+		);
 	}
 }
 
@@ -62,11 +65,20 @@ export async function externalFileExists(absPath: string): Promise<boolean> {
  */
 export async function pickExternalPath(): Promise<string | null> {
 	// eslint 访问 window.electron 无类型声明，只能在函数体内窄化
-	const electron = (window as unknown as { electron?: { remote?: { dialog?: {
-		showOpenDialog?: (opts: Record<string, unknown>) => Promise<{
-			canceled?: boolean;
-			filePaths?: string[];
-		}> } } } }).electron;
+	const electron = (
+		window as unknown as {
+			electron?: {
+				remote?: {
+					dialog?: {
+						showOpenDialog?: (opts: Record<string, unknown>) => Promise<{
+							canceled?: boolean;
+							filePaths?: string[];
+						}>;
+					};
+				};
+			};
+		}
+	).electron;
 	const dialog = electron?.remote?.dialog;
 	if (!dialog || typeof dialog.showOpenDialog !== "function") {
 		return null;

@@ -35,7 +35,7 @@ export async function translateText(
 		response = await requestUrl({ ...spec, throw: false });
 	} catch (err) {
 		console.error("[MarinMind] 翻译请求失败", err);
-		throw new Error(engine.networkHint);
+		throw new Error(engine.networkHint, { cause: err });
 	}
 	if (response.status !== 200) {
 		throw new Error(`${engine.label}返回 HTTP ${response.status}，请稍后重试`);
@@ -44,6 +44,6 @@ export async function translateText(
 		return engine.parse(response.json);
 	} catch (err) {
 		console.error("[MarinMind] 翻译响应解析失败", err);
-		throw new Error(err instanceof Error ? err.message : "翻译响应解析失败");
+		throw new Error(err instanceof Error ? err.message : "翻译响应解析失败", { cause: err });
 	}
 }

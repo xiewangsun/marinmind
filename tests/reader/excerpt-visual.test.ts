@@ -31,14 +31,12 @@ describe("84-D canPageCrop 页裁剪守卫", () => {
 
 	it("缺文档归属 / 缺页码 / 无矩形均不可裁剪", () => {
 		const rects = [{ x: 0.1, y: 0.1, w: 0.2, h: 0.05 }];
-		expect(
-			canPageCrop({ documentId: null, page: 1, rects, excerptType: "text" }),
-		).toBe(false);
-		expect(
-			canPageCrop({ documentId: "doc1", page: null, rects, excerptType: "text" }),
-		).toBe(false);
-		expect(
-			canPageCrop({ documentId: "doc1", page: 1, rects: [], excerptType: "text" }),
-		).toBe(false);
+		expect(canPageCrop({ documentId: null, page: 1, rects, excerptType: "text" })).toBe(false);
+		expect(canPageCrop({ documentId: "doc1", page: null, rects, excerptType: "text" })).toBe(
+			false,
+		);
+		expect(canPageCrop({ documentId: "doc1", page: 1, rects: [], excerptType: "text" })).toBe(
+			false,
+		);
 	});
 });

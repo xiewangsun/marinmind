@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Plugin } from "obsidian";
-import {
-	DEFAULT_SETTINGS,
-	loadSettings,
-	validateDirInput,
-} from "../../src/settings/settings";
-import {
-	isLinkDirection,
-	LINK_DIRECTIONS,
-	LINK_DIRECTION_LABELS,
-} from "../../src/types";
+import { DEFAULT_SETTINGS, loadSettings, validateDirInput } from "../../src/settings/settings";
+import { isLinkDirection, LINK_DIRECTIONS, LINK_DIRECTION_LABELS } from "../../src/types";
 
 describe("联动方向名单（79-1）", () => {
 	it("四档且顺序固定（both 默认在前，off 收尾）", () => {
@@ -100,9 +92,7 @@ describe("loadSettings 复习设置字段（65）", () => {
 	});
 
 	it("合法存量值原样保留（不因归一化改写用户偏好）", async () => {
-		const merged = await loadSettings(
-			fakePlugin({ reviewNewPerDay: 15, reviewBatchSize: 50 }),
-		);
+		const merged = await loadSettings(fakePlugin({ reviewNewPerDay: 15, reviewBatchSize: 50 }));
 		expect(merged.reviewNewPerDay).toBe(15);
 		expect(merged.reviewBatchSize).toBe(50);
 	});

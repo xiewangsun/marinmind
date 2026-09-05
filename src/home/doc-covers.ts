@@ -155,10 +155,7 @@ async function encodeCoverImage(href: string, bytes: Uint8Array): Promise<string
 			el.onerror = () => reject(new Error("封面图片解码失败"));
 			el.src = blobUrl;
 		});
-		const scale = Math.min(
-			COVER_WIDTH / img.naturalWidth,
-			COVER_HEIGHT / img.naturalHeight,
-		);
+		const scale = Math.min(COVER_WIDTH / img.naturalWidth, COVER_HEIGHT / img.naturalHeight);
 		const canvas = document.createElement("canvas");
 		canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
 		canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));

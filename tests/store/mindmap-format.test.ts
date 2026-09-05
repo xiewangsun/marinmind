@@ -47,7 +47,14 @@ function node(partial: Partial<MindmapNode> & Pick<MindmapNode, "id" | "cardId">
 describe("mindmap-format 序列化与解析", () => {
 	it("嵌套树往返：父子结构、坐标、折叠、样式还原；二次序列化字节相同", () => {
 		const root = node({ id: "n1", cardId: "c1", x: 10, y: 0 });
-		const child = node({ id: "n2", cardId: "c2", parentId: "n1", x: 220, y: 40, createdAt: 1700000002000 });
+		const child = node({
+			id: "n2",
+			cardId: "c2",
+			parentId: "n1",
+			x: 220,
+			y: 40,
+			createdAt: 1700000002000,
+		});
 		const grand = node({
 			id: "n3",
 			cardId: "c3",
@@ -57,7 +64,14 @@ describe("mindmap-format 序列化与解析", () => {
 			collapsed: true,
 			branchStyle: "line",
 		});
-		const root2 = node({ id: "n4", cardId: "c4", x: 0, y: 300, createdAt: 1700000003000, order: 1 });
+		const root2 = node({
+			id: "n4",
+			cardId: "c4",
+			x: 0,
+			y: 300,
+			createdAt: 1700000003000,
+			order: 1,
+		});
 		const nodes = [root, child, grand, root2];
 		const ctx = resolver({ c1: "根节点", c2: "子节点", c3: "[带括号] 标题", c4: "第二根" });
 
@@ -115,8 +129,8 @@ describe("mindmap-format 序列化与解析", () => {
 			"updated_at: 1700000100000",
 			"---",
 			"",
-			"- [[书籍A#^card-c1|根]] <!--mm {\"id\":\"n1\",\"x\":0,\"y\":0,\"created\":1} -->",
-			"    - [[书籍A#^card-c2|跳级]] <!--mm {\"id\":\"n2\",\"x\":1,\"y\":1,\"created\":2} -->",
+			'- [[书籍A#^card-c1|根]] <!--mm {"id":"n1","x":0,"y":0,"created":1} -->',
+			'    - [[书籍A#^card-c2|跳级]] <!--mm {"id":"n2","x":1,"y":1,"created":2} -->',
 			"- 手写的行没有机器注释",
 			"",
 		].join("\n");
@@ -138,8 +152,8 @@ describe("mindmap-format 序列化与解析", () => {
 			"updated_at: 1",
 			"---",
 			"",
-			"- [[书籍A#^card-c1|一]] <!--mm {\"id\":\"n1\",\"x\":0,\"y\":0} -->",
-			"- [[书籍A#^card-c1|二]] <!--mm {\"id\":\"n2\",\"x\":0,\"y\":1} -->",
+			'- [[书籍A#^card-c1|一]] <!--mm {"id":"n1","x":0,"y":0} -->',
+			'- [[书籍A#^card-c1|二]] <!--mm {"id":"n2","x":0,"y":1} -->',
 			"",
 		].join("\n");
 		const parsed = parseMindmapMd(text);
@@ -216,8 +230,20 @@ describe("mindmap-format 序列化与解析", () => {
 	it("旧数据无 order：按创建序输出，解析赋下标序（升级零感知）", () => {
 		const nodes = [
 			node({ id: "n1", cardId: "c0" }),
-			node({ id: "n2", cardId: "c1", parentId: "n1", createdAt: 1700000002000, order: undefined }),
-			node({ id: "n3", cardId: "c2", parentId: "n1", createdAt: 1700000001000, order: undefined }),
+			node({
+				id: "n2",
+				cardId: "c1",
+				parentId: "n1",
+				createdAt: 1700000002000,
+				order: undefined,
+			}),
+			node({
+				id: "n3",
+				cardId: "c2",
+				parentId: "n1",
+				createdAt: 1700000001000,
+				order: undefined,
+			}),
 		];
 		const ctx = resolver({ c0: "根", c1: "晚", c2: "早" });
 		const text = serializeMindmapMd(map(), nodes, ctx);

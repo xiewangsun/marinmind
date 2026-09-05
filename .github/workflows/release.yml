@@ -1,0 +1,76 @@
+# 发版流水线：推 v* 标签触发（如 git tag v0.2.0 && git push origin v0.2.0）
+# 步骤：tag↔manifest 版本一致性校验 → versions.json 版本映射同步（缺则补写回仓库）
+#       → 构建 → 创建 GitHub Release 并附带 main.js / manifest.json / styles.css
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # versions.json 回写提交 + 创建 Release 所需
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 回写 versions.json 需要完整历史与推回权限
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 校验 tag 与 manifest.json 版本一致
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MANIFEST=$(node -p "require('./manifest.json').version")
+          if [ "$TAG" != "$MANIFEST" ]; then
+            echo "::error::tag(${GITHUB_REF_NAME}) 与 manifest.json 版本(${MANIFEST}) 不一致——请先改 manifest.json 的 version 再打同名 tag"
+            exit 1
+          fi
+          echo "版本一致：${TAG}"
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建（发版产物必须来自干净的 CI 构建）
+        run: npm run build
+
+      - name: 同步 versions.json（缺条目则补写并提交回仓库）
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          MIN_APP=$(node -p "require('./manifest.json').minAppVersion")
+          CURRENT=$(node -p "require('./versions.json')['${VERSION}'] || ''")
+          if [ "$CURRENT" = "$MIN_APP" ]; then
+            echo "versions.json 已含 ${VERSION} → ${MIN_APP}，无需改动"
+            exit 0
+          fi
+          # 写入（新增或修正该版本的 minAppVersion），保持 2 空格缩进 + 结尾换行
+          node -e "
+            const fs = require('fs');
+            const v = '${VERSION}';
+            const map = JSON.parse(fs.readFileSync('versions.json', 'utf8'));
+            map[v] = '${MIN_APP}';
+            fs.writeFileSync('versions.json', JSON.stringify(map, null, '\t') + '\n');
+          "
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add versions.json
+          git commit -m "chore(release): versions.json 增加 ${VERSION} → ${MIN_APP} [skip ci]"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
+          git push origin HEAD:"${GITHUB_REF_NAME}"
+
+      - name: 创建 GitHub Release（附 main.js / manifest.json / styles.css）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./manifest.json').version")
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "MarinMind ${VERSION}" \
+            --generate-notes \
+            main.js manifest.json styles.css

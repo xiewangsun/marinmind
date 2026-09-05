@@ -398,7 +398,7 @@ describe("脑图仓储", () => {
 		const mapA = mindmaps.create("A");
 		const mapB = mindmaps.create("B");
 		const root = mindmaps.addNode(mapA.id, shared.id, null, 0, 0)!;
-		const child = mindmaps.addNode(mapA.id, c2.id, root.id, 100, 0)!;
+		mindmaps.addNode(mapA.id, c2.id, root.id, 100, 0)!;
 		mindmaps.addNode(mapB.id, shared.id, null, 0, 0); // B 已有该卡
 
 		expect(mindmaps.moveSubtreeToMap(root.id, mapB.id)).toBe(false);

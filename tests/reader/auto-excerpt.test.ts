@@ -43,14 +43,8 @@ describe("auto-excerpt.detectBlocks（AI 一键摘录版面块检测，㉓）", 
 	});
 
 	it("双栏同一水平线拆为两行两块（栏间距 > 20pt，水平无重叠）", () => {
-		const left = [
-			item("左栏第一", 60, 100, 88),
-			item("左栏第二", 60, 112, 88),
-		];
-		const right = [
-			item("右栏第一", 320, 100, 88),
-			item("右栏第二", 320, 112, 88),
-		];
+		const left = [item("左栏第一", 60, 100, 88), item("左栏第二", 60, 112, 88)];
+		const right = [item("右栏第一", 320, 100, 88), item("右栏第二", 320, 112, 88)];
 		const blocks = detectBlocks([...left, ...right], 600, 800);
 		expect(blocks).toHaveLength(2);
 		expect(blocks[0].text).toContain("左栏");
@@ -98,16 +92,14 @@ describe("auto-excerpt.detectBlocks（AI 一键摘录版面块检测，㉓）", 
 
 	it("矩形按页尺寸归一（逐行一条）", () => {
 		const blocks = detectBlocks([item("文本", 120, 160, 88, 10)], 600, 800);
-		expect(blocks[0].rects).toEqual([
-			{ x: 120 / 600, y: 160 / 800, w: 88 / 600, h: 10 / 800 },
-		]);
+		expect(blocks[0].rects).toEqual([{ x: 120 / 600, y: 160 / 800, w: 88 / 600, h: 10 / 800 }]);
 	});
 
 	it("空输入 / 全空白项返回空数组", () => {
 		expect(detectBlocks([], 600, 800)).toEqual([]);
-		expect(
-			detectBlocks([item("  ", 100, 100, 20), item("", 200, 100, 10)], 600, 800),
-		).toEqual([]);
+		expect(detectBlocks([item("  ", 100, 100, 20), item("", 200, 100, 10)], 600, 800)).toEqual(
+			[],
+		);
 	});
 
 	it("非法页尺寸返回空数组（防御）", () => {
@@ -228,8 +220,6 @@ describe("auto-excerpt.isDuplicateBlock（㉕ 重复执行去重）", () => {
 	});
 
 	it("卡片无文本且无矩形（页码 null）→ 不判重", () => {
-		expect(
-			isDuplicateBlock(block, 5, { page: 5, rects: [], excerptText: null }),
-		).toBe(false);
+		expect(isDuplicateBlock(block, 5, { page: 5, rects: [], excerptText: null })).toBe(false);
 	});
 });

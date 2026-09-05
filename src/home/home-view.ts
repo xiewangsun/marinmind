@@ -2,7 +2,15 @@ import { ItemView, setIcon } from "obsidian";
 import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { CardsPageState, CategorySelection } from "./home-data";
-import { renderCardsPage, renderDocumentsPage, enableKeyboardActivation, renderMapsPage, renderOverviewPage, clearBatchSelection, type HomePage } from "./home-pages";
+import {
+	renderCardsPage,
+	renderDocumentsPage,
+	enableKeyboardActivation,
+	renderMapsPage,
+	renderOverviewPage,
+	clearBatchSelection,
+	type HomePage,
+} from "./home-pages";
 
 /** 主页视图类型标识（main.ts registerView / openHome 共用） */
 export const HOME_VIEW_TYPE = "marinmind-home";
@@ -47,7 +55,10 @@ export class MarinMindHomeView extends ItemView {
 	private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 	private navCountEls = new Map<HomePage, HTMLElement>();
 
-	constructor(leaf: WorkspaceLeaf, private readonly plugin: MarinMindPlugin) {
+	constructor(
+		leaf: WorkspaceLeaf,
+		private readonly plugin: MarinMindPlugin,
+	) {
 		super(leaf);
 	}
 
@@ -198,7 +209,10 @@ export class MarinMindHomeView extends ItemView {
 		if (!(content instanceof HTMLElement)) return;
 		content.empty();
 		if (!this.plugin.store) {
-			content.createEl("p", { cls: "marinmind-home-empty", text: "数据层未就绪，无法展示主页内容。" });
+			content.createEl("p", {
+				cls: "marinmind-home-empty",
+				text: "数据层未就绪，无法展示主页内容。",
+			});
 			return;
 		}
 		const view = this;

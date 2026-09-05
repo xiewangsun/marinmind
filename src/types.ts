@@ -233,6 +233,13 @@ export function isLinkDirection(v: unknown): v is LinkDirection {
 	return typeof v === "string" && (LINK_DIRECTIONS as readonly string[]).includes(v);
 }
 
+/** 调度算法合法值（103 设置守卫用） */
+const SRS_SCHEDULERS = ["sm2", "fsrs"] as const;
+
+export function isSrsScheduler(v: unknown): v is SrsScheduler {
+	return typeof v === "string" && (SRS_SCHEDULERS as readonly string[]).includes(v);
+}
+
 /** 思维导图（命名脑图，任何书的卡片可混排进同一张图） */
 export interface Mindmap {
 	id: string;
@@ -282,13 +289,16 @@ export type ReviewGrade = "again" | "hard" | "good" | "easy";
 /** 间隔重复所处阶段 */
 export type SrsPhase = "new" | "learning" | "review" | "relearning";
 
-/** 闪卡复习状态（SM-2 字段集；后续可整体替换为 FSRS） */
+/** 间隔重复调度算法（103）：SM-2（默认，Anki 简化版）/ FSRS-4.5（记忆二元组模型） */
+export type SrsScheduler = "sm2" | "fsrs";
+
+/** 闪卡复习状态（SM-2 字段集 + FSRS 可选扩展） */
 export interface ReviewState {
 	cardId: string;
 	/** 是否已转为闪卡：卡片默认只是摘录，需显式启用复习 */
 	isFlashcard: boolean;
 	phase: SrsPhase;
-	/** 难度系数（SM-2 的 EF 因子） */
+	/** 难度系数（SM-2 的 EF 因子；FSRS 调度不读不写，保留 SM-2 历史） */
 	ease: number;
 	/** 当前间隔（天；小数表示分钟级学习步长） */
 	intervalDays: number;
@@ -299,4 +309,11 @@ export interface ReviewState {
 	lastReviewedAt: number | null;
 	/** 遗忘次数 */
 	lapses: number;
+	/**
+	 * FSRS 稳定性（天，103 可选扩展）：90% 保留率意义上的记忆半衰期。
+	 * SM-2 存量卡无此字段——切 fsrs 后首次评分时惰性迁移（见 sm2StateToFsrsMemory）。
+	 */
+	stability?: number;
+	/** FSRS 难度（1-10，越大越难；103 可选扩展，同上惰性迁移） */
+	difficulty?: number;
 }

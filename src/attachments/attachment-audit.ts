@@ -55,7 +55,10 @@ async function collectFiles(adapter: ListableStorageAdapter, dir: string): Promi
 /** 全库扫描：枚举 assets/ 实际文件，对照全部卡片的 excerptRef */
 export async function scanAttachments(plugin: MarinMindPlugin): Promise<AssetAuditResult> {
 	const files = await collectFiles(plugin.dataLoc.adapter, ASSETS_SUBDIR);
-	return diffAssetFiles(files, plugin.cards.listAll().map((c) => c.excerptRef));
+	return diffAssetFiles(
+		files,
+		plugin.cards.listAll().map((c) => c.excerptRef),
+	);
 }
 
 /** 删除孤儿附件（逐个走 attachments.remove——幂等，不存在静默）；返回成功删除数 */

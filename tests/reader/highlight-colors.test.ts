@@ -8,12 +8,7 @@ import {
 	isHighlightColor,
 	LINE_STYLE_ICONS,
 } from "../../src/reader/highlight-colors";
-import {
-	isLineStyle,
-	LINE_STYLES,
-	LINE_STYLE_LABELS,
-	type LineStyle,
-} from "../../src/types";
+import { isLineStyle, LINE_STYLES, LINE_STYLE_LABELS, type LineStyle } from "../../src/types";
 
 /** 测试用最小卡片（highlightFallbackColor/highlightLineStyle 只读 color/lineStyle/excerptType） */
 function cardOf(

@@ -19,35 +19,149 @@ export type EpubLinkTarget =
 
 /** 整删标签（脚本/样式/嵌入框架/表单控件/音视频——音视频挂账后续优化） */
 const DROP_TAGS = new Set([
-	"script", "style", "link", "meta", "iframe", "object", "embed",
-	"video", "audio", "source", "track", "form", "input", "button",
-	"select", "textarea", "option", "optgroup", "base", "frame", "frameset",
+	"script",
+	"style",
+	"link",
+	"meta",
+	"iframe",
+	"object",
+	"embed",
+	"video",
+	"audio",
+	"source",
+	"track",
+	"form",
+	"input",
+	"button",
+	"select",
+	"textarea",
+	"option",
+	"optgroup",
+	"base",
+	"frame",
+	"frameset",
 ]);
 
 /** HTML 结构白名单（统一排版保留语义所需的最小集） */
 const HTML_KEEP = new Set([
-	"p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "dl", "dt", "dd",
-	"table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "col", "colgroup",
-	"img", "figure", "figcaption", "blockquote", "pre", "code", "em", "strong", "b",
-	"i", "u", "s", "small", "sub", "sup", "br", "hr", "span", "div", "a",
-	"ruby", "rt", "rp", "section", "article", "aside", "header", "footer", "nav",
-	"del", "ins", "mark", "abbr", "cite", "q", "time",
+	"p",
+	"h1",
+	"h2",
+	"h3",
+	"h4",
+	"h5",
+	"h6",
+	"ul",
+	"ol",
+	"li",
+	"dl",
+	"dt",
+	"dd",
+	"table",
+	"thead",
+	"tbody",
+	"tfoot",
+	"tr",
+	"td",
+	"th",
+	"caption",
+	"col",
+	"colgroup",
+	"img",
+	"figure",
+	"figcaption",
+	"blockquote",
+	"pre",
+	"code",
+	"em",
+	"strong",
+	"b",
+	"i",
+	"u",
+	"s",
+	"small",
+	"sub",
+	"sup",
+	"br",
+	"hr",
+	"span",
+	"div",
+	"a",
+	"ruby",
+	"rt",
+	"rp",
+	"section",
+	"article",
+	"aside",
+	"header",
+	"footer",
+	"nav",
+	"del",
+	"ins",
+	"mark",
+	"abbr",
+	"cite",
+	"q",
+	"time",
 ]);
 
 /** SVG 子集白名单（svg 进入后按此表过滤；defs 内渐变等不在表内按 unwrap 处理） */
 const SVG_KEEP = new Set([
-	"svg", "g", "image", "path", "rect", "circle", "ellipse", "line", "polyline",
-	"polygon", "text", "tspan", "use", "defs",
+	"svg",
+	"g",
+	"image",
+	"path",
+	"rect",
+	"circle",
+	"ellipse",
+	"line",
+	"polyline",
+	"polygon",
+	"text",
+	"tspan",
+	"use",
+	"defs",
 ]);
 
 /** 通用保留属性（style/class/on* 一律剥；src/href/xlink:href 逐个处理） */
 const KEEP_ATTRS = new Set([
-	"id", "alt", "title", "colspan", "rowspan", "lang", "dir", "datetime",
+	"id",
+	"alt",
+	"title",
+	"colspan",
+	"rowspan",
+	"lang",
+	"dir",
+	"datetime",
 	// SVG 几何/绘制属性（SVG 不吃主题变量，语义保留所需）
-	"viewbox", "width", "height", "x", "y", "cx", "cy", "r", "rx", "ry",
-	"x1", "x2", "y1", "y2", "points", "d", "fill", "stroke", "stroke-width",
-	"transform", "opacity", "preserveaspectratio", "text-anchor",
-	"font-size", "font-family", "font-weight", "dx", "dy",
+	"viewbox",
+	"width",
+	"height",
+	"x",
+	"y",
+	"cx",
+	"cy",
+	"r",
+	"rx",
+	"ry",
+	"x1",
+	"x2",
+	"y1",
+	"y2",
+	"points",
+	"d",
+	"fill",
+	"stroke",
+	"stroke-width",
+	"transform",
+	"opacity",
+	"preserveaspectratio",
+	"text-anchor",
+	"font-size",
+	"font-family",
+	"font-weight",
+	"dx",
+	"dy",
 ]);
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -66,7 +180,7 @@ function imageMimeOf(path: string): string {
 
 /** 绝对 URL / 带协议前缀判定（http 外的协议 javascript:/data:/mailto: 等一律不透传） */
 function hasUrlScheme(href: string): boolean {
-	return /^[a-z][a-z0-9+.\-]*:/i.test(href);
+	return /^[a-z][a-z0-9+.-]*:/i.test(href);
 }
 
 /**
@@ -149,7 +263,7 @@ export class EpubSession {
 			return;
 		}
 		evt.preventDefault();
-		let target: EpubLinkTarget | null = null;
+		let target: EpubLinkTarget | null;
 		try {
 			target = JSON.parse(anchor.getAttribute("data-mm-link") ?? "") as EpubLinkTarget;
 		} catch {
@@ -178,7 +292,11 @@ export class EpubSession {
 	}
 
 	/** 链接三分类：章内/跨章 spine｜外链 http(s)｜非 spine 相对（unsupported） */
-	private classifyLink(href: string, chapterFile: string, spineIndex: number): EpubLinkTarget | null {
+	private classifyLink(
+		href: string,
+		chapterFile: string,
+		spineIndex: number,
+	): EpubLinkTarget | null {
 		if (href.startsWith("#")) {
 			return { kind: "spine", spineIndex, fragment: href.slice(1) || null };
 		}
@@ -228,9 +346,10 @@ export class EpubSession {
 			}
 			return;
 		}
-		const created = svgBoundary || inSvg
-			? document.createElementNS(SVG_NS, tag)
-			: document.createElement(tag);
+		const created =
+			svgBoundary || inSvg
+				? document.createElementNS(SVG_NS, tag)
+				: document.createElement(tag);
 		this.copyAttrs(el, created, chapterFile, spineIndex, tag);
 		target.appendChild(created);
 		for (const child of Array.from(el.childNodes)) {
@@ -294,12 +413,7 @@ export class EpubSession {
 	}
 
 	/** a href：三分类结果挂 data-mm-link（点击委托消费）；不可用链接剥 href */
-	private wireAnchor(
-		dest: Element,
-		href: string,
-		chapterFile: string,
-		spineIndex: number,
-	): void {
+	private wireAnchor(dest: Element, href: string, chapterFile: string, spineIndex: number): void {
 		if (!href) {
 			return;
 		}

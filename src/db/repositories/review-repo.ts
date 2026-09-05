@@ -2,24 +2,28 @@ import type { MarinMindStore } from "../../store/marinmind-store";
 import { defaultReviewState } from "../../store/book-format";
 import { recordReview, reviewLogDayKey, unrecordReview } from "../../store/review-log";
 import { inPathSubtree, normalizeCategory } from "../../home/home-data";
-import type { Card, ReviewGrade, ReviewState } from "../../types";
+import type { Card, ReviewGrade, ReviewState, SrsScheduler } from "../../types";
 import { now } from "../../utils";
 import { nextReviewState } from "../../srs/sm2";
+import { nextReviewStateFsrs } from "../../srs/fsrs";
 
 /**
  * 闪卡复习仓储（㉚ md 存储版）：复习状态存卡片机器注释（store.reviews），
- * 调度算法仍走 src/srs/sm2.ts 纯函数。公开语义与 SQL 版一致。
+ * 调度算法走 src/srs/ 纯函数（103 起双算法：sm2 默认 / fsrs-4.5，设置切换）。
+ * schedulerGetter 每次评分现取设置——运行期切换即时生效，无存量批迁移。
  */
 export class ReviewRepository {
-	constructor(private store: MarinMindStore) {}
+	constructor(
+		private store: MarinMindStore,
+		private schedulerGetter?: () => SrsScheduler,
+	) {}
 
 	/** 将卡片转为闪卡（幂等），可指定初始到期时间 */
 	enable(cardId: string, dueAt: number = now()): void {
 		if (!this.store.bookOfCard(cardId)) {
 			throw new Error(`卡片不存在，无法转为闪卡：${cardId}`);
 		}
-		const prev =
-			this.store.reviews.get(cardId) ?? defaultReviewState(cardId, now());
+		const prev = this.store.reviews.get(cardId) ?? defaultReviewState(cardId, now());
 		this.store.putReview({ ...prev, isFlashcard: true, dueAt });
 	}
 
@@ -76,15 +80,21 @@ export class ReviewRepository {
 		// deck 目标归一一次（73 子树匹配）；卡片侧同步归一防空白变体漏配；
 		// 归一失败（全空白/超长）= 无效子树 → 不命中任何卡（宁拒不赌，不静默放行）
 		const deckTarget = deck != null ? normalizeCategory(deck) : null;
-		return this.assembleMixed(states, nowMs, newPerDay, (card) => {
-			if (documentId != null && card.documentId !== documentId) return false;
-			if (deck != null) {
-				if (deckTarget == null) return false;
-				const path = card.deck ? normalizeCategory(card.deck) : null;
-				if (!(path != null && inPathSubtree(path, deckTarget))) return false;
-			}
-			return true;
-		}, limit);
+		return this.assembleMixed(
+			states,
+			nowMs,
+			newPerDay,
+			(card) => {
+				if (documentId != null && card.documentId !== documentId) return false;
+				if (deck != null) {
+					if (deckTarget == null) return false;
+					const path = card.deck ? normalizeCategory(card.deck) : null;
+					if (!(path != null && inPathSubtree(path, deckTarget))) return false;
+				}
+				return true;
+			},
+			limit,
+		);
 	}
 
 	/**
@@ -99,7 +109,13 @@ export class ReviewRepository {
 		const states = [...this.store.reviews.values()]
 			.filter((r) => r.isFlashcard && r.dueAt <= nowMs && ids.has(r.cardId))
 			.sort((a, b) => a.dueAt - b.dueAt || (a.cardId < b.cardId ? -1 : 1));
-		return this.assembleMixed(states, nowMs, opts?.newPerDay, () => true, Number.POSITIVE_INFINITY);
+		return this.assembleMixed(
+			states,
+			nowMs,
+			opts?.newPerDay,
+			() => true,
+			Number.POSITIVE_INFINITY,
+		);
 	}
 
 	/**
@@ -123,9 +139,14 @@ export class ReviewRepository {
 			(r.phase === "new" ? newCards : reviewCards).push(card);
 		}
 		const out = reviewCards.slice(0, limit);
-		let newQuota = newPerDay && newPerDay > 0
-			? Math.max(0, newPerDay - (this.store.getReviewLog()[reviewLogDayKey(nowMs)]?.newCards ?? 0))
-			: Number.POSITIVE_INFINITY;
+		let newQuota =
+			newPerDay && newPerDay > 0
+				? Math.max(
+						0,
+						newPerDay -
+							(this.store.getReviewLog()[reviewLogDayKey(nowMs)]?.newCards ?? 0),
+					)
+				: Number.POSITIVE_INFINITY;
 		for (const card of newCards) {
 			if (newQuota <= 0) break;
 			out.push(card);
@@ -134,18 +155,25 @@ export class ReviewRepository {
 		return out;
 	}
 
-	/** 完成一次复习（SM-2 调度）；卡片不存在或未启用闪卡时返回 undefined */
+	/**
+	 * 完成一次复习（按设置走 SM-2 / FSRS 调度）；卡片不存在或未启用闪卡时返回 undefined。
+	 * 103：两算法同签名纯函数，ReviewState 同形状——FSRS 侧惰性迁移缺
+	 * stability/difficulty 的存量卡；撤销走 restoreReview 快照直写，与算法无关。
+	 */
 	review(cardId: string, grade: ReviewGrade, nowMs: number = now()): ReviewState | undefined {
 		const prev = this.store.reviews.get(cardId);
 		if (!prev || !prev.isFlashcard) {
 			return undefined;
 		}
-		const next = nextReviewState(prev, grade, nowMs);
+		const scheduler = this.schedulerGetter?.() ?? "sm2";
+		const next =
+			scheduler === "fsrs"
+				? nextReviewStateFsrs(prev, grade, nowMs)
+				: nextReviewState(prev, grade, nowMs);
 		this.store.putReview(next);
 		// 66 复习日志：与 putReview 共用同一 nowMs（撤销跨午夜回退 ts 对齐依赖此单一时间源）；
 		// isNew 判定用评分前 prev.phase——评分后 next.phase 已离开 new
-		this.store.mutateReviewLog((log) =>
-			recordReview(log, nowMs, prev.phase === "new", grade));
+		this.store.mutateReviewLog((log) => recordReview(log, nowMs, prev.phase === "new", grade));
 		return next;
 	}
 
@@ -156,7 +184,6 @@ export class ReviewRepository {
 	 */
 	restoreReview(before: ReviewState, ts: number, grade: ReviewGrade): void {
 		this.store.putReview(before);
-		this.store.mutateReviewLog((log) =>
-			unrecordReview(log, ts, before.phase === "new", grade));
+		this.store.mutateReviewLog((log) => unrecordReview(log, ts, before.phase === "new", grade));
 	}
 }

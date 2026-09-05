@@ -32,10 +32,7 @@ describe("pdfLinesFromSpecs（PDF 文本聚行，89-D）", () => {
 	});
 
 	it("left 乱序输入行内按左序排列", () => {
-		const lines = pdfLinesFromSpecs([
-			spec("界", 30, 100),
-			spec("世", 10, 100),
-		]);
+		const lines = pdfLinesFromSpecs([spec("界", 30, 100), spec("世", 10, 100)]);
 		expect(lines).toHaveLength(1);
 		expect(lines[0].text).toBe("世界");
 		expect(lines[0].left).toBe(10);
@@ -51,20 +48,14 @@ describe("pdfLinesFromSpecs（PDF 文本聚行，89-D）", () => {
 	});
 
 	it("同视觉行轻微 top 漂移（±2px 内）合并", () => {
-		const lines = pdfLinesFromSpecs([
-			spec("He", 10, 100),
-			spec("llo", 30, 101.5),
-		]);
+		const lines = pdfLinesFromSpecs([spec("He", 10, 100), spec("llo", 30, 101.5)]);
 		expect(lines).toHaveLength(1);
 		expect(lines[0].text).toBe("Hello");
 	});
 
 	it("行混排字号：容差随两侧最大字号放大，仍合一", () => {
 		// 大字 30px 基线近似 top 偏小 10px，容差 = max(2, 30×0.35)=10.5 ≥ 10 → 合并
-		const lines = pdfLinesFromSpecs([
-			spec("大标题", 10, 90, 30),
-			spec("小字", 100, 100, 14),
-		]);
+		const lines = pdfLinesFromSpecs([spec("大标题", 10, 90, 30), spec("小字", 100, 100, 14)]);
 		expect(lines).toHaveLength(1);
 		expect(lines[0].fontSize).toBe(30);
 	});
@@ -75,10 +66,7 @@ describe("pdfLinesFromSpecs（PDF 文本聚行，89-D）", () => {
 	});
 
 	it("行元数据：top 取行内最小、left 取最左", () => {
-		const lines = pdfLinesFromSpecs([
-			spec("b", 30, 102),
-			spec("a", 10, 100),
-		]);
+		const lines = pdfLinesFromSpecs([spec("b", 30, 102), spec("a", 10, 100)]);
 		expect(lines[0].top).toBe(100);
 		expect(lines[0].left).toBe(10);
 	});
@@ -153,7 +141,11 @@ describe("searchTexts（三形态统一匹配，89-D）", () => {
 			spec("长时程", 10, 100),
 			spec("增强", 40, 100),
 		]);
-		const { hits } = searchTexts(7, lines.map((l) => l.text), "长时程增强");
+		const { hits } = searchTexts(
+			7,
+			lines.map((l) => l.text),
+			"长时程增强",
+		);
 		expect(hits).toHaveLength(1);
 		expect(hits[0].page).toBe(7);
 	});

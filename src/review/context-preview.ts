@@ -69,7 +69,10 @@ export class ContextPreviewRenderer {
 				return; // 渲染期间视图已翻页重绘——丢弃
 			}
 			const wrap = container.createDiv({ cls: "marinmind-review-context" });
-			wrap.createDiv({ cls: "marinmind-review-context-label", text: `📍 原文上下文 · 第 ${page} 页` });
+			wrap.createDiv({
+				cls: "marinmind-review-context-label",
+				text: `📍 原文上下文 · 第 ${page} 页`,
+			});
 			wrap.appendChild(canvas);
 			// 71 点击缩略图跳原文：openCardSource 统一入口（精确定位 + 闪烁高亮），
 			// title 提示可点（CSS .marinmind-review-context 挂 cursor/hover 态）

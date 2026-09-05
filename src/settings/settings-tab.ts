@@ -22,6 +22,10 @@ import {
 	isTranslateLangCode,
 } from "../translate/translate-engine";
 import { DEFAULT_OCR_LANGS, OCR_LANGUAGES, isOcrLangs } from "../ocr/ocr-text";
+import { AiPresetModal } from "../ai/ai-preset-modal";
+import { AiCustomPromptModal } from "../ai/ai-custom-prompt-modal";
+import { sanitizeAiCustomPrompts, sanitizeAiPresets } from "../ai/ai-provider";
+import { testAiConnection } from "../ai/ai-service";
 
 /** R3（W-14）：路径/凭据输入关拼写检查与自动填充——防红线误报与密码管理器误触发 */
 function noAssist(text: TextComponent): void {
@@ -39,7 +43,10 @@ export class MarinMindSettingTab extends PluginSettingTab {
 	private pendingDataDir: string;
 	private dataDirError: string | null = null;
 
-	constructor(app: App, private readonly plugin: MarinMindPlugin) {
+	constructor(
+		app: App,
+		private readonly plugin: MarinMindPlugin,
+	) {
 		super(app, plugin);
 		this.pendingDataDir = plugin.settings.dataDir;
 	}
@@ -55,6 +62,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		this.renderReaderSection(containerEl);
 		this.renderOcrSection(containerEl);
 		this.renderTranslateSection(containerEl);
+		this.renderAiSection(containerEl);
 		this.renderReviewSection(containerEl);
 	}
 
@@ -87,7 +95,9 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("主页主题")
-			.setDesc("Linear 深色为项目默认风格；浅色为 Linear 浅色变体（㊸）；「跟随 Obsidian 主题」则随当前亮/暗色主题变化。均立即生效。")
+			.setDesc(
+				"Linear 深色为项目默认风格；浅色为 Linear 浅色变体（㊸）；「跟随 Obsidian 主题」则随当前亮/暗色主题变化。均立即生效。",
+			)
 			.addDropdown((dropdown) => {
 				// 选项值直接用存储值（dark/light/auto）——存量 data.json 仅有 dark/auto，均仍合法零迁移
 				dropdown
@@ -112,9 +122,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 	private renderDataSection(containerEl: HTMLElement): void {
 		containerEl.createEl("h2", { text: "数据存储" });
 
-		const setting = new Setting(containerEl)
-			.setName("数据目录")
-			.setDesc(this.dataDirDesc());
+		const setting = new Setting(containerEl).setName("数据目录").setDesc(this.dataDirDesc());
 		let migrateButton: ButtonComponent | undefined;
 		setting.addText((text) => {
 			noAssist(text); // R3（W-14）：路径输入
@@ -130,7 +138,9 @@ export class MarinMindSettingTab extends PluginSettingTab {
 					setting.descEl.textContent = result.reason;
 					setting.descEl.style.color = "var(--text-error)";
 				}
-				migrateButton?.setDisabled(!result.ok || result.normalized === this.plugin.settings.dataDir);
+				migrateButton?.setDisabled(
+					!result.ok || result.normalized === this.plugin.settings.dataDir,
+				);
 			});
 		});
 		new Setting(containerEl)
@@ -140,13 +150,18 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				migrateButton = button
 					.setButtonText("应用并迁移数据…")
 					.setCta()
-					.setDisabled(this.pendingDataDir === this.plugin.settings.dataDir || this.dataDirError !== null)
+					.setDisabled(
+						this.pendingDataDir === this.plugin.settings.dataDir ||
+							this.dataDirError !== null,
+					)
 					.onClick(() => void migrateDataDir(this.plugin, this.pendingDataDir));
 			});
 
 		new Setting(containerEl)
 			.setName("文档管理")
-			.setDesc("查看全部文档记录与失联状态，重关联失联文档（卡片与复习进度保留）或清理无用记录。")
+			.setDesc(
+				"查看全部文档记录与失联状态，重关联失联文档（卡片与复习进度保留）或清理无用记录。",
+			)
 			.addButton((button) =>
 				button.setButtonText("打开文档管理面板").onClick(() => {
 					new DocumentManagerModal(this.app, this.plugin).open();
@@ -160,32 +175,32 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("划选工具栏")
-			.setDesc("选中文字后弹出浮动工具栏（色点摘录 / 线型 / 翻译 / 复制 / 书签 / 搜索）；关闭后恢复划选松开即直接建卡。")
+			.setDesc(
+				"选中文字后弹出浮动工具栏（色点摘录 / 线型 / 翻译 / 复制 / 书签 / 搜索）；关闭后恢复划选松开即直接建卡。",
+			)
 			.addToggle((toggle) => {
-				toggle
-					.setValue(this.plugin.settings.selectionToolbar)
-					.onChange(async (value) => {
-						this.plugin.settings.selectionToolbar = value;
-						await this.plugin.saveData({ ...this.plugin.settings });
-					});
+				toggle.setValue(this.plugin.settings.selectionToolbar).onChange(async (value) => {
+					this.plugin.settings.selectionToolbar = value;
+					await this.plugin.saveData({ ...this.plugin.settings });
+				});
 			});
 
 		new Setting(containerEl)
 			.setName("文字摘录线型")
-			.setDesc("新建文字摘录的高亮形态（下划线 / 波浪线 / 删除线）；已有卡片点击高亮块菜单「线型…」单独修改。")
+			.setDesc(
+				"新建文字摘录的高亮形态（下划线 / 波浪线 / 删除线）；已有卡片点击高亮块菜单「线型…」单独修改。",
+			)
 			.addDropdown((dropdown) => {
 				for (const style of LINE_STYLES) {
 					dropdown.addOption(style, LINE_STYLE_LABELS[style]);
 				}
-				dropdown
-					.setValue(this.plugin.settings.excerptLineStyle)
-					.onChange((value) => {
-						if (!isLineStyle(value)) {
-							return;
-						}
-						this.plugin.settings.excerptLineStyle = value;
-						void this.plugin.saveData({ ...this.plugin.settings });
-					});
+				dropdown.setValue(this.plugin.settings.excerptLineStyle).onChange((value) => {
+					if (!isLineStyle(value)) {
+						return;
+					}
+					this.plugin.settings.excerptLineStyle = value;
+					void this.plugin.saveData({ ...this.plugin.settings });
+				});
 			});
 	}
 
@@ -220,12 +235,10 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				"区域摘录工具下框选松开即自动 OCR（免去二次点菜单识别）。默认关：首次使用会静默联网下载引擎，且连续摘录会被逐框识别等待打断。仅桌面端 PDF 文档生效。",
 			)
 			.addToggle((toggle) => {
-				toggle
-					.setValue(this.plugin.settings.ocrOnAreaExcerpt)
-					.onChange(async (value) => {
-						this.plugin.settings.ocrOnAreaExcerpt = value;
-						await this.plugin.saveData({ ...this.plugin.settings });
-					});
+				toggle.setValue(this.plugin.settings.ocrOnAreaExcerpt).onChange(async (value) => {
+					this.plugin.settings.ocrOnAreaExcerpt = value;
+					await this.plugin.saveData({ ...this.plugin.settings });
+				});
 			});
 
 		new Setting(containerEl)
@@ -234,12 +247,10 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				"OCR 识别成功后自动翻译识别文字，并把译文存为原文正下方的留白卡（目标语言与引擎跟随「翻译」节设置）；翻译失败不影响已识别的文字。",
 			)
 			.addToggle((toggle) => {
-				toggle
-					.setValue(this.plugin.settings.ocrAutoTranslate)
-					.onChange(async (value) => {
-						this.plugin.settings.ocrAutoTranslate = value;
-						await this.plugin.saveData({ ...this.plugin.settings });
-					});
+				toggle.setValue(this.plugin.settings.ocrAutoTranslate).onChange(async (value) => {
+					this.plugin.settings.ocrAutoTranslate = value;
+					await this.plugin.saveData({ ...this.plugin.settings });
+				});
 			});
 
 		// 84-E 照片入库压缩：缩放 + WebP 转码省库体积（GIF/SVG 与小图不受影响）
@@ -249,12 +260,10 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				"超 300KB 的照片在保存为摘录卡片前，先缩放到最长边 2560px 并转为 WebP（画质 0.85，肉眼无损），显著减小库体积；GIF、SVG 与小图原样保留。",
 			)
 			.addToggle((toggle) => {
-				toggle
-					.setValue(this.plugin.settings.photoCompress)
-					.onChange(async (value) => {
-						this.plugin.settings.photoCompress = value;
-						await this.plugin.saveData({ ...this.plugin.settings });
-					});
+				toggle.setValue(this.plugin.settings.photoCompress).onChange(async (value) => {
+					this.plugin.settings.photoCompress = value;
+					await this.plugin.saveData({ ...this.plugin.settings });
+				});
 			});
 	}
 
@@ -314,7 +323,9 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
-					text.setPlaceholder("APP ID").setValue(this.plugin.settings.translateBaiduAppid);
+					text.setPlaceholder("APP ID").setValue(
+						this.plugin.settings.translateBaiduAppid,
+					);
 					text.onChange((value) => {
 						this.plugin.settings.translateBaiduAppid = value.trim();
 						void this.plugin.saveData({ ...this.plugin.settings });
@@ -338,7 +349,9 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
-					text.setPlaceholder("应用 ID（appKey）").setValue(this.plugin.settings.translateYoudaoAppid);
+					text.setPlaceholder("应用 ID（appKey）").setValue(
+						this.plugin.settings.translateYoudaoAppid,
+					);
 					text.onChange((value) => {
 						this.plugin.settings.translateYoudaoAppid = value.trim();
 						void this.plugin.saveData({ ...this.plugin.settings });
@@ -346,7 +359,9 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				})
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
-					text.setPlaceholder("应用密钥").setValue(this.plugin.settings.translateYoudaoAppSecret);
+					text.setPlaceholder("应用密钥").setValue(
+						this.plugin.settings.translateYoudaoAppSecret,
+					);
 					text.onChange((value) => {
 						this.plugin.settings.translateYoudaoAppSecret = value.trim();
 						void this.plugin.saveData({ ...this.plugin.settings });
@@ -371,6 +386,169 @@ export class MarinMindSettingTab extends PluginSettingTab {
 					});
 				});
 		}
+	}
+
+	/** AI（96）：模型预设（OpenAI 兼容端点）/ 测试连接 / 采样与流式 / 上下文预算 / 用量 */
+	private renderAiSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "AI" });
+
+		const presets = sanitizeAiPresets(this.plugin.settings.aiPresets);
+		const activePreset = presets.find((p) => p.id === this.plugin.settings.aiActivePresetId);
+		new Setting(containerEl)
+			.setName("模型预设")
+			.setDesc(
+				activePreset
+					? `当前启用「${activePreset.name}」（${activePreset.model}）。凭据明文存于插件数据文件，请勿在共享库中使用。`
+					: "未启用——AI 功能需先添加并启用一个模型预设。支持 OpenAI 兼容端点（DeepSeek / 智谱 / OpenAI / oneapi 系中转站等）。",
+			)
+			.addDropdown((dropdown) => {
+				dropdown.addOption("", "未启用");
+				for (const preset of presets) {
+					dropdown.addOption(preset.id, preset.name);
+				}
+				dropdown.setValue(this.plugin.settings.aiActivePresetId).onChange((value) => {
+					this.plugin.settings.aiActivePresetId = value;
+					void this.plugin.saveData({ ...this.plugin.settings });
+					// desc 与测试连接钮状态随启用态变化：整页重建（镜像翻译引擎切换先例）
+					this.display();
+				});
+			})
+			.addButton((button) =>
+				button.setButtonText("管理预设…").onClick(() => {
+					new AiPresetModal(this.app, this.plugin, () => this.display()).open();
+				}),
+			);
+
+		// 测试连接：max_tokens=1 的 ping（未启用时按钮禁用；成功 Notice 带模型名）
+		new Setting(containerEl)
+			.setName("测试连接")
+			.setDesc("向当前启用预设发送一条最小请求，验证地址、密钥与模型名可用。")
+			.addButton((button) => {
+				button
+					.setButtonText("测试连接")
+					.setDisabled(!activePreset)
+					.onClick(async () => {
+						button.setDisabled(true).setButtonText("测试中…");
+						try {
+							const model = await testAiConnection(this.plugin.settings);
+							new Notice(`AI 连接成功：模型 ${model}`);
+						} catch (err) {
+							console.error("[MarinMind] AI 测试连接失败", err);
+							new Notice(
+								`AI 连接失败：${err instanceof Error ? err.message : String(err)}`,
+							);
+						} finally {
+							button.setDisabled(false).setButtonText("测试连接");
+						}
+					});
+			});
+
+		// 温度（96）：浮点输入 + 行内红字校验（镜像复习节数字校验先例）
+		const tempDesc =
+			"采样温度（0-2，默认 0.3）：越低越确定、越高越发散；制卡/整理等结构化场景建议保持低值。";
+		const tempSetting = new Setting(containerEl).setName("采样温度").setDesc(tempDesc);
+		tempSetting.addText((text) => {
+			text.inputEl.type = "number";
+			text.inputEl.setAttribute("inputmode", "decimal");
+			text.inputEl.setAttribute("step", "0.1");
+			text.setValue(String(this.plugin.settings.aiTemperature)).onChange((value) => {
+				const n = Number(value);
+				const ok = Number.isFinite(n) && n >= 0 && n <= 2;
+				tempSetting.descEl.textContent = ok
+					? tempDesc
+					: "采样温度需为 0-2 之间的数值（默认 0.3）";
+				tempSetting.descEl.style.color = ok ? "" : "var(--text-error)";
+				if (!ok) {
+					return;
+				}
+				this.plugin.settings.aiTemperature = n;
+				void this.plugin.saveData({ ...this.plugin.settings });
+			});
+		});
+
+		new Setting(containerEl)
+			.setName("流式输出")
+			.setDesc(
+				"开启（默认）逐字流式显示 AI 回复；个别自建网关或移动端不支持流式时自动降级整包返回。「关闭」则始终整包返回（最稳但无逐字效果）。",
+			)
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption("auto", "开启（自动降级）")
+					.addOption("off", "关闭（始终整包）")
+					.setValue(this.plugin.settings.aiStream)
+					.onChange((value) => {
+						this.plugin.settings.aiStream = value === "off" ? "off" : "auto";
+						void this.plugin.saveData({ ...this.plugin.settings });
+					});
+			});
+
+		// 上下文预算（96）：文档问答/摘要的分块裁剪上限
+		const budgetDesc =
+			"单次请求上下文 token 预算（2000-200000，默认 24000）：文档问答与摘要按此裁剪送入的内容量（估算值，中文约一字一 token）。";
+		const budgetSetting = new Setting(containerEl)
+			.setName("上下文 token 预算")
+			.setDesc(budgetDesc);
+		budgetSetting.addText((text) => {
+			text.inputEl.type = "number";
+			text.inputEl.setAttribute("inputmode", "numeric");
+			text.setValue(String(this.plugin.settings.aiMaxContextTokens)).onChange((value) => {
+				const n = Math.round(Number(value));
+				const ok = Number.isFinite(n) && n >= 2000 && n <= 200000;
+				budgetSetting.descEl.textContent = ok
+					? budgetDesc
+					: "上下文 token 预算需为 2000-200000 的整数（默认 24000）";
+				budgetSetting.descEl.style.color = ok ? "" : "var(--text-error)";
+				if (!ok) {
+					return;
+				}
+				this.plugin.settings.aiMaxContextTokens = n;
+				void this.plugin.saveData({ ...this.plugin.settings });
+			});
+		});
+
+		// 自定义指令（97）：划选工具栏 AI 菜单的自定义项管理
+		const customPrompts = sanitizeAiCustomPrompts(this.plugin.settings.aiCustomPrompts);
+		new Setting(containerEl)
+			.setName("自定义 AI 指令")
+			.setDesc(
+				customPrompts.length > 0
+					? `已有 ${customPrompts.length} 条（${customPrompts.map((p) => p.label).join("、")}），出现在划选工具栏的 AI 菜单里。`
+					: "添加后出现在划选工具栏的 AI 菜单里（如「举例说明」「出 3 道练习题」）。",
+			)
+			.addButton((button) =>
+				button.setButtonText("管理指令…").onClick(() => {
+					new AiCustomPromptModal(this.app, this.plugin, () => this.display()).open();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("AI 制卡自动转闪卡")
+			.setDesc("AI 生成的卡片默认直接进入复习队列（可在制卡预览中逐批调整）。")
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.aiAutoFlashcard).onChange(async (value) => {
+					this.plugin.settings.aiAutoFlashcard = value;
+					await this.plugin.saveData({ ...this.plugin.settings });
+				});
+			});
+
+		// 用量展示（96）：请求次数与累计 token（流式为估算值），只读 + 清零
+		const usage = this.plugin.settings.aiUsage;
+		new Setting(containerEl)
+			.setName("累计用量")
+			.setDesc(
+				`请求 ${usage.requests} 次 · 输入 ${usage.promptTokens.toLocaleString()} · 输出 ${usage.completionTokens.toLocaleString()} token（流式请求为估算值）。`,
+			)
+			.addButton((button) =>
+				button.setButtonText("清零").onClick(() => {
+					this.plugin.settings.aiUsage = {
+						requests: 0,
+						promptTokens: 0,
+						completionTokens: 0,
+					};
+					void this.plugin.saveData({ ...this.plugin.settings });
+					this.display();
+				}),
+			);
 	}
 
 	/** 复习（65）：批次张数与每日新卡上限（68 起消费——due 分批与新卡混排） */
@@ -400,7 +578,9 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		const newPerDayDesc =
 			"每天最多引入多少张新闪卡（0-999，0 = 不限，默认 0）。开启后新卡排在到期复习卡之后，当日已考新卡计入配额；适合控制新知识引入速度。";
-		const newPerDaySetting = new Setting(containerEl).setName("每日新卡上限").setDesc(newPerDayDesc);
+		const newPerDaySetting = new Setting(containerEl)
+			.setName("每日新卡上限")
+			.setDesc(newPerDayDesc);
 		newPerDaySetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.inputEl.setAttribute("inputmode", "numeric");
@@ -418,6 +598,22 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				void this.plugin.saveData({ ...this.plugin.settings });
 			});
 		});
+
+		// 103 调度算法：SM-2 / FSRS-4.5 切换（即时生效；SM-2 存量卡切 fsrs 后
+		// 首次评分惰性迁移记忆状态，切回零成本——双向可退）
+		new Setting(containerEl)
+			.setName("调度算法")
+			.setDesc(
+				"SM-2（Anki 简化版，默认）或 FSRS-4.5（记忆稳定性/难度模型，间隔更平滑）。切换即时生效；切换只影响之后的评分，已算出的到期时间不变。",
+			)
+			.addDropdown((drop) => {
+				drop.addOption("sm2", "SM-2（Anki 简化版）");
+				drop.addOption("fsrs", "FSRS-4.5");
+				drop.setValue(this.plugin.settings.scheduler).onChange((value) => {
+					this.plugin.settings.scheduler = value === "fsrs" ? "fsrs" : "sm2";
+					void this.plugin.saveData({ ...this.plugin.settings });
+				});
+			});
 	}
 
 	private dataDirDesc(): string {
@@ -432,7 +628,9 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("备份目录")
-			.setDesc(".marginpkg 导出落点。vault 内相对路径或本机绝对路径（仅桌面）；不影响已导出的历史备份。")
+			.setDesc(
+				".marginpkg 导出落点。vault 内相对路径或本机绝对路径（仅桌面）；不影响已导出的历史备份。",
+			)
 			.addText((text) => {
 				noAssist(text); // R3（W-14）：路径输入
 				text.setValue(this.plugin.settings.backupDir).onChange((value) => {

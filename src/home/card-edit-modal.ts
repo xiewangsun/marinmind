@@ -17,6 +17,8 @@ export class CardEditModal extends Modal {
 		private readonly card: Card,
 		/** 保存成功回调（拿到最新卡快照；媒体预览弹窗用于同步宿主缓存与重渲染） */
 		private readonly onSaved?: (updated: Card) => void,
+		/** 批注预填（97 AI 补充解释「填入批注」：AI 结果经人手确认后落库） */
+		private readonly initialNote?: string,
 	) {
 		super(app);
 	}
@@ -35,7 +37,8 @@ export class CardEditModal extends Modal {
 		const note = noteLabel.createEl("textarea");
 		note.rows = 4;
 		note.placeholder = "复习正面的问题（留空则用摘录内容）";
-		note.value = this.card.note ?? "";
+		// 97：AI 补充解释预填优先（人手确认/修改后保存）；常规路径用卡片现值
+		note.value = this.initialNote ?? this.card.note ?? "";
 
 		// 85-D 摘录只读块：OCR/划选文字存 excerptText，弹窗此前只读写
 		// title/note——用户"看不到 OCR 识别文字"。只读展示（与节点编辑器同款；

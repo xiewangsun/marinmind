@@ -108,7 +108,10 @@ describe("备份 zip 组包/解包（v2 markdown）", () => {
 	});
 
 	it("version 高于当前拒绝", () => {
-		const higher = buildBackupZip(sampleContent(), sampleManifest({ version: BACKUP_VERSION + 1 }));
+		const higher = buildBackupZip(
+			sampleContent(),
+			sampleManifest({ version: BACKUP_VERSION + 1 }),
+		);
 		expect(() => parseBackupZip(higher)).toThrow(/更新版本/);
 	});
 
@@ -162,7 +165,9 @@ describe("v1 旧包解包（SQLite 形态，㉚ 兼容导入）", () => {
 		const onlyDb = zipSync({ "marinmind.db": new Uint8Array([1]) });
 		expect(() => parseLegacyBackupZip(onlyDb)).toThrow(/manifest/);
 
-		const noDb = zipSync({ "manifest.json": strToU8(JSON.stringify(sampleManifest({ version: 1 }))) });
+		const noDb = zipSync({
+			"manifest.json": strToU8(JSON.stringify(sampleManifest({ version: 1 }))),
+		});
 		expect(() => parseLegacyBackupZip(noDb)).toThrow(/marinmind\.db/);
 
 		// v2 包（无 db 条目）走 legacy 解析器 → 同样报缺 db 条目
