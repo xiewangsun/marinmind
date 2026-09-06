@@ -3,7 +3,7 @@ import type MarinMindPlugin from "../main";
 import type { Card, DocRect } from "../types";
 import { excerptCropRect, occlusionBounds, snapshotImgSize } from "./rect-utils";
 import { paintCardHighlights, pixelRect } from "./region-snapshot";
-import { acquirePdf, pdfCacheKey, type PdfHandle } from "./pdf-cache";
+import { acquirePdf, pdfCacheKey, retainPdf, type PdfHandle } from "./pdf-cache";
 import { readExternalBinary } from "../storage/external-file";
 import { docExtOf, isAbsoluteFsPath } from "../storage/paths";
 import { EXCERPT_LABELS } from "../home/home-data";
@@ -167,13 +167,20 @@ async function renderPageCrop(
 	}
 	let handle: PdfHandle | null = null;
 	try {
-		// 路径双语义（㉞）：库外绝对路径桌面 fs 直读；库内经 vault（失联抛错走 catch 回退）
-		const buf = isAbsoluteFsPath(doc.filePath)
-			? await readExternalBinary(doc.filePath)
-			: await plugin.app.vault.readBinary(
-					plugin.app.vault.getAbstractFileByPath(doc.filePath) as TFile,
-				);
-		handle = await acquirePdf(pdfCacheKey(doc.filePath), buf);
+		// 112 提速：暖窗命中（60s 内解析过同书，pdf-cache 空闲保留）先借引用——
+		// 跳过整份字节读取与重新解析（冷首开大文件的秒级开销）；未命中才读字节
+		// 走 acquirePdf（byteLength 比对与替换语义不变）
+		const cacheKey = pdfCacheKey(doc.filePath);
+		handle = retainPdf(cacheKey);
+		if (!handle) {
+			// 路径双语义（㉞）：库外绝对路径桌面 fs 直读；库内经 vault（失联抛错走 catch 回退）
+			const buf = isAbsoluteFsPath(doc.filePath)
+				? await readExternalBinary(doc.filePath)
+				: await plugin.app.vault.readBinary(
+						plugin.app.vault.getAbstractFileByPath(doc.filePath) as TFile,
+					);
+			handle = await acquirePdf(cacheKey, buf);
+		}
 		const base = await handle.doc.getPageSize(page);
 		// 110 area/lasso 参照文字摘录的显示范围：context 档裁剪窗口（页比例余量 +
 		// 文字量级最小窗口）；text/blank 主路径不传——窗口量纲与现状一致零回归

@@ -298,9 +298,16 @@ export class CardPreviewModal extends Modal {
 		// 111 与复习统一：area/lasso 页裁剪优先（preferCrop，110 context 档窗口
 		// ——显示范围参照文字摘录）；此前走附件快照（紧贴区域的窄图，用户反馈
 		// 主页-卡片显示区域偏窄）。handwriting/photo 由 canPreferCrop 守卫不受影响。
+		// 112 感知提速：出图前先占位——冷首开要读文件+解析+渲染（数百毫秒到秒级），
+		// 暖窗命中时占位一闪而过，无突兀感
+		const loading = host.createDiv({
+			cls: "marinmind-card-preview-loading",
+			text: "摘录图加载中…",
+		});
 		const result = await renderExcerptVisual(this.plugin, this.card, host, {
 			preferCrop: true,
 		});
+		loading.remove();
 		if (result.objectUrl) {
 			this.objectUrl = result.objectUrl;
 		}

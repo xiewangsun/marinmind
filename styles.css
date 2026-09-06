@@ -31,8 +31,18 @@ body.theme-light {
    Tab 导航时呈现（鼠标点击不触发，不打扰指针用户）。两条选择器分别覆盖
    「自身带 marinmind 类的控件」与「marinmind 容器内的控件」，特异性 (0,3,1)
    稳压既有 outline 覆盖（如主页搜索框三祖先 (0,3,0) 的 outline:none） */
-body :is(button, input, textarea, select, [role="button"], [tabindex])[class*="marinmind"]:focus-visible,
-body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], [tabindex]):focus-visible {
+body
+	:is(
+		button,
+		input,
+		textarea,
+		select,
+		[role="button"],
+		[tabindex]
+	)[class*="marinmind"]:focus-visible,
+body
+	[class*="marinmind"]
+	:is(button, input, textarea, select, [role="button"], [tabindex]):focus-visible {
 	outline: 2px solid var(--text-accent);
 	outline-offset: 1px;
 }
@@ -388,61 +398,61 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
    pink 统一 #d96a9c；line 色与 highlight-colors.ts 的 line 字段同值
    （canvas 描边是另一条正当通道，两处同值即视觉单源） */
 :is(
-		.marinmind-excerpt-highlight,
-		.marinmind-drag-rect,
-		.marinmind-lasso-preview,
-		.marinmind-mm-node-head,
-		.marinmind-drag-ghost-color,
-		.marinmind-tool-color-dot,
-		.marinmind-home-ink-dot,
-		.marinmind-card-preview,
-		.marinmind-review-card
-	)[data-color="yellow"] {
+	.marinmind-excerpt-highlight,
+	.marinmind-drag-rect,
+	.marinmind-lasso-preview,
+	.marinmind-mm-node-head,
+	.marinmind-drag-ghost-color,
+	.marinmind-tool-color-dot,
+	.marinmind-home-ink-dot,
+	.marinmind-card-preview,
+	.marinmind-review-card
+)[data-color="yellow"] {
 	--mm-hl-line: rgba(217, 169, 22, 0.95);
 	--mm-hl-tint: rgba(232, 197, 58, 0.2);
 }
 
 :is(
-		.marinmind-excerpt-highlight,
-		.marinmind-drag-rect,
-		.marinmind-lasso-preview,
-		.marinmind-mm-node-head,
-		.marinmind-drag-ghost-color,
-		.marinmind-tool-color-dot,
-		.marinmind-home-ink-dot,
-		.marinmind-card-preview,
-		.marinmind-review-card
-	)[data-color="green"] {
+	.marinmind-excerpt-highlight,
+	.marinmind-drag-rect,
+	.marinmind-lasso-preview,
+	.marinmind-mm-node-head,
+	.marinmind-drag-ghost-color,
+	.marinmind-tool-color-dot,
+	.marinmind-home-ink-dot,
+	.marinmind-card-preview,
+	.marinmind-review-card
+)[data-color="green"] {
 	--mm-hl-line: rgba(90, 171, 90, 0.95);
 	--mm-hl-tint: rgba(90, 171, 90, 0.2);
 }
 
 :is(
-		.marinmind-excerpt-highlight,
-		.marinmind-drag-rect,
-		.marinmind-lasso-preview,
-		.marinmind-mm-node-head,
-		.marinmind-drag-ghost-color,
-		.marinmind-tool-color-dot,
-		.marinmind-home-ink-dot,
-		.marinmind-card-preview,
-		.marinmind-review-card
-	)[data-color="blue"] {
+	.marinmind-excerpt-highlight,
+	.marinmind-drag-rect,
+	.marinmind-lasso-preview,
+	.marinmind-mm-node-head,
+	.marinmind-drag-ghost-color,
+	.marinmind-tool-color-dot,
+	.marinmind-home-ink-dot,
+	.marinmind-card-preview,
+	.marinmind-review-card
+)[data-color="blue"] {
 	--mm-hl-line: rgba(74, 144, 217, 0.95);
 	--mm-hl-tint: rgba(74, 144, 217, 0.2);
 }
 
 :is(
-		.marinmind-excerpt-highlight,
-		.marinmind-drag-rect,
-		.marinmind-lasso-preview,
-		.marinmind-mm-node-head,
-		.marinmind-drag-ghost-color,
-		.marinmind-tool-color-dot,
-		.marinmind-home-ink-dot,
-		.marinmind-card-preview,
-		.marinmind-review-card
-	)[data-color="red"] {
+	.marinmind-excerpt-highlight,
+	.marinmind-drag-rect,
+	.marinmind-lasso-preview,
+	.marinmind-mm-node-head,
+	.marinmind-drag-ghost-color,
+	.marinmind-tool-color-dot,
+	.marinmind-home-ink-dot,
+	.marinmind-card-preview,
+	.marinmind-review-card
+)[data-color="red"] {
 	--mm-hl-line: rgba(217, 83, 79, 0.95);
 	--mm-hl-tint: rgba(217, 83, 79, 0.2);
 }
@@ -450,57 +460,57 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 /* 存量旧色相（teal/orange/purple/pink）：四色化前的卡继续按原色相渲染，
    仅样式随形态规则变为下划线/边框；新建卡不再产生这些值 */
 :is(
-		.marinmind-excerpt-highlight,
-		.marinmind-drag-rect,
-		.marinmind-lasso-preview,
-		.marinmind-mm-node-head,
-		.marinmind-drag-ghost-color,
-		.marinmind-home-ink-dot,
-		.marinmind-card-preview,
-		.marinmind-review-card
-	)[data-color="teal"] {
+	.marinmind-excerpt-highlight,
+	.marinmind-drag-rect,
+	.marinmind-lasso-preview,
+	.marinmind-mm-node-head,
+	.marinmind-drag-ghost-color,
+	.marinmind-home-ink-dot,
+	.marinmind-card-preview,
+	.marinmind-review-card
+)[data-color="teal"] {
 	--mm-hl-line: rgba(20, 184, 166, 0.95);
 	--mm-hl-tint: rgba(20, 184, 166, 0.2);
 }
 
 :is(
-		.marinmind-excerpt-highlight,
-		.marinmind-drag-rect,
-		.marinmind-lasso-preview,
-		.marinmind-mm-node-head,
-		.marinmind-drag-ghost-color,
-		.marinmind-home-ink-dot,
-		.marinmind-card-preview,
-		.marinmind-review-card
-	)[data-color="orange"] {
+	.marinmind-excerpt-highlight,
+	.marinmind-drag-rect,
+	.marinmind-lasso-preview,
+	.marinmind-mm-node-head,
+	.marinmind-drag-ghost-color,
+	.marinmind-home-ink-dot,
+	.marinmind-card-preview,
+	.marinmind-review-card
+)[data-color="orange"] {
 	--mm-hl-line: rgba(251, 146, 60, 0.95);
 	--mm-hl-tint: rgba(251, 146, 60, 0.2);
 }
 
 :is(
-		.marinmind-excerpt-highlight,
-		.marinmind-drag-rect,
-		.marinmind-lasso-preview,
-		.marinmind-mm-node-head,
-		.marinmind-drag-ghost-color,
-		.marinmind-home-ink-dot,
-		.marinmind-card-preview,
-		.marinmind-review-card
-	)[data-color="purple"] {
+	.marinmind-excerpt-highlight,
+	.marinmind-drag-rect,
+	.marinmind-lasso-preview,
+	.marinmind-mm-node-head,
+	.marinmind-drag-ghost-color,
+	.marinmind-home-ink-dot,
+	.marinmind-card-preview,
+	.marinmind-review-card
+)[data-color="purple"] {
 	--mm-hl-line: rgba(160, 98, 190, 0.95);
 	--mm-hl-tint: rgba(160, 98, 190, 0.2);
 }
 
 :is(
-		.marinmind-excerpt-highlight,
-		.marinmind-drag-rect,
-		.marinmind-lasso-preview,
-		.marinmind-mm-node-head,
-		.marinmind-drag-ghost-color,
-		.marinmind-home-ink-dot,
-		.marinmind-card-preview,
-		.marinmind-review-card
-	)[data-color="pink"] {
+	.marinmind-excerpt-highlight,
+	.marinmind-drag-rect,
+	.marinmind-lasso-preview,
+	.marinmind-mm-node-head,
+	.marinmind-drag-ghost-color,
+	.marinmind-home-ink-dot,
+	.marinmind-card-preview,
+	.marinmind-review-card
+)[data-color="pink"] {
 	--mm-hl-line: rgba(217, 106, 156, 0.95);
 	--mm-hl-tint: rgba(217, 106, 156, 0.2);
 }
@@ -1172,7 +1182,6 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	white-space: nowrap;
 	font-size: var(--font-ui-smaller);
 }
-
 
 .marinmind-review-pos {
 	color: var(--text-muted);
@@ -2636,6 +2645,17 @@ audio.marinmind-review-media {
 	background: var(--background-primary);
 }
 
+/* 112 出图占位：页裁剪冷首开（读文件 + 解析 + 渲染）期间先给反馈，
+   暖窗命中时一闪而过 */
+.marinmind-card-preview-loading {
+	min-height: 4em;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-faint);
+	font-size: var(--font-ui-smaller);
+}
+
 audio.marinmind-card-preview-media {
 	max-height: none;
 	width: 100%;
@@ -3825,7 +3845,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	color: var(--text-muted);
 	cursor: pointer;
 	user-select: none;
-	transition: background 0.1s, color 0.1s;
+	transition:
+		background 0.1s,
+		color 0.1s;
 }
 
 .marinmind-home-nav-item:hover {
@@ -3921,7 +3943,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	padding: 14px 16px;
-	transition: border-color 0.1s, background 0.1s;
+	transition:
+		border-color 0.1s,
+		background 0.1s;
 }
 
 .marinmind-home-stat.is-clickable {
@@ -4179,7 +4203,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	color: var(--text-muted);
 	cursor: pointer;
 	user-select: none;
-	transition: background 0.1s, color 0.1s;
+	transition:
+		background 0.1s,
+		color 0.1s;
 }
 
 .marinmind-home-folder:hover {
@@ -4246,7 +4272,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	font-size: 0.75rem;
 	cursor: pointer;
 	user-select: none;
-	transition: background 0.1s, color 0.1s;
+	transition:
+		background 0.1s,
+		color 0.1s;
 }
 
 .marinmind-home-folder-create:hover {
@@ -4435,7 +4463,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	color: var(--text-faint);
 	background: transparent;
 	cursor: pointer;
-	transition: background 0.1s, color 0.1s;
+	transition:
+		background 0.1s,
+		color 0.1s;
 }
 
 .marinmind-home-view-toggle-btn + .marinmind-home-view-toggle-btn {
@@ -4510,7 +4540,9 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	user-select: none;
-	transition: background 0.1s, border-color 0.1s;
+	transition:
+		background 0.1s,
+		border-color 0.1s;
 }
 
 .marinmind-home-doc-tile.is-clickable {
@@ -4734,10 +4766,30 @@ body.theme-light .marinmind-autoex-badge.is-body {
 }
 
 /* 五档色：仅透明度阶梯（不引入字面色，主题变量铁律——与主页分区注释约定同源） */
-.marinmind-stats-cell.lv1 { background: color-mix(in srgb, var(--interactive-accent) 25%, var(--background-modifier-border)); }
-.marinmind-stats-cell.lv2 { background: color-mix(in srgb, var(--interactive-accent) 50%, var(--background-modifier-border)); }
-.marinmind-stats-cell.lv3 { background: color-mix(in srgb, var(--interactive-accent) 75%, var(--background-modifier-border)); }
-.marinmind-stats-cell.lv4 { background: var(--interactive-accent); }
+.marinmind-stats-cell.lv1 {
+	background: color-mix(
+		in srgb,
+		var(--interactive-accent) 25%,
+		var(--background-modifier-border)
+	);
+}
+.marinmind-stats-cell.lv2 {
+	background: color-mix(
+		in srgb,
+		var(--interactive-accent) 50%,
+		var(--background-modifier-border)
+	);
+}
+.marinmind-stats-cell.lv3 {
+	background: color-mix(
+		in srgb,
+		var(--interactive-accent) 75%,
+		var(--background-modifier-border)
+	);
+}
+.marinmind-stats-cell.lv4 {
+	background: var(--interactive-accent);
+}
 
 .marinmind-stats-cell.is-future {
 	background: transparent;
