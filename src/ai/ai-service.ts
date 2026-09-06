@@ -13,15 +13,19 @@
 import { requestUrl } from "obsidian";
 import {
 	buildChatRequest,
+	estimatePromptTokens,
 	estimateTokens,
 	parseChatResponse,
 	parseSseDelta,
 	resolveAiPreset,
 	SseParser,
+	webSearchKind,
 	type AiPreset,
 	type AiUsage,
 	type ChatMessage,
 	type ChatSampleOptions,
+	type WebSearchKind,
+	type WebSource,
 } from "./ai-provider";
 
 /** sendChat 需要的设置字段子集（MarinMindSettings 结构性满足，免 service 依赖 settings 模块） */
@@ -34,6 +38,13 @@ export interface AiSettingsView {
 
 /** HTTP 状态 → 中文提示（AI 配置复杂度高于翻译，逐档明示排查出路） */
 function httpError(status: number): Error {
+	if (status === 400) {
+		// 104-C / 105：无错误体的 400 兜底——最常见的失败是模型能力不匹配
+		// （视觉：不支持图片输入；联网：不支持 web_search 工具/搜索参数）
+		return new Error(
+			"请求被服务端拒绝（HTTP 400）：若正在解释图片摘录，可能是当前模型不支持视觉输入，请在 设置 → AI 换用多模态模型（如 gpt-4o / glm-4v 系列）；若开启了联网搜索，请确认当前模型支持联网",
+		);
+	}
 	if (status === 401) {
 		return new Error("API Key 无效或已过期：请核对 设置 → AI 中的密钥");
 	}
@@ -69,6 +80,13 @@ async function raiseHttpError(status: number, readJson: () => Promise<unknown>):
 	throw httpError(status);
 }
 
+/** chat/chatStream 的联网搜索透传项（105）：webSearch 为已识别的厂商方式，
+ *  onSources 携带响应里提取到的联网来源（非流式一次、流式收尾一次） */
+export interface ChatExtras {
+	webSearch?: WebSearchKind;
+	onSources?: (sources: WebSource[]) => void;
+}
+
 /**
  * 非流式对话（requestUrl 绕 CORS）：返回完整回复文本；onUsage 携带精确用量
  * （estimated=false；无 usage 回传的中转站不上报）。
@@ -78,8 +96,9 @@ export async function chat(
 	messages: ChatMessage[],
 	sample: ChatSampleOptions,
 	onUsage?: (usage: AiUsage, estimated: boolean) => void,
+	extras?: ChatExtras,
 ): Promise<string> {
-	const spec = buildChatRequest(preset, messages, sample, false);
+	const spec = buildChatRequest(preset, messages, sample, false, extras?.webSearch);
 	let response: Awaited<ReturnType<typeof requestUrl>>;
 	try {
 		response = await requestUrl({
@@ -101,6 +120,9 @@ export async function chat(
 		if (parsed.usage) {
 			onUsage?.(parsed.usage, false);
 		}
+		if (parsed.sources.length > 0) {
+			extras?.onSources?.(parsed.sources);
+		}
 		return parsed.text;
 	} catch (err) {
 		console.error("[MarinMind] AI 响应解析失败", err);
@@ -117,12 +139,15 @@ export interface StreamCallbacks {
 	onUsage?: (usage: AiUsage, estimated: boolean) => void;
 	/** 流式不可用自动降级非流式时触发（调用方 Notice 一次） */
 	onDegraded?: () => void;
+	/** 联网来源回调（105）：流式收尾单次回调（累积去重后），与页 chip 同节奏 */
+	onSources?: (sources: WebSource[]) => void;
 }
 
 /**
  * 流式对话（fetch + SSE）：onDelta 逐段喂增量，返回完整文本。fetch 网络层
  * 异常（TypeError = CORS/断网特征）自动降级 chat 非流式重发——降级路径把
  * 完整文本作为单个增量喂给 onDelta，调用方 UI 无感切换。
+ * 联网来源（105）：各 chunk 的 sources 增量按 url 去重累积，流末单次回调。
  */
 export async function chatStream(
 	preset: AiPreset,
@@ -130,14 +155,22 @@ export async function chatStream(
 	sample: ChatSampleOptions,
 	cbs: StreamCallbacks,
 	signal?: AbortSignal,
+	extras?: ChatExtras,
 ): Promise<string> {
-	if (streamDegraded) {
-		// 已知不可流式：直接非流式，整包作为一个增量喂出（UI 无感）
-		const text = await chat(preset, messages, sample, cbs.onUsage);
+	const degrade = async (): Promise<string> => {
+		// 降级非流式重发：整包一个增量；来源经 chat 的 parseChatResponse 路径回传
+		const text = await chat(preset, messages, sample, cbs.onUsage, {
+			webSearch: extras?.webSearch,
+			onSources: cbs.onSources,
+		});
 		cbs.onDelta?.(text);
 		return text;
+	};
+	if (streamDegraded) {
+		// 已知不可流式：直接非流式，整包作为一个增量喂出（UI 无感）
+		return degrade();
 	}
-	const spec = buildChatRequest(preset, messages, sample, true);
+	const spec = buildChatRequest(preset, messages, sample, true, extras?.webSearch);
 	let response: Response;
 	try {
 		response = await fetch(spec.url, {
@@ -154,9 +187,7 @@ export async function chatStream(
 		console.error("[MarinMind] AI 流式请求失败，降级非流式", err);
 		streamDegraded = true;
 		cbs.onDegraded?.();
-		const text = await chat(preset, messages, sample, cbs.onUsage);
-		cbs.onDelta?.(text);
-		return text;
+		return degrade();
 	}
 	if (!response.ok) {
 		await raiseHttpError(response.status, () => response.json());
@@ -165,6 +196,9 @@ export async function chatStream(
 		// 无流式体（个别网关整包返回 200 + 非 SSE）：按整包文本兜底解析
 		const raw = await response.text();
 		const parsed = parseChatResponse(JSON.parse(raw));
+		if (parsed.sources.length > 0) {
+			cbs.onSources?.(parsed.sources);
+		}
 		cbs.onDelta?.(parsed.text);
 		return parsed.text;
 	}
@@ -172,6 +206,8 @@ export async function chatStream(
 	const decoder = new TextDecoder();
 	const parser = new SseParser();
 	let full = "";
+	const seenUrls = new Set<string>();
+	const sources: WebSource[] = [];
 	const emit = (payload: string): void => {
 		if (payload.trim() === "[DONE]") {
 			return; // 终止哨兵：OpenAI 兼容流的收尾标记
@@ -180,6 +216,15 @@ export async function chatStream(
 		if (delta.content) {
 			full += delta.content;
 			cbs.onDelta?.(delta.content);
+		}
+		if (delta.sources) {
+			// 来源可能分多个 chunk 到达（智谱搜索先行、perplexity 首 chunk）——累积去重
+			for (const s of delta.sources) {
+				if (!seenUrls.has(s.url)) {
+					seenUrls.add(s.url);
+					sources.push(s);
+				}
+			}
 		}
 	};
 	try {
@@ -202,11 +247,15 @@ export async function chatStream(
 		console.error("[MarinMind] AI 流中断", err);
 		throw new Error("AI 响应流中断，请重试", { cause: err });
 	}
+	// 联网来源流末单次回调（105）：UI 与页 chip 同节奏只渲染一次
+	if (sources.length > 0) {
+		cbs.onSources?.(sources);
+	}
 	// 流式无 usage 回传（stream_options 中转兼容性差不传）：估算上报
 	cbs.onUsage?.(
 		{
 			requests: 1,
-			promptTokens: estimateTokens(messages.map((m) => m.content).join("\n")),
+			promptTokens: estimatePromptTokens(messages),
 			completionTokens: estimateTokens(full),
 		},
 		true,
@@ -226,11 +275,17 @@ export interface SendChatOptions {
 	onDegraded?: () => void;
 	/** 用量上报（main 聚合入 settings.aiUsage） */
 	onUsage?: (usage: AiUsage, estimated: boolean) => void;
+	/** 开启联网搜索（105，仅 AI 助手用）：不支持的预设在此抛中文引导 */
+	webSearch?: boolean;
+	/** 联网来源回调（105）：非流式一次 / 流式收尾一次 */
+	onSources?: (sources: WebSource[]) => void;
 }
 
 /**
  * 功能层统一入口（96）：resolveAiPreset 守卫（未配置抛中文错）+ 按设置路由
  * 流式/非流式。所有 AI 功能都从这里进——单一入口保证守卫与温度一致。
+ * 105：webSearch 开启时识别厂商搜索方式，不支持联网的模型抛中文引导
+ * （视图层发送前已前置拦截，此路径为未来调用方的防御）。
  */
 export async function sendChat(
 	settings: AiSettingsView,
@@ -238,6 +293,19 @@ export async function sendChat(
 	opts: SendChatOptions = {},
 ): Promise<string> {
 	const preset = resolveAiPreset(settings);
+	let webSearch: WebSearchKind | undefined;
+	if (opts.webSearch) {
+		const kind = webSearchKind(preset);
+		if (!kind) {
+			throw new Error(
+				"当前模型不支持联网搜索：请到 设置 → AI 换用 GLM（glm-*）、gpt-4o-search-preview 或 sonar 系列模型",
+			);
+		}
+		webSearch = kind;
+	}
+	const extras: ChatExtras | undefined = opts.webSearch
+		? { webSearch, onSources: opts.onSources }
+		: undefined;
 	const temperature =
 		typeof settings.aiTemperature === "number" && Number.isFinite(settings.aiTemperature)
 			? Math.min(2, Math.max(0, settings.aiTemperature))
@@ -248,7 +316,7 @@ export async function sendChat(
 	};
 	const streamMode = settings.aiStream === "off" ? "off" : "auto";
 	if (streamMode === "off" || !opts.onDelta) {
-		return chat(preset, messages, sample, opts.onUsage);
+		return chat(preset, messages, sample, opts.onUsage, extras);
 	}
 	return chatStream(
 		preset,
@@ -256,6 +324,7 @@ export async function sendChat(
 		sample,
 		{ onDelta: opts.onDelta, onUsage: opts.onUsage, onDegraded: opts.onDegraded },
 		opts.signal,
+		extras,
 	);
 }
 

@@ -12,7 +12,7 @@ import { NodeSearchModal } from "./node-search-modal";
 import { deleteCardCascade, promptCardLinks } from "../home/card-actions";
 import { buildCardCopyText } from "../links/card-links";
 import { createViewModeBar } from "../ui/view-mode-bar";
-import { setIconSafe } from "../ui/icon-resolve";
+import { resolveIcon, setIconSafe } from "../ui/icon-resolve";
 import { isHiddenVaultDir, fsBasename, pageWordOf, docExtOf } from "../storage/paths";
 import { readExternalBinary } from "../storage/external-file";
 import { acquirePdf, pdfCacheKey } from "../reader/pdf-cache";
@@ -40,6 +40,7 @@ import {
 	edgePath,
 	compareSiblings,
 	collapsedAncestorsOf,
+	centerViewportTransform,
 	effectiveBranchStyle,
 	fitViewportTransform,
 	frameRectFor,
@@ -551,7 +552,8 @@ export class MarinMindMindmapView extends ItemView {
 
 	/**
 	 * 一键自动布局：按各节点生效分支样式分层整列（layoutTree 纯函数）→
-	 * applyLayout 单事务写回 → 全量重拉 → 视口适配。
+	 * applyLayout 单事务写回 → 全量重拉 → 保持缩放居中复位（104-B：不再
+	 * 缩放适配，fit 收缩为显式「适配视图」动作）。
 	 * 覆盖全部节点手动位置（含折叠隐藏的子树），先确认再执行。
 	 */
 	private autoLayout(): void {
@@ -579,7 +581,7 @@ export class MarinMindMindmapView extends ItemView {
 					layoutTree(this.measuredNodes(), this.mapDefault),
 				);
 				this.loadMap(this.mapId);
-				this.fitToContent();
+				this.centerToContent();
 				this.commitUndo("自动布局");
 			},
 		).open();
@@ -705,12 +707,9 @@ export class MarinMindMindmapView extends ItemView {
 		new Notice(`已重做：${entry.label}`);
 	}
 
-	/** 视口适配：可见节点包围盒缩放并居中（折叠隐藏的子树不参与适配） */
-	private fitToContent(): void {
-		const vp = this.viewportEl;
-		if (!vp) {
-			return;
-		}
+	/** 可见节点包围盒（104-B 自 fitToContent 提出）：折叠隐藏的子树不参与；
+	 *  高度用 DOM 实测回退估值；无可见节点返回 null */
+	private visibleBBox(): { minX: number; minY: number; maxX: number; maxY: number } | null {
 		const visible = visibleNodes(this.nodes);
 		let minX = Infinity;
 		let minY = Infinity;
@@ -726,18 +725,41 @@ export class MarinMindMindmapView extends ItemView {
 			maxX = Math.max(maxX, n.x + NODE_WIDTH);
 			maxY = Math.max(maxY, n.y + h);
 		}
-		if (minX === Infinity) {
-			return; // 无可见节点
+		return minX === Infinity ? null : { minX, minY, maxX, maxY };
+	}
+
+	/** 视口适配（显式「适配视图」动作，104-B 起不再被自动布局隐式触发）：
+	 *  可见节点包围盒缩放并居中（折叠隐藏的子树不参与适配） */
+	private fitToContent(): void {
+		const vp = this.viewportEl;
+		const bbox = this.visibleBBox();
+		if (!vp || !bbox) {
+			return;
 		}
 		const rect = vp.getBoundingClientRect();
-		const t = fitViewportTransform(
-			{ minX, minY, maxX, maxY },
-			{ width: rect.width, height: rect.height },
-			40,
-		);
+		const t = fitViewportTransform(bbox, { width: rect.width, height: rect.height }, 40);
 		this.tx = t.tx;
 		this.ty = t.ty;
 		this.scale = t.scale;
+		this.applyTransform();
+	}
+
+	/** 布局后复位（104-B）：保持当前缩放，平移使可见包围盒居中——
+	 *  自动布局 / AI 整理收尾用，不再偷走用户的缩放档（fit 是显式动作） */
+	private centerToContent(): void {
+		const vp = this.viewportEl;
+		const bbox = this.visibleBBox();
+		if (!vp || !bbox) {
+			return;
+		}
+		const rect = vp.getBoundingClientRect();
+		const t = centerViewportTransform(
+			bbox,
+			{ width: rect.width, height: rect.height },
+			this.scale,
+		);
+		this.tx = t.tx;
+		this.ty = t.ty;
 		this.applyTransform();
 	}
 
@@ -834,7 +856,7 @@ export class MarinMindMindmapView extends ItemView {
 			attr: {
 				type: "button",
 				"aria-label": "更多操作",
-				title: "更多操作（添加卡片 / 新建文字卡片 / 分支样式 / 固定根 / 重命名 / 删除 / 导出 / 自动布局 / 目录建框架 / 撤销 / 重做 / 刷新）",
+				title: "更多操作（添加卡片 / 新建文字卡片 / 分支样式 / 固定根 / 重命名 / 删除 / 导出 / 自动布局 / 适配视图 / 目录建框架 / 撤销 / 重做 / 刷新）",
 			},
 		});
 		setIcon(this.headerOverflowBtn, "more-horizontal");
@@ -859,9 +881,10 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	/**
-	 * ⋯ 溢出菜单（89-B；90 批新增卡片组+导出，五组）：卡片（添加已有卡片/新建文字
-	 * 卡片，原头部 addAction 迁入）｜图（分支样式…/固定根）｜管理（重命名/删除脑图/
-	 * 导出）｜排版（自动布局/从文档目录建框架）｜历史（撤销/重做/刷新）。
+	 * ⋯ 溢出菜单（89-B；90 批新增卡片组+导出，五组；104-B 排版组加适配视图）：
+	 * 卡片（添加已有卡片/新建文字卡片，原头部 addAction 迁入）｜图（分支样式…/
+	 * 固定根）｜管理（重命名/删除脑图/导出）｜排版（自动布局/适配视图/从文档目录
+	 * 建框架）｜历史（撤销/重做/刷新）。
 	 * 图标+文字，Menu 即开即建，勾选/禁用态每次打开现读（mapDefault/fixedRootId/undoStack）。
 	 */
 	private openHeaderOverflowMenu(evt: MouseEvent): void {
@@ -923,6 +946,13 @@ export class MarinMindMindmapView extends ItemView {
 				.setTitle("自动布局")
 				.setIcon("layout-template")
 				.onClick(() => this.autoLayout()),
+		);
+		// 104-B 适配视图：布局不再隐式缩放适配后的显式出口（缩到全图可见并居中）
+		menu.addItem((mi) =>
+			mi
+				.setTitle("适配视图")
+				.setIcon(resolveIcon(["expand", "scan", "frame"]))
+				.onClick(() => this.fitToContent()),
 		);
 		menu.addItem((mi) =>
 			mi
@@ -3761,7 +3791,7 @@ export class MarinMindMindmapView extends ItemView {
 				layoutTree(this.measuredNodes(), this.mapDefault),
 			);
 			this.loadMap(mapId);
-			this.fitToContent();
+			this.centerToContent(); // 104-B 保持缩放居中（fit 是显式「适配视图」动作）
 			this.commitUndo("AI 整理");
 			new Notice(`AI 整理完成：新建 ${madeGroups} 个分组、归入 ${moved} 张卡片`, 5000);
 		} catch (err) {

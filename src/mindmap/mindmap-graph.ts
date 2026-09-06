@@ -1052,3 +1052,19 @@ export function fitViewportTransform(
 	const ty = (viewport.height - h * scale) / 2 - bbox.minY * scale;
 	return { tx, ty, scale };
 }
+
+/**
+ * 保持当前缩放居中（104-B）：世界包围盒中心映射到视口中心，只算平移不动 scale。
+ * 自动布局 / AI 整理后的复位用——布局重排节点位置但不偷走用户的缩放档
+ * （缩到全图可见的 fit 是显式「适配视图」动作，不再隐式触发）。
+ * 屏幕坐标 = 世界坐标 × scale + t，据此反解居中的 tx/ty。
+ */
+export function centerViewportTransform(
+	bbox: { minX: number; minY: number; maxX: number; maxY: number },
+	viewport: { width: number; height: number },
+	scale: number,
+): { tx: number; ty: number } {
+	const cx = (bbox.minX + bbox.maxX) / 2;
+	const cy = (bbox.minY + bbox.maxY) / 2;
+	return { tx: viewport.width / 2 - cx * scale, ty: viewport.height / 2 - cy * scale };
+}

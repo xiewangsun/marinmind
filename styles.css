@@ -54,19 +54,21 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 		outline-offset: 2px;
 	}
 
-	/* P1-c 翻面墨线展开：编排动效退静态（墨线常显，身份色信息保留） */
-	.marinmind-review-card::before {
+	/* P1-c 翻面墨色浮现：编排动效退静态（边框常显，身份色信息保留） */
+	.marinmind-review-card {
 		animation: none;
 	}
 }
 
 /* ===== PDF 阅读视图 ===== */
 
-/* ---- 顶栏合一（90 批）：隐藏 Obsidian 原生视图标题行，插件工具栏成为唯一顶栏。
-   标题（文件名/图名）并入工具行左侧；tab 栏标题走 getDisplayText 不受影响。
-   代价（用户已确认）：失去标题行右键菜单/拖拽把手/右上角更多选项入口 */
+/* ---- 顶栏合一（90 批阅读器/脑图、107 批复习）：隐藏 Obsidian 原生视图标题行，
+   插件工具栏成为唯一顶栏。标题（文件名/图名）并入工具行左侧；tab 栏标题走
+   getDisplayText 不受影响。代价（用户已确认）：失去标题行右键菜单/拖拽把手/
+   右上角更多选项入口 */
 .workspace-leaf-content[data-type="marinmind-reader"] .view-header,
-.workspace-leaf-content[data-type="marinmind-mindmap"] .view-header {
+.workspace-leaf-content[data-type="marinmind-mindmap"] .view-header,
+.workspace-leaf-content[data-type="marinmind-review"] .view-header {
 	display: none;
 }
 
@@ -1007,13 +1009,14 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	gap: 1em;
 }
 
-/* 出处/进度行（卡组批书名下沉）：[范围 chip] [出处段] [剩余 N 张]——flex 三段，
-   各段独立省略，整体不折行（R2（E2-18）长书名兜底语义保留） */
+/* 出处/进度段（107 顶栏合一：原独立 meta 行并入工具行中部，▶ 与撤销之间）：
+   [范围 chip] [出处段] [剩余 N 张]——flex 三段，各段独立省略，整体不折行
+   （R2（E2-18）长书名兜底语义保留） */
 .marinmind-review-meta {
 	display: flex;
 	align-items: center;
-	justify-content: center;
 	gap: 0.4em;
+	min-width: 0; /* 顶行拥挤时本段可压缩（按钮与 pos 不缩），内部逐段省略 */
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	white-space: nowrap;
@@ -1032,13 +1035,13 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	flex: none;
 }
 
-/* 顶部导航条（㉑）：◀ 第 i/N 张 ▶ …… ↗ 原文 —— 复习界面内切换卡片 */
+/* 顶部工具行（㉑ 起；107 顶栏合一单行）：列表 ◀ 第 i/N 张 ▶ [出处/进度段] …
+   撤销 翻译 ⋯管理 ↗ 原文 */
 .marinmind-review-topbar {
 	display: flex;
 	align-items: center;
 	gap: 6px;
-	/* R2（E2-04）：pos 固定 6.5em + 徽标 + 导航钮合计 min 约 400px，更窄窗格
-	   会连带根容器出横向滚动条——wrap 兜底 */
+	/* R2（E2-04）：极窄窗格兜底换行（正常宽度单行；出处段内部省略先于此触发） */
 	flex-wrap: wrap;
 }
 
@@ -1346,40 +1349,26 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 
 /* 卡片盒：正面摘录 +（翻面后）背面批注/出处 */
 .marinmind-review-card {
-	position: relative; /* P1-c 顶缘墨线 ::before 的定位锚（遮挡层就近挂 occlusion-stage 不受影响） */
 	background: var(--background-primary);
-	border: 1px solid var(--background-modifier-border);
+	/* 四缘等宽身份色边框（106 四缘化 + 107 等宽统一：原顶缘 3px 墨线 + 其余三边
+	   1px 粗细不一，107 起统一 1px 四边同色）：有色卡全边框走墨色；无色卡
+	   --mm-hl-line 缺失回落中性描边 */
+	border: 1px solid var(--mm-hl-line, var(--background-modifier-border));
 	border-radius: var(--radius-m, 8px);
 	padding: 2em;
 	min-height: 12em;
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
+	/* P1-c 编排时刻保留（107 改形态：顶缘墨线展开 → 墨色浮现）：翻面/换卡整体
+	   重渲染时边框墨色从透明 0.3s 浮现——全插件唯一的编排动效
+	   （reduced-motion 豁免见文件头全局块） */
+	animation: marinmind-ink-in 0.3s ease-out;
 }
 
-/* P1-c 墨色随卡走（签名元素收尾）：复习大卡顶缘 3px 墨线 = 卡片身份色
-   （cardBox 挂 data-color，--mm-hl-line 由摘录色令牌块提供）；翻面/评分
-   换卡整体重渲染时墨线从左 0.3s 展开——全插件唯一的编排时刻
-   （reduced-motion 豁免见文件头全局块） */
-.marinmind-review-card::before {
-	content: "";
-	position: absolute;
-	top: 0;
-	left: 0;
-	right: 0;
-	height: 3px;
-	border-radius: var(--radius-m, 8px) var(--radius-m, 8px) 0 0;
-	background: var(--mm-hl-line, var(--text-faint));
-	transform-origin: 0 50%;
-	animation: marinmind-ink-sweep 0.3s ease-out;
-}
-
-@keyframes marinmind-ink-sweep {
+@keyframes marinmind-ink-in {
 	from {
-		transform: scaleX(0);
-	}
-	to {
-		transform: scaleX(1);
+		border-color: transparent;
 	}
 }
 
@@ -1665,7 +1654,8 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	font-size: var(--font-ui-smaller);
 }
 
-/* 文字型动作按钮（再查一批 / 跳转原文） */
+/* 文字型动作链接（空屏/收尾屏：再查一批 / 考全部书籍 / 统计 / 错题总结、
+   遮挡条开关等；顶栏原「管理/原文」文字钮 105 后已改纯 icon nav-btn） */
 .marinmind-review-link {
 	background: none;
 	border: none;
@@ -1674,14 +1664,9 @@ body [class*="marinmind"] :is(button, input, textarea, select, [role="button"], 
 	font-size: var(--font-ui-smaller);
 	cursor: pointer;
 	padding: 0;
-	display: inline-flex; /* P2-1：arrow-up-right 图标 span 与文字 flex 排列 */
+	display: inline-flex;
 	align-items: center;
 	gap: 2px;
-}
-
-.marinmind-review-link-icon {
-	display: inline-flex;
-	flex: none;
 }
 
 .marinmind-review-link:hover {
@@ -3265,6 +3250,16 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	word-break: break-word;
 }
 
+/* 104-C 图片摘录缩略图（AI 补充解释弹窗原文区，无文字的图卡只显图） */
+.marinmind-tr-thumb {
+	display: block;
+	max-width: 100%;
+	max-height: 200px;
+	object-fit: contain;
+	border-radius: var(--radius-s);
+	margin-bottom: 6px;
+}
+
 .marinmind-tr-result {
 	min-height: 42px;
 }
@@ -3474,6 +3469,32 @@ body.theme-light .marinmind-autoex-badge.is-body {
 .marinmind-ai-chat-chip:hover {
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
+}
+
+/* 联网来源 chip（105）：URL 可能很长，截断省略；悬停 title 看全 */
+.marinmind-ai-chat-chip.is-link {
+	max-width: 160px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 来源行前置的 globe 小图标（105，与页 chip 区分） */
+.marinmind-ai-chat-webmark {
+	display: flex;
+	align-items: center;
+	color: var(--text-muted);
+}
+
+.marinmind-ai-chat-webmark .svg-icon {
+	width: 14px;
+	height: 14px;
+}
+
+/* 联网开关（105）：icon 按钮，is-on 反色高亮表开启态 */
+.marinmind-ai-chat-web.is-on {
+	color: var(--text-on-accent);
+	background: var(--interactive-accent);
 }
 
 .marinmind-ai-chat-foot {

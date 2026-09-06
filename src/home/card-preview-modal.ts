@@ -17,6 +17,7 @@ import {
 	promptCardEdit,
 	promptCardTags,
 } from "./card-actions";
+import { canCardAiComment } from "../ai/ai-prompts";
 import { ConfirmModal } from "../mindmap/confirm-modal";
 
 /**
@@ -26,7 +27,9 @@ import { ConfirmModal } from "../mindmap/confirm-modal";
  * （跳原文/编辑/复制链接三钮直放 + 低频动作收 ⋯ 菜单，MN3 式收敛）。
  *
  * 视觉三级回退（㊷ 起管线抽至 src/reader/excerpt-visual.ts，与复习遮挡正面共用）：
- * 1. 媒体附件（photo/audio/handwriting/area/lasso 的 excerptRef）；
+ * 1. 媒体附件（photo/audio/handwriting 的 excerptRef；111 起 area/lasso 页裁剪
+ *    优先、快照降为兜底——与复习卡同形态，110 context 档窗口显示范围参照
+ *    文字摘录）；
  * 2. 原文页裁剪（text/blank 卡走此路，带少量上下文）；
  * 3. 文本兜底（附件缺失且无 rects 的 photo/audio）。
  *
@@ -180,23 +183,25 @@ export class CardPreviewModal extends Modal {
 					promptCardDeck(this.app, this.plugin, this.freshCard());
 				}),
 		);
-		// 97 AI 评论：有摘录文字即可解释（与阅读器高亮菜单 card-actions 单源共享）
+		// 翻译/AI 制卡：有摘录文字才可用；AI 补充解释 104-C 起扩全摘录类型
+		// （canCardAiComment 单源——有文字 / 图片类摘录 vision / audio 有批注）
 		if ((this.card.excerptText ?? "").trim().length > 0) {
-			menu.addItem((mi) =>
-				mi
-					.setTitle("AI 补充解释")
-					.setIcon("sparkles")
-					.onClick(() => {
-						promptCardAiComment(this.app, this.plugin, this.freshCard());
-					}),
-			);
-			// 99 AI 制卡：摘录文字为材料出 QA/填空卡（有锚点继承回链）
 			menu.addItem((mi) =>
 				mi
 					.setTitle("AI 制卡…")
 					.setIcon("list-checks")
 					.onClick(() => {
 						promptCardGen(this.app, this.plugin, this.freshCard());
+					}),
+			);
+		}
+		if (canCardAiComment(this.card)) {
+			menu.addItem((mi) =>
+				mi
+					.setTitle("AI 补充解释")
+					.setIcon("sparkles")
+					.onClick(() => {
+						void promptCardAiComment(this.app, this.plugin, this.freshCard());
 					}),
 			);
 		}
@@ -290,7 +295,12 @@ export class CardPreviewModal extends Modal {
 			await this.renderOccEditor(host);
 			return;
 		}
-		const result = await renderExcerptVisual(this.plugin, this.card, host);
+		// 111 与复习统一：area/lasso 页裁剪优先（preferCrop，110 context 档窗口
+		// ——显示范围参照文字摘录）；此前走附件快照（紧贴区域的窄图，用户反馈
+		// 主页-卡片显示区域偏窄）。handwriting/photo 由 canPreferCrop 守卫不受影响。
+		const result = await renderExcerptVisual(this.plugin, this.card, host, {
+			preferCrop: true,
+		});
 		if (result.objectUrl) {
 			this.objectUrl = result.objectUrl;
 		}

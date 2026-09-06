@@ -7,8 +7,13 @@ import { sendChat, type AiSettingsView } from "./ai-service";
 export interface AiActionModalOptions {
 	/** 弹窗标题（aiActionTitle 产物：AI 解释 / AI · 〈label〉…） */
 	title: string;
-	/** 原文展示（划选文本或卡片摘录，只读对照区） */
+	/** 原文展示（划选文本或卡片摘录，只读对照区）；图片卡无文字时传空串跳过文本块 */
 	sourceText: string;
+	/** 原文为图片时的缩略展示（104-C 视觉多模态，dataURL；与 sourceText 可
+	 *  并存——OCR 过的图卡两者都有） */
+	sourceImage?: string | null;
+	/** 原文区标签（默认"原文"；audio 卡批注作材料时传"批注"） */
+	sourceLabel?: string;
 	/** 请求载荷（ai-prompts 构造的 messages） */
 	messages: ChatMessage[];
 	/** 设置视图（sendChat 读预设/温度/流式；MarinMindPlugin.settings 结构性满足） */
@@ -49,11 +54,23 @@ export class AiActionModal extends Modal {
 	onOpen(): void {
 		this.titleEl.setText(this.opts.title);
 
-		this.contentEl.createDiv({ cls: "marinmind-tr-label", text: "原文" });
 		this.contentEl.createDiv({
-			cls: "marinmind-tr-text marinmind-tr-source",
-			text: this.opts.sourceText,
+			cls: "marinmind-tr-label",
+			text: this.opts.sourceLabel ?? "原文",
 		});
+		// 104-C 图片摘录：缩略图插在文本块前（无文字的图卡只显图）
+		if (this.opts.sourceImage) {
+			this.contentEl.createEl("img", {
+				cls: "marinmind-tr-thumb",
+				attr: { src: this.opts.sourceImage, alt: "摘录图片" },
+			});
+		}
+		if (this.opts.sourceText) {
+			this.contentEl.createDiv({
+				cls: "marinmind-tr-text marinmind-tr-source",
+				text: this.opts.sourceText,
+			});
+		}
 
 		this.contentEl.createDiv({ cls: "marinmind-tr-label", text: "AI 结果" });
 		this.resultEl = this.contentEl.createDiv({

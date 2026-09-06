@@ -11,6 +11,8 @@ export interface TextPromptOptions {
 	initialText?: string;
 	/** 是否多行（单行用于名称类输入，限制高度） */
 	multiline?: boolean;
+	/** 单行输入回车直接保存（缩放比例等数值输入场景；多行场景回车仍是换行） */
+	enterSubmit?: boolean;
 }
 
 /**
@@ -41,15 +43,23 @@ export class TextPromptModal extends Modal {
 		}
 
 		const actions = this.contentEl.createDiv({ cls: "marinmind-note-actions" });
+		// 保存逻辑提为局部函数：保存按钮与 enterSubmit 回车共用同一出口
+		const save = (): void => {
+			const text = textarea.value.trim();
+			this.onSave(text === "" ? null : text);
+			this.close();
+		};
 		new ButtonComponent(actions).setButtonText("取消").onClick(() => this.close());
-		new ButtonComponent(actions)
-			.setButtonText("保存")
-			.setCta()
-			.onClick(() => {
-				const text = textarea.value.trim();
-				this.onSave(text === "" ? null : text);
-				this.close();
+		new ButtonComponent(actions).setButtonText("保存").setCta().onClick(save);
+		// enterSubmit（单行数值类输入）：Enter 直接保存；Modal 关闭时监听随 DOM 销毁无需解绑
+		if (this.opts.enterSubmit) {
+			textarea.addEventListener("keydown", (evt) => {
+				if (evt.key === "Enter" && !evt.shiftKey) {
+					evt.preventDefault();
+					save();
+				}
 			});
+		}
 		// 打开后聚焦输入框，提升键盘录入体验
 		window.setTimeout(() => textarea.focus(), 0);
 	}

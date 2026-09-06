@@ -4,6 +4,7 @@ import type MarinMindPlugin from "../main";
 import { resolveIcon, setIconSafe } from "../ui/icon-resolve";
 import { imageExtOf, pickImageFiles, preparePhotoBytes } from "../attachments/media-import";
 import { promptCardEdit, promptCardAiComment, promptCardGen } from "../home/card-actions";
+import { canCardAiComment } from "../ai/ai-prompts";
 import { MindmapPickerModal } from "../mindmap/mindmap-picker-modal";
 import { ConfirmModal } from "../mindmap/confirm-modal";
 import { collectTargetOf, fixedRootDocOf } from "../mindmap/auto-collect";
@@ -38,6 +39,7 @@ import { MediaPreviewModal } from "./media-preview-modal";
 import { MdDocument } from "./md-document";
 import { outlineFromDom } from "./md-outline";
 import { TextPromptModal } from "./note-edit-modal";
+import { parseZoomInput } from "./zoom-input";
 import { PageView, type PageSize } from "./page-view";
 import { pdfLinesFromSpecs, type DocSearchHit, type PdfSearchLine } from "./doc-search";
 import { DocSearchModal, collectBlockEls, type DocSearchHost } from "./doc-search-modal";
@@ -76,6 +78,8 @@ const MAX_ZOOM = 5;
 const ZOOM_STEP = 1.25;
 /** 89 Ctrl+滚轮缩放灵敏度（指数曲线系数，镜像脑图 ZOOM_SENSITIVITY=0.0015） */
 const WHEEL_ZOOM_SENSITIVITY = 0.0015;
+/** 缩放快捷预设档（菜单直达；勾选态按当前 scale 现读，0.005 容差防浮点误差） */
+const ZOOM_PRESETS = [1, 1.5, 2] as const;
 /** fit-width 计算预留的滚动容器水平内边距（与 CSS padding 12px×2 对应） */
 const SCROLL_PADDING_X = 24;
 
@@ -1812,7 +1816,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		menu.showAtMouseEvent(evt);
 	}
 
-	/** 缩放二段菜单（89：原头部 放大/缩小/适应宽度 三枚并入）：百分比信息项 + 三档操作 */
+	/** 缩放二段菜单（89：原头部 放大/缩小/适应宽度 三枚并入；104-A 加预设档与
+	 * 精确输入）：百分比信息项 + 快捷预设 + 输入比例… + 三档操作 */
 	private showZoomMenu(evt: MouseEvent): void {
 		const menu = new Menu();
 		menu.addItem((mi) =>
@@ -1820,6 +1825,22 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				.setTitle(`当前 ${Math.round(this.scale * 100)}%`)
 				.setIcon("info")
 				.setDisabled(true),
+		);
+		menu.addSeparator();
+		// 快捷预设档：一次点击直达（勾选态现读，0.005 容差防 1.5×÷1.25 浮点误差）
+		for (const preset of ZOOM_PRESETS) {
+			menu.addItem((mi) =>
+				mi
+					.setTitle(`${Math.round(preset * 100)}%`)
+					.setChecked(Math.abs(this.scale - preset) < 0.005)
+					.onClick(() => this.setZoom(preset)),
+			);
+		}
+		menu.addItem((mi) =>
+			mi
+				.setTitle("输入缩放比例…")
+				.setIcon(resolveIcon(["text-cursor-input", "pencil"]))
+				.onClick(() => this.promptZoomInput()),
 		);
 		menu.addSeparator();
 		menu.addItem((mi) =>
@@ -1841,6 +1862,43 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				.onClick(() => this.fitWidth()),
 		);
 		menu.showAtMouseEvent(evt);
+	}
+
+	/**
+	 * 精确缩放输入（104-A）：弹小窗输入百分比（20-500，支持 "150" / "150%" /
+	 * 全角 ％），回车或保存应用；越界钳到边界并 Notice 告知实际值。
+	 * 钳制双保险：此处提示 + setZoom 内统一钳制。
+	 */
+	private promptZoomInput(): void {
+		new TextPromptModal(
+			this.app,
+			{
+				title: "缩放比例",
+				placeholder: "输入百分比（20-500，如 150 或 150%）",
+				initialText: String(Math.round(this.scale * 100)),
+				multiline: false,
+				enterSubmit: true,
+			},
+			(text) => {
+				// TextPromptModal trim 后空串转 null——空输入视作取消不提示
+				if (text == null) {
+					return;
+				}
+				const value = parseZoomInput(text);
+				if (value == null) {
+					new Notice("请输入 20-500 之间的比例值（如 150 或 150%）");
+					return;
+				}
+				const pct = value * 100;
+				if (pct < MIN_ZOOM * 100 || pct > MAX_ZOOM * 100) {
+					const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
+					new Notice(`已超出 20%-500% 范围，应用为 ${Math.round(clamped * 100)}%`);
+					this.setZoom(clamped);
+					return;
+				}
+				this.setZoom(value);
+			},
+		).open();
 	}
 
 	/** ⋯ 按钮点亮同步（89）：当前工具折叠在菜单里（hand/select）时点亮，提示非默认态 */
@@ -4093,7 +4151,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 					.onClick(() => void this.ocrCard(card)),
 			);
 		}
-		// 翻译：有摘录文字即可译（文字摘录 / OCR 过的区域、手写卡；MN4 内置翻译对齐）
+		// 翻译 / AI 制卡：有摘录文字才可用（文字摘录 / OCR 过的区域、手写卡；
+		// MN4 内置翻译对齐）——104-C 起与本项解耦，见下方 AI 补充解释
 		if ((card.excerptText ?? "").trim().length > 0) {
 			menu.addItem((item) =>
 				item
@@ -4101,20 +4160,23 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 					.setIcon("languages")
 					.onClick(() => this.openTranslate(card)),
 			);
-			// 97 AI 评论：流式解释摘录内容，「填入批注」经人手确认后落库
-			// （card-actions 单源共享——卡片预览 ⋯ 菜单同一动作）
-			menu.addItem((item) =>
-				item
-					.setTitle("AI 补充解释")
-					.setIcon("sparkles")
-					.onClick(() => promptCardAiComment(this.app, this.plugin, card)),
-			);
 			// 99 AI 制卡：摘录文字为材料出 QA/填空卡，继承本文档锚点（自动入图归章）
 			menu.addItem((item) =>
 				item
 					.setTitle("AI 制卡…")
 					.setIcon("list-checks")
 					.onClick(() => promptCardGen(this.app, this.plugin, card)),
+			);
+		}
+		// 104-C AI 评论扩全摘录类型：有文字 / 图片类摘录（vision 直发快照）/
+		// audio 有批注均可解释（canCardAiComment 单源——卡片预览 ⋯ 同款）；
+		// 「填入批注」经人手确认后落库（card-actions 单源共享）
+		if (canCardAiComment(card)) {
+			menu.addItem((item) =>
+				item
+					.setTitle("AI 补充解释")
+					.setIcon("sparkles")
+					.onClick(() => void promptCardAiComment(this.app, this.plugin, card)),
 			);
 		}
 		// 84-D 照片重定位：把照片以虚线展示框锚定到当前页某处（MN 式"贴"到页面）；

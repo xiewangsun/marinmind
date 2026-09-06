@@ -125,6 +125,43 @@ describe("摘录预览裁剪窗口 excerptCropRect（㊶）", () => {
 	});
 });
 
+describe("110 area/lasso 参照文字摘录裁剪范围（context 档）", () => {
+	it("小区域：页比例余量 + 文字量级最小窗口（不再紧贴包围盒裁成小 zoom 图）", () => {
+		const r = excerptCropRect([{ x: 0.3, y: 0.4, w: 0.2, h: 0.12 }], { context: true });
+		// mx=max(0.016,0.1)=0.1 → cw=0.4<0.55 → 围绕中心 0.4 扩到 0.55；
+		// my=max(0.048,0.05)=0.05 → ch=0.22≥0.18 不再扩
+		expect(r.x).toBeCloseTo(0.125, 10);
+		expect(r.y).toBeCloseTo(0.35, 10);
+		expect(r.w).toBeCloseTo(0.55, 10);
+		expect(r.h).toBeCloseTo(0.22, 10);
+	});
+
+	it("极小摘录（留白级锚点）同款下限：中心扩到 0.55×0.18", () => {
+		const r = excerptCropRect([{ x: 0.5, y: 0.5, w: 0.006, h: 0.006 }], { context: true });
+		// 余量触 0.1/0.05 底 → cw=0.206<0.55、ch=0.106<0.18 → 双向中心扩展
+		expect(r.x).toBeCloseTo(0.503 - 0.275, 10);
+		expect(r.y).toBeCloseTo(0.503 - 0.09, 10);
+		expect(r.w).toBeCloseTo(0.55, 10);
+		expect(r.h).toBeCloseTo(0.18, 10);
+	});
+
+	it("大区域：比例余量主导（40% 垂直规则），context 档不缩小既有窗口", () => {
+		const r = excerptCropRect([{ x: 0.15, y: 0.1, w: 0.6, h: 0.5 }], { context: true });
+		// mx=max(0.048,0.1)=0.1 → cw=0.8；my=max(0.2,0.05)=0.2 → ch=0.9（越顶钳 0）
+		expect(r.x).toBeCloseTo(0.05, 10);
+		expect(r.y).toBeCloseTo(0, 10);
+		expect(r.w).toBeCloseTo(0.8, 10);
+		expect(r.h).toBeCloseTo(0.9, 10);
+	});
+
+	it("不传 context（text/blank 主路径）窗口量纲与现状一致——110 零回归", () => {
+		const r = excerptCropRect([{ x: 0.3, y: 0.4, w: 0.2, h: 0.12 }]);
+		// mx=max(0.016,0.008)=0.016、my=max(0.048,0.012)=0.048 → 0.232×0.216
+		expect(r.w).toBeCloseTo(0.232, 10);
+		expect(r.h).toBeCloseTo(0.216, 10);
+	});
+});
+
 describe("遮挡摆位 occlusionPercent / occlusionBounds（㊷）", () => {
 	// 视觉窗口：页 (0.1,0.2)-(0.5,0.4)（0.4×0.2）
 	const bounds = { x: 0.1, y: 0.2, w: 0.4, h: 0.2 };

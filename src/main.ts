@@ -1238,10 +1238,15 @@ export default class MarinMindPlugin extends Plugin {
 	 * 跳转到卡片原文位置：打开阅读器并精确定位（页码 + 矩形滚动 + 高亮闪烁）。
 	 * 复习界面与脑图的共用入口（原先两处各写一份）。文档/文件缺失时 Notice 降级；
 	 * 库外绝对路径（㉞）桌面直开，移动端 Notice 拒绝（openInReader 内分流）。
+	 * 109 已开同文件标签就地定位（reuseOpenReaderLeaf），未开/异文件走新开路径。
 	 */
 	async openCardSource(card: Card): Promise<void> {
 		const doc = card.documentId ? this.documents.get(card.documentId) : undefined;
 		if (!doc) {
+			return;
+		}
+		// 109 复用已开标签：阅读窗格正显示本文档时不新开，直接激活 + 精确定位
+		if (await this.reuseOpenReaderLeaf(doc.filePath, card)) {
 			return;
 		}
 		if (isAbsoluteFsPath(doc.filePath)) {
@@ -1255,6 +1260,36 @@ export default class MarinMindPlugin extends Plugin {
 			return;
 		}
 		await this.openInReader(file, card.page ?? undefined, card.id);
+	}
+
+	/**
+	 * 109 跳原文复用已开标签：已有阅读标签正显示该文件时激活它，并同文件
+	 * setViewState 就地精确定位（reader setState 同文件只定位不重载，⑨-A——
+	 * 页码 + cardId 矩形滚动 + 闪烁）。此前每次跳原文都新开标签再定位
+	 * （用户反馈）。仅同文件复用——阅读窗格显示其他文档时不夺屏换文件
+	 * （异文件仍走新开路径）；state.file 与视图实况不符的竞态兜底返回
+	 * false，由调用方回落新开。leaf 匹配按 state.file 字符串比较，
+	 * 库内/库外两种路径形态天然兼容（与 revealCardInReader 同款）。
+	 */
+	private async reuseOpenReaderLeaf(filePath: string, card: Card): Promise<boolean> {
+		const ws = this.app.workspace;
+		const leaf = ws
+			.getLeavesOfType(READER_VIEW_TYPE)
+			.find((l) => ((l.getViewState().state ?? {}) as { file?: string }).file === filePath);
+		if (!leaf) {
+			return false;
+		}
+		ws.setActiveLeaf(leaf, { focus: false });
+		await leaf.loadIfDeferred();
+		if (!(leaf.view instanceof MarinMindReaderView) || leaf.view.filePath !== filePath) {
+			return false;
+		}
+		const state: Record<string, unknown> = { file: filePath, cardId: card.id };
+		if (card.page != null) {
+			state.page = card.page;
+		}
+		await leaf.setViewState({ type: READER_VIEW_TYPE, state });
+		return true;
 	}
 
 	/**

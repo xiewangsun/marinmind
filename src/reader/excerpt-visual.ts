@@ -56,15 +56,32 @@ export function canPageCrop(card: {
 }
 
 /**
+ * 108 preferCrop 适用面（纯守卫，vitest 直测）：仅 area/lasso——handwriting
+ * 笔迹不在 PDF 里（附件即全部内容，裁页只见底页不见笔迹）、photo 与页裁剪
+ * 互斥（canPageCrop 恒拒）、text/blank 无附件不受优先序影响。
+ */
+export function canPreferCrop(card: { excerptType: string }, preferCrop?: boolean): boolean {
+	return preferCrop === true && (card.excerptType === "area" || card.excerptType === "lasso");
+}
+
+/**
  * 渲染摘录视觉（异步三级回退，host 内追加媒体元素或裁剪画布）。
  * host 已断开（弹窗/视图关闭）时视为成功并丢弃，不触发兜底回退。
+ * opts.preferCrop（108 复习展示形态统一）：area/lasso **页裁剪优先**、附件快照
+ * 兜底——快照图按截取时缩放档出图、400px 基宽展示有缩放感；页裁剪按窗口
+ * 自适应渲染，与 text 卡同形态（带上下文余量、居中舞台）。handwriting 不适用
+ * （笔迹不在 PDF 里，附件即全部内容）；photo/页裁剪互斥不受影响。
+ * 110 area/lasso 裁剪窗口走 context 档（excerptCropRect 页比例余量 + 文字量级
+ * 最小窗口）——显示范围与 text 卡对齐，不再紧贴包围盒裁成小 zoom 图。
  */
 export async function renderExcerptVisual(
 	plugin: MarinMindPlugin,
 	card: Card,
 	host: HTMLElement,
+	opts?: { preferCrop?: boolean },
 ): Promise<ExcerptVisualResult> {
-	if (card.excerptRef) {
+	const preferCrop = canPreferCrop(card, opts?.preferCrop);
+	if (card.excerptRef && !preferCrop) {
 		const attached = await renderAttachment(plugin, card, host);
 		if (attached.rendered) {
 			return attached;
@@ -75,6 +92,13 @@ export async function renderExcerptVisual(
 		const crop = await renderPageCrop(plugin, card, host);
 		if (crop) {
 			return { rendered: true, objectUrl: null, bounds: crop };
+		}
+	}
+	// preferCrop 兜底链：页裁剪失败（文档失联/非 PDF）回落附件快照，再落调用方文本兜底
+	if (card.excerptRef && preferCrop) {
+		const attached = await renderAttachment(plugin, card, host);
+		if (attached.rendered) {
+			return attached;
 		}
 	}
 	return { rendered: false, objectUrl: null, bounds: null };
@@ -151,7 +175,11 @@ async function renderPageCrop(
 				);
 		handle = await acquirePdf(pdfCacheKey(doc.filePath), buf);
 		const base = await handle.doc.getPageSize(page);
-		const crop = excerptCropRect(card.rects);
+		// 110 area/lasso 参照文字摘录的显示范围：context 档裁剪窗口（页比例余量 +
+		// 文字量级最小窗口）；text/blank 主路径不传——窗口量纲与现状一致零回归
+		const crop = excerptCropRect(card.rects, {
+			context: card.excerptType === "area" || card.excerptType === "lasso",
+		});
 		// 渲染尺度：裁剪窗口贴目标档位（取小不拉伸），整页像素不超预算
 		let scale = Math.min(
 			PREVIEW_WIDTH / (crop.w * base.width),

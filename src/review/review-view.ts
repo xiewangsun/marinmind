@@ -30,6 +30,7 @@ import {
 	promptCardTags,
 } from "../home/card-actions";
 import { AiActionModal } from "../ai/ai-action-modal";
+import { canCardAiComment } from "../ai/ai-prompts";
 import { sendChat } from "../ai/ai-service";
 import {
 	buildMistakeSummaryMessages,
@@ -146,11 +147,15 @@ function mediaLabel(card: Card): string {
  * - 正面遮挡：带 occlusions 的卡正面出图（excerpt-visual 共享管线）+ 实心遮挡块
  *   盖住重点区域，点击单块临时揭开 /「显示全部遮挡」全揭；翻面与已考回看显示
  *   同一张视觉、不叠遮挡块（㊿-B：把遮挡区域去除即是答案，各形态与正面一致）
+ * - 108 摘录面形态统一（用户反馈）：无遮挡卡的正面/答案面也走摘录视觉管线
+ *   （区域形貌 + 居中舞台），不再纯文字/左贴快照图；area/lasso 页裁剪优先
+ *   （快照 400px 基宽缩放感 → 与 text 卡同形态）；blank/audio 无视觉面保持原样
  *
  * 卡组与卡片管理（复习卡组批）：
  * - 范围三态 ReviewScope（㊷ 按书范围泛化）：null 全部书籍 / book 限书
  *   （阅读器·学习模式入口）/ deck 限卡组（命令「按卡组复习」·主页「复习本组」）；
- *   范围 chip 从 topbar 下沉到出处 meta 行（topbar 只留 ◀ 第 i/N 张 ▶ + ⋯管理 + ↗原文）
+ *   范围 chip 与书名/页码/剩余计数 107 起并入 topbar 中部（顶栏合一单行：
+ *   列表 ◀ 第 i/N 张 ▶ [chip·出处·剩余] 撤销 翻译 ⋯管理 ↗原文）
  * - topbar「⋯ 管理」：查看卡片 / 打标签 / 设卡组 / 删除——已考回看与后面的卡同可用
  *   （不套 ↗原文 的 doc/page 守卫，自由卡片与照片/语音卡也可管理）；动作与
  *   卡片预览弹窗经 card-actions 单源共享，删除后会话剔除由 cardBus removed 订阅完成
@@ -446,7 +451,8 @@ export class MarinMindReviewView extends ItemView {
 		// 浏览到已考过的卡：直接显示正反面（只读）；待考卡按翻面态；未考预览只显示正面
 		const showBack = s.isRevealed || s.gradedAt != null;
 
-		// 顶部导航条：📋 ◀ 第 i/N 张 ▶ …… ↗ 原文（正面即可跳转，MN4 文档栏入口）
+		// 顶部工具行（107 顶栏合一，参照阅读器/脑图 90 批）：
+		// 列表 ◀ 第 i/N 张 ▶ [范围chip · 书名页码 · 剩余] …… 撤销 翻译 管理 ↗ 原文
 		const topbar = stage.createDiv({ cls: "marinmind-review-topbar" });
 		// 70 卡片组列表开关（panel-left 与主页文件夹收起同图标语言；空会话无列表可开）
 		const listBtn = topbar.createEl("button", {
@@ -484,6 +490,27 @@ export class MarinMindReviewView extends ItemView {
 		setIcon(next, "chevron-right");
 		next.disabled = !s.canNext;
 		next.addEventListener("click", () => this.navigate(() => s.goNext()));
+		// 出处/进度段（107 顶栏合一：原独立 meta 行并入工具行中部）：
+		// [范围 chip（scoped 时）] [《书名》· 第 m 页] [剩余 N 张]——书名可压缩省略
+		const meta = topbar.createDiv({ cls: "marinmind-review-meta" });
+		this.renderScopeChip(meta);
+		// 出处段：book 范围书名已在 chip 不重复；deck 范围组内跨书需完整出处
+		let source: string;
+		if (this.reviewScope?.kind === "book") {
+			source =
+				card.page != null ? `第 ${card.page} ${doc ? pageWordOf(doc.filePath) : "页"}` : "";
+		} else if (doc) {
+			source = `《${doc.title}》${card.page != null ? ` · 第 ${card.page} ${pageWordOf(doc.filePath)}` : ""}`;
+		} else {
+			source = "自由卡片";
+		}
+		if (source) {
+			meta.createSpan({ cls: "marinmind-review-meta-item", text: source });
+		}
+		meta.createSpan({
+			cls: "marinmind-review-meta-item",
+			text: `剩余 ${s.remaining} 张`,
+		});
 		topbar.createEl("div", { cls: "marinmind-review-topbar-spacer" });
 		// 67 撤销上次评分（Ctrl+Z）：会话态 + DB SM-2/日志 一并回退；改评 = 撤销后重评
 		const undo = topbar.createEl("button", {
@@ -507,44 +534,31 @@ export class MarinMindReviewView extends ItemView {
 		translate.disabled = (card.excerptText ?? "").trim().length === 0;
 		translate.addEventListener("click", () => this.openTranslateForCard(card));
 		// ⋯ 管理（卡组批）：查看 / 打标签 / 设卡组 / 删除——任何卡都有，不套 ↗原文
-		// 的 doc/page 守卫（自由卡片与照片/语音卡同样可管理；已考回看/后面的卡同可用）
+		// 的 doc/page 守卫（自由卡片与照片/语音卡同样可管理；已考回看/后面的卡同可用）。
+		// 文字型改纯 icon（用户反馈）：与顶栏邻居 undo/翻译同款 nav-btn 方框，含义靠 title 提示
 		const manage = topbar.createEl("button", {
-			cls: "marinmind-review-link",
-			attr: { type: "button", title: "管理卡片（查看 / 标签 / 卡组 / 删除）" },
+			cls: "marinmind-review-nav-btn",
+			attr: {
+				type: "button",
+				title: "管理卡片（查看 / 标签 / 卡组 / 删除）",
+				"aria-label": "管理卡片",
+			},
 		});
-		setIcon(manage.createSpan({ cls: "marinmind-review-link-icon" }), "more-horizontal");
-		manage.createSpan({ text: "管理" });
+		setIcon(manage, "more-horizontal");
 		manage.addEventListener("click", (evt) => this.openManageMenu(evt, card));
 		if (doc && card.documentId && card.page != null) {
-			const jump = topbar.createEl("button", { cls: "marinmind-review-link" });
 			// P2-1 图标语言统一：字符 ↗ → lucide arrow-up-right（与脑图节点编辑器/主页预览弹窗同款）
-			setIcon(jump.createSpan({ cls: "marinmind-review-link-icon" }), "arrow-up-right");
-			jump.createSpan({ text: "原文" });
+			const jump = topbar.createEl("button", {
+				cls: "marinmind-review-nav-btn",
+				attr: { type: "button", title: "跳转原文", "aria-label": "跳转原文" },
+			});
+			setIcon(jump, "arrow-up-right");
 			jump.addEventListener("click", () => void this.plugin.openCardSource(card));
 		}
 
-		// 出处 meta 行（卡组批书名下沉）：[范围 chip（scoped 时）] [出处段] [剩余 N 张]。
-		// 结构化 DOM 替代原 textContent 拼串——chip 是可点击按钮，进不了纯文本
-		const meta = stage.createDiv({ cls: "marinmind-review-meta" });
-		this.renderScopeChip(meta);
-		// 出处段：book 范围书名已在 chip 不重复；deck 范围组内跨书需完整出处
-		let source: string;
-		if (this.reviewScope?.kind === "book") {
-			source =
-				card.page != null ? `第 ${card.page} ${doc ? pageWordOf(doc.filePath) : "页"}` : "";
-		} else if (doc) {
-			source = `《${doc.title}》${card.page != null ? ` · 第 ${card.page} ${pageWordOf(doc.filePath)}` : ""}`;
-		} else {
-			source = "自由卡片";
-		}
-		if (source) {
-			meta.createSpan({ cls: "marinmind-review-meta-item", text: source });
-		}
-		meta.createSpan({ cls: "marinmind-review-meta-item", text: `剩余 ${s.remaining} 张` });
-
 		const cardBox = stage.createDiv({ cls: "marinmind-review-card" });
-		// P1-c 墨色随卡走：顶缘墨线 = 卡片身份色（highlightFallbackColor 对
-		// null 色卡按形态回退；翻面/换卡重渲染时墨线从左展开，见 CSS 编排注释）
+		// P1-c 墨色随卡走：四缘边框 = 卡片身份色（highlightFallbackColor 对
+		// null 色卡按形态回退；翻面/换卡重渲染时墨色浮现，见 CSS 编排注释）
 		cardBox.dataset.color = highlightFallbackColor(card);
 		// 正面（MN4：问题）：有批注时批注即问题，摘录内容移到背面作答案
 		if (card.note) {
@@ -557,11 +571,9 @@ export class MarinMindReviewView extends ItemView {
 		if (card.occlusions.length > 0 && !showBack) {
 			this.renderOcclusionFront(cardBox, card);
 		} else if (!card.note) {
-			if (card.occlusions.length > 0) {
-				this.renderExcerptVisualPlain(cardBox, card);
-			} else {
-				this.renderExcerptBody(cardBox, card);
-			}
+			// 108 展示形态统一：正面摘录一律走摘录视觉（区域形貌 + 居中舞台），
+			// 与遮挡卡同款；blank/audio 无视觉面保持文本/播放器主体
+			this.renderExcerptFace(cardBox, card);
 		}
 
 		// 背面（MN4：全部内容）：摘录内容（正面显示过则不重复）+ 批注（正面未显示时）+ 出处
@@ -571,11 +583,8 @@ export class MarinMindReviewView extends ItemView {
 				// 正面是批注（问题）：摘录内容是答案主体
 				const a = back.createDiv({ cls: "marinmind-review-answer" });
 				a.createSpan({ cls: "marinmind-review-block-label", text: "内容" });
-				if (card.occlusions.length > 0) {
-					this.renderExcerptVisualPlain(a, card);
-				} else {
-					this.renderExcerptBody(a, card);
-				}
+				// 108 同正面：答案主体走摘录视觉（含无遮挡卡），blank/audio 回文本/播放器
+				this.renderExcerptFace(a, card);
 			}
 			const source = back.createDiv({ cls: "marinmind-review-source" });
 			source.textContent = doc
@@ -651,15 +660,17 @@ export class MarinMindReviewView extends ItemView {
 				if (this.aiQuiz) {
 					this.renderQuiz(stage, this.aiQuiz);
 				}
-			} else if (card.excerptText) {
-				// 翻面后：AI 解释（复用卡片评论单源——上下文含标题/批注，可填入批注）
+			} else if (canCardAiComment(card)) {
+				// 翻面后：AI 解释（复用卡片评论单源——上下文含标题/批注，可填入批注；
+				// 104-C 扩全摘录类型：图片类摘录 vision 直发、audio 卡批注作材料）
 				const aiRow = stage.createDiv({ cls: "marinmind-review-ai-row" });
 				const explainBtn = aiRow.createEl("button", {
 					cls: "marinmind-review-btn is-ai",
 					text: "AI 解释",
 				});
-				explainBtn.addEventListener("click", () =>
-					promptCardAiComment(this.app, this.plugin, card),
+				explainBtn.addEventListener(
+					"click",
+					() => void promptCardAiComment(this.app, this.plugin, card),
 				);
 			}
 		}
@@ -677,10 +688,26 @@ export class MarinMindReviewView extends ItemView {
 	}
 
 	/**
+	 * 108 复习卡摘录面统一路由：text/area/lasso/handwriting/photo 走共享摘录视觉
+	 * 管线（区域形貌 + 居中舞台，与遮挡卡同款）；blank（胶囊文字画不进页裁剪）
+	 * 与 audio（无视觉面）保持 renderExcerptBody 文本/播放器主体。视觉不可用
+	 * （文档失联/非 PDF 且无附件）由 renderExcerptVisualPlain 内部回退文本兜底。
+	 */
+	private renderExcerptFace(parent: HTMLElement, card: Card): void {
+		if (card.excerptType === "blank" || card.excerptType === "audio") {
+			this.renderExcerptBody(parent, card);
+			return;
+		}
+		this.renderExcerptVisualPlain(parent, card);
+	}
+
+	/**
 	 * 正面遮挡渲染（㊷）：摘录视觉（附件快照 / 原文页裁剪——excerpt-visual 共享管线，
 	 * 与主页卡片预览同一出图）+ 实心遮挡块按页归一化坐标换算到视觉窗口内百分比定位。
 	 * 点击单块临时揭开（再点重遮）；「显示全部遮挡」一键全揭/重遮（不翻面）。
 	 * 换卡/翻面/评分整体重渲染，揭开态自然复位。
+	 * 108 area/lasso 页裁剪优先（preferCrop）——快照 400px 基宽的缩放感统一为
+	 * 与 text 卡同形态；遮挡摆位 bounds 跟随 result.bounds，快照/裁剪两路均成立。
 	 */
 	private renderOcclusionFront(cardBox: HTMLElement, card: Card): void {
 		const wrap = cardBox.createDiv({ cls: "marinmind-review-occlusion-wrap" });
@@ -703,23 +730,25 @@ export class MarinMindReviewView extends ItemView {
 				Object.assign(blocks[i].style, pos);
 			});
 		};
-		void renderExcerptVisual(this.plugin, card, visualHost).then((result) => {
-			if (result.objectUrl) {
-				this.occlusionUrls.add(result.objectUrl);
-			}
-			if (!stage.isConnected) {
-				return; // 渲染期间换卡/翻面：DOM 已拆，无需摆位
-			}
-			place(result.bounds ?? occlusionBounds(card));
-			if (!result.rendered) {
-				// 视觉不可用兜底：摘录文字直接展示，遮挡块按估算位置近似遮住对应区域
-				visualHost.createDiv({
-					cls: "marinmind-review-excerpt",
-					// P3-1 措辞对齐 card-preview-modal 同款兜底文案（统一「或」）
-					text: card.excerptText || "（摘录图不可用——附件缺失或原文文件无法读取）",
-				});
-			}
-		});
+		void renderExcerptVisual(this.plugin, card, visualHost, { preferCrop: true }).then(
+			(result) => {
+				if (result.objectUrl) {
+					this.occlusionUrls.add(result.objectUrl);
+				}
+				if (!stage.isConnected) {
+					return; // 渲染期间换卡/翻面：DOM 已拆，无需摆位
+				}
+				place(result.bounds ?? occlusionBounds(card));
+				if (!result.rendered) {
+					// 视觉不可用兜底：摘录文字直接展示，遮挡块按估算位置近似遮住对应区域
+					visualHost.createDiv({
+						cls: "marinmind-review-excerpt",
+						// P3-1 措辞对齐 card-preview-modal 同款兜底文案（统一「或」）
+						text: card.excerptText || "（摘录图不可用——附件缺失或原文文件无法读取）",
+					});
+				}
+			},
+		);
 		blocks.forEach((el) => {
 			// 单块点击临时揭开，再点重遮（换卡/翻面重渲染自然复位）
 			el.addEventListener("click", () => el.classList.toggle("is-peeked"));
@@ -738,12 +767,14 @@ export class MarinMindReviewView extends ItemView {
 	}
 
 	/**
-	 * 遮挡卡翻面/已考回看的内容形态（㊿-B）：与正面同一张摘录视觉
-	 * （excerpt-visual 共享管线），只是遮挡块换成答案形态——**透明底 + 同色系
-	 * 虚线边框**（㊿-C 用户反馈：遮挡区域去除但边框保留，位置感不丢），
-	 * 各摘录形态（文字/区域/套索/留白）观感与正面一致。视觉不可用回退
-	 * renderExcerptBody（文字/媒体兜底）。此前背面走 renderExcerptBody：
-	 * 文字摘录翻面显示纯文本，与正面的图形态割裂。
+	 * 摘录视觉明示形态（108 起为复习卡统一摘录面）：与 renderOcclusionFront 同款
+	 * wrap/stage 结构（居中 + inline-block 收缩）。有遮挡的卡（㊿-B）：与正面同一张
+	 * 摘录视觉（excerpt-visual 共享管线），遮挡块换答案形态——**透明底 + 同色系
+	 * 虚线边框**（㊿-C 用户反馈：遮挡区域去除但边框保留，位置感不丢）；无遮挡的卡
+	 * （108）：纯出图不画遮挡块（空层零子元素无害）。area/lasso 页裁剪优先
+	 * （preferCrop，形态与 text 卡统一）；视觉不可用回退 renderExcerptBody
+	 * （文字/媒体兜底）。此前背面走 renderExcerptBody：文字摘录翻面显示纯文本，
+	 * 与正面的图形态割裂。
 	 */
 	private renderExcerptVisualPlain(parent: HTMLElement, card: Card): void {
 		// 与 renderOcclusionFront 同款 wrap/stage 结构（居中 + inline-block 收缩），
@@ -756,25 +787,27 @@ export class MarinMindReviewView extends ItemView {
 			layer.createDiv({ cls: "marinmind-review-occlusion is-answer" }),
 		);
 		this.applyOcclusionColor(blocks, card);
-		void renderExcerptVisual(this.plugin, card, visualHost).then((result) => {
-			if (result.objectUrl) {
-				this.occlusionUrls.add(result.objectUrl);
-			}
-			if (!stage.isConnected) {
-				return; // 渲染期间翻面/换卡：DOM 已拆，无需兜底
-			}
-			const bounds = result.bounds ?? occlusionBounds(card);
-			card.occlusions.forEach((occ, i) => {
-				Object.assign(blocks[i].style, occlusionPercent(occ, bounds));
-			});
-			if (!result.rendered) {
-				// 视觉不可用：无图可叠边框，撤掉答案块退回文字/媒体主体
-				for (const b of blocks) {
-					b.remove();
+		void renderExcerptVisual(this.plugin, card, visualHost, { preferCrop: true }).then(
+			(result) => {
+				if (result.objectUrl) {
+					this.occlusionUrls.add(result.objectUrl);
 				}
-				this.renderExcerptBody(visualHost, card);
-			}
-		});
+				if (!stage.isConnected) {
+					return; // 渲染期间翻面/换卡：DOM 已拆，无需兜底
+				}
+				const bounds = result.bounds ?? occlusionBounds(card);
+				card.occlusions.forEach((occ, i) => {
+					Object.assign(blocks[i].style, occlusionPercent(occ, bounds));
+				});
+				if (!result.rendered) {
+					// 视觉不可用：无图可叠边框，撤掉答案块退回文字/媒体主体
+					for (const b of blocks) {
+						b.remove();
+					}
+					this.renderExcerptBody(visualHost, card);
+				}
+			},
+		);
 	}
 
 	/**

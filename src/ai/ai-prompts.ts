@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./ai-provider";
+import type { ChatContentPart, ChatMessage } from "./ai-provider";
 
 /**
  * AI prompt 构造（97，纯函数层）：划选操作（解释/总结/改写/自定义）与卡片
@@ -55,33 +55,102 @@ export function aiActionTitle(action: AiMenuAction): string {
 		: `AI ${SELECTION_ACTION_LABELS[action.kind]}`;
 }
 
+/** 图片类摘录（104-C 视觉多模态）：区域/套索/手写是快照附件、photo 是入库图，
+ *  均可经 imageToDataUrl 栅格化后直发 vision 模型 */
+const IMAGE_EXCERPT_TYPES = new Set(["area", "lasso", "handwriting", "photo"]);
+
+/** 「AI 补充解释」入口判定（104-C，纯函数，阅读器高亮菜单 / 卡片预览 ⋯ 菜单 /
+ *  复习翻面按钮三处单源）：有摘录文字（text/blank 或已 OCR 的区域/手写）；或
+ *  图片类摘录带附件引用（附件实际可读性由调用点读字节兜底降级）；或 audio 卡
+ *  有批注（批注文字作材料）。AI 制卡 / 翻译仍走 excerptText 守卫，不用本函数。 */
+export function canCardAiComment(card: {
+	excerptType: string;
+	excerptText?: string | null;
+	excerptRef?: string | null;
+	note?: string | null;
+}): boolean {
+	if ((card.excerptText ?? "").trim().length > 0) {
+		return true;
+	}
+	if (card.excerptType === "audio") {
+		return (card.note ?? "").trim().length > 0;
+	}
+	return cardVisionImageRef(card) != null;
+}
+
+/** 图片类摘录的附件引用（104-C）：area/lasso/handwriting/photo 且带 excerptRef
+ *  时返回归一后的 ref（vision 路径的取图入口），否则 null——类型集合保持模块
+ *  私有，调用方不重复定义 */
+export function cardVisionImageRef(card: {
+	excerptType: string;
+	excerptRef?: string | null;
+}): string | null {
+	if (!IMAGE_EXCERPT_TYPES.has(card.excerptType)) {
+		return null;
+	}
+	const ref = (card.excerptRef ?? "").trim();
+	return ref.length > 0 ? ref : null;
+}
+
 /** 卡片 AI 评论的上下文输入（结构性满足 Card，免 prompts 依赖 types 模块） */
 export interface AiCardContext {
 	title?: string | null;
 	note?: string | null;
 	excerptText?: string | null;
+	/** 视觉多模态（104-C）：图片摘录的 dataURL（调用方经 imageToDataUrl 栅格化
+	 *  压缩）；null/缺省 = 纯文本路径（现行为不变） */
+	imageDataUrl?: string | null;
+	/** 摘录形态：图片类卡走 vision 文案、audio 卡批注作材料；缺省按纯文本 */
+	excerptType?: string;
 }
 
 /**
- * 组装卡片「AI 补充解释」请求（97，MN4 AI 评论对齐）：解释摘录内容并补充
- * 背景，输出预填批注（经 CardEditModal 人手确认后落库）。上下文带上标题与
- * 已有批注（若存在），让解释贴合用户已记录的关注点。
+ * 组装卡片「AI 补充解释」请求（97，MN4 AI 评论对齐；104-C 扩视觉/语音）：
+ * 解释摘录内容并补充背景，输出预填批注（经 CardEditModal 人手确认后落库）。
+ * 上下文带上标题与已有批注（若存在），让解释贴合用户已记录的关注点。
+ * 三分支：图片摘录（imageDataUrl 非空，user 为分段数组直发 vision 模型）/
+ * audio 卡（批注文字作材料）/ 纯文本（现行为逐字不变）。
  */
 export function buildCardCommentMessages(card: AiCardContext): ChatMessage[] {
-	const excerpt = (card.excerptText ?? "").trim();
+	// audio 卡：无摘录文字，批注（用户对录音的转述）作材料——批注即材料本体，
+	// 不再进「我的批注」上下文行（否则同一段文字出现两次）
+	const isAudio = (card.excerptText ?? "").trim().length === 0 && card.excerptType === "audio";
 	const context: string[] = [];
 	if (card.title?.trim()) {
 		context.push(`卡片标题：${card.title.trim()}`);
 	}
-	if (card.note?.trim()) {
+	if (card.note?.trim() && !isAudio) {
 		context.push(`我的批注：${card.note.trim()}`);
 	}
+	// 图片摘录：视觉多模态——system 换图片解释文案，user 为 分段数组（text + image_url）
+	if (card.imageDataUrl) {
+		const parts: ChatContentPart[] = [
+			{
+				type: "text",
+				text:
+					context.length > 0
+						? `${context.join("\n")}\n摘录图片见附图，请解释它。`
+						: "请解释这张摘录图片的内容。",
+			},
+			{ type: "image_url", image_url: { url: card.imageDataUrl } },
+		];
+		return [
+			{
+				role: "system",
+				content:
+					"你是严谨的学习助手。我在阅读时摘录了一张图片（可能是版面截图、图表、手写或照片），想深入了解它。请用简体中文解释图片内容：它展示了什么、关键信息与必要背景、值得注意的要点。控制在 200 字以内，直接输出解释内容，不加前缀标题。",
+			},
+			{ role: "user", content: parts },
+		];
+	}
+	const excerpt = (card.excerptText ?? "").trim() || (isAudio ? (card.note ?? "").trim() : "");
 	const user = context.length > 0 ? `${context.join("\n")}\n\n摘录内容：${excerpt}` : excerpt;
 	return [
 		{
 			role: "system",
-			content:
-				"你是严谨的学习助手。我在阅读时摘录了下面这段内容，想深入了解它。请用简体中文给出补充解释：它讲了什么、必要的背景知识、值得注意的要点或易混淆处。控制在 200 字以内，直接输出解释内容，不加前缀标题。",
+			content: isAudio
+				? "你是严谨的学习助手。这是一段我对录音摘录写下的批注文字（即我对录音内容的记录）。请围绕批注内容用简体中文给出补充解释：它涉及什么、必要的背景知识、值得注意的要点。控制在 200 字以内，直接输出解释内容，不加前缀标题。"
+				: "你是严谨的学习助手。我在阅读时摘录了下面这段内容，想深入了解它。请用简体中文给出补充解释：它讲了什么、必要的背景知识、值得注意的要点或易混淆处。控制在 200 字以内，直接输出解释内容，不加前缀标题。",
 		},
 		{ role: "user", content: user },
 	];
@@ -102,19 +171,22 @@ export const CHAT_HISTORY_LIMIT = 8;
  * 组装文档问答请求（98）：system 约束「只依据文档内容回答 + 引用只许文中
  * 已有页标记」（页码幻觉防线）；上下文以明确围栏包裹；历史裁剪到近
  * CHAT_HISTORY_LIMIT 轮。
+ * 105 联网分支：webSearch 为 true 时 system 换「文档内容 + 联网资料」文案
+ * ——页码约束保留，「未提及要说明」放宽为「区分文档依据与联网资料并注明
+ * 来源」；不传（其他调用方）文案逐字不变。
  */
 export function buildChatMessages(
 	history: ChatTurn[],
 	contextText: string,
 	question: string,
+	webSearch?: boolean,
 ): ChatMessage[] {
 	const trimmed = history.slice(-CHAT_HISTORY_LIMIT);
+	const system = webSearch
+		? "你是严谨的学习助手，结合用户提供的文档内容与联网搜索资料回答问题。要求：1) 用简体中文回答；2) 引用文档出处时使用「（第 N 页）」格式，且 N 只能取文档内容中已出现的页标记，禁止编造页码；3) 优先依据文档内容，文档中未提及的部分可参考联网搜索资料并注明来源；4) 文档内容与联网资料冲突时明确指出差异；5) 直接回答，不加客套。"
+		: "你是严谨的学习助手，依据用户提供的文档内容回答问题。要求：1) 用简体中文回答；2) 引用出处时使用「（第 N 页）」格式，且 N 只能取文档内容中已出现的页标记，禁止编造页码；3) 文档内容中没有依据的部分要明确说明「文档中未提及」，不要自行脑补；4) 直接回答，不加客套。";
 	return [
-		{
-			role: "system",
-			content:
-				"你是严谨的学习助手，依据用户提供的文档内容回答问题。要求：1) 用简体中文回答；2) 引用出处时使用「（第 N 页）」格式，且 N 只能取文档内容中已出现的页标记，禁止编造页码；3) 文档内容中没有依据的部分要明确说明「文档中未提及」，不要自行脑补；4) 直接回答，不加客套。",
-		},
+		{ role: "system", content: system },
 		...trimmed,
 		{
 			role: "user",

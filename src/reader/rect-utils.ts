@@ -101,8 +101,13 @@ export function jumpAnchorY(rects: DocRect[]): number | null {
  * （上下多带一两行上下文便于辨认位置），并保证最小窗口尺寸（留白 6×6
  * 锚点等极小摘录不至于裁出一条缝），整体钳制在页内。
  * 空矩形列表返回整页（调用方不应到达——无 rects 的卡不走页裁剪路径）。
+ * opts.context（110 area/lasso 参照文字摘录显示范围）：余量下限抬到页比例
+ * （水平每侧 ≥10% 页宽、垂直每侧 ≥5% 页高），最小窗口抬到文字摘录量级
+ * （≥55% 页宽 × ≥18% 页高）——小区域不再紧贴包围盒裁成一小块 zoom 图，
+ * 与 text 卡同等带上下文的窗口形态（用户反馈 area/lasso 显示范围远小于
+ * 文字摘录：text 矩形天然整行/整段宽，同一比例公式得到的窗口就大）。
  */
-export function excerptCropRect(rects: DocRect[]): DocRect {
+export function excerptCropRect(rects: DocRect[], opts?: { context?: boolean }): DocRect {
 	if (rects.length === 0) {
 		return { x: 0, y: 0, w: 1, h: 1 };
 	}
@@ -110,16 +115,17 @@ export function excerptCropRect(rects: DocRect[]): DocRect {
 	const y1 = Math.min(...rects.map((r) => r.y));
 	const x2 = Math.max(...rects.map((r) => r.x + r.w));
 	const y2 = Math.max(...rects.map((r) => r.y + r.h));
-	// 余量：水平 = 包围盒宽 8%，垂直 = 包围盒高 40%（多带上下文行），各设页比例下限
-	const mx = Math.max((x2 - x1) * 0.08, 0.008);
-	const my = Math.max((y2 - y1) * 0.4, 0.012);
+	// 余量：水平 = 包围盒宽 8%，垂直 = 包围盒高 40%（多带上下文行），各设页比例
+	// 下限；context 档（110）下限抬高到页比例，大区域仍由比例公式主导
+	const mx = Math.max((x2 - x1) * 0.08, opts?.context ? 0.1 : 0.008);
+	const my = Math.max((y2 - y1) * 0.4, opts?.context ? 0.05 : 0.012);
 	let cx = x1 - mx;
 	let cy = y1 - my;
 	let cw = x2 - x1 + mx * 2;
 	let ch = y2 - y1 + my * 2;
-	// 最小窗口（页比例）：围绕包围盒中心扩到可辨尺寸
-	const MIN_W = 0.22;
-	const MIN_H = 0.08;
+	// 最小窗口（页比例）：围绕包围盒中心扩到可辨尺寸；context 档抬到文字量级
+	const MIN_W = opts?.context ? 0.55 : 0.22;
+	const MIN_H = opts?.context ? 0.18 : 0.08;
 	if (cw < MIN_W) {
 		cx = (x1 + x2) / 2 - MIN_W / 2;
 		cw = MIN_W;

@@ -8,6 +8,7 @@ import {
 	edgeDots,
 	edgePath,
 	effectiveBranchStyle,
+	centerViewportTransform,
 	fitViewportTransform,
 	frameRectFor,
 	FRAME_PADDING,
@@ -418,6 +419,38 @@ describe("mindmap-graph 图纯逻辑", () => {
 			10,
 		);
 		expect(t.scale).toBe(MIN_SCALE);
+	});
+
+	it("centerViewportTransform：包围盒中心映射视口中心（scale=1）", () => {
+		const t = centerViewportTransform(
+			{ minX: 0, minY: 0, maxX: 200, maxY: 100 },
+			{ width: 800, height: 600 },
+			1,
+		);
+		// 中心 (100,50) → (400,300)：tx=400-100×1=300、ty=300-50×1=250
+		expect(t.tx).toBe(300);
+		expect(t.ty).toBe(250);
+		// 纯平移语义：无 scale 字段（104-B 保持缩放档）
+		expect(t).not.toHaveProperty("scale");
+	});
+
+	it("centerViewportTransform：scale 只参与换算不被改写", () => {
+		const t = centerViewportTransform(
+			{ minX: 0, minY: 0, maxX: 200, maxY: 100 },
+			{ width: 800, height: 600 },
+			0.5,
+		);
+		// 中心 (100,50)×0.5=(50,25) → tx=400-50=350、ty=300-25=275
+		expect(t.tx).toBe(350);
+		expect(t.ty).toBe(275);
+	});
+
+	it("centerViewportTransform：负原点包围盒同样居中（两端屏幕坐标对称）", () => {
+		const bbox = { minX: -300, minY: -100, maxX: 100, maxY: 300 };
+		const t = centerViewportTransform(bbox, { width: 800, height: 600 }, 1);
+		// 两端点屏幕坐标应关于视口中心 (400,300) 对称
+		expect(bbox.minX * 1 + t.tx).toBeCloseTo(800 - (bbox.maxX * 1 + t.tx), 10);
+		expect(bbox.minY * 1 + t.ty).toBeCloseTo(600 - (bbox.maxY * 1 + t.ty), 10);
 	});
 
 	// ---------- ⑱ 分支样式 ----------

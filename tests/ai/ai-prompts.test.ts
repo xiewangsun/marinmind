@@ -8,6 +8,8 @@ import {
 	buildSummaryMapMessages,
 	buildSummaryMessages,
 	buildSummaryReduceMessages,
+	canCardAiComment,
+	cardVisionImageRef,
 	type AiMenuAction,
 	type ChatTurn,
 } from "../../src/ai/ai-prompts";
@@ -83,6 +85,142 @@ describe("buildCardCommentMessages", () => {
 		const messages = buildCardCommentMessages({ title: "  ", note: null, excerptText: "内容" });
 		expect(messages[1].content).toBe("内容");
 	});
+
+	it("104-C 图片路径：user 为分段数组（text + image_url），system 换图片解释文案", () => {
+		const messages = buildCardCommentMessages({
+			title: "正态分布",
+			note: "这条曲线代表什么？",
+			excerptText: null,
+			excerptType: "area",
+			imageDataUrl: "data:image/webp;base64,AAAA",
+		});
+		expect(messages[0].content).toContain("图片");
+		expect(messages[0].content).not.toContain("摘录了下面这段内容");
+		const user = messages[1];
+		if (!Array.isArray(user.content)) {
+			throw new Error("图片路径 user.content 应为分段数组");
+		}
+		expect(user.content).toHaveLength(2);
+		expect(user.content[0]).toEqual({ type: "text", text: expect.any(String) });
+		expect(user.content[1]).toEqual({
+			type: "image_url",
+			image_url: { url: "data:image/webp;base64,AAAA" },
+		});
+		// 文本段含标题/批注上下文与附图指引
+		const textPart = user.content[0];
+		if (textPart.type !== "text") {
+			throw new Error("首段应为 text");
+		}
+		expect(textPart.text).toContain("卡片标题：正态分布");
+		expect(textPart.text).toContain("我的批注：这条曲线代表什么？");
+		expect(textPart.text).toContain("附图");
+	});
+
+	it("104-C 图片路径无上下文：文本段为默认引导句", () => {
+		const messages = buildCardCommentMessages({
+			excerptText: null,
+			excerptType: "photo",
+			imageDataUrl: "data:image/webp;base64,BBBB",
+		});
+		const user = messages[1];
+		if (!Array.isArray(user.content) || user.content[0].type !== "text") {
+			throw new Error("user.content 应为 text 起头的分段数组");
+		}
+		expect(user.content[0].text).toContain("摘录图片");
+	});
+
+	it("104-C audio 路径：批注作摘录材料且不重复进上下文行，system 含录音措辞", () => {
+		const messages = buildCardCommentMessages({
+			title: "口语课",
+			note: "老师讲了连读规则",
+			excerptText: null,
+			excerptType: "audio",
+		});
+		expect(messages[0].content).toContain("录音");
+		expect(messages[1].content).toContain("卡片标题：口语课");
+		expect(messages[1].content).toContain("摘录内容：老师讲了连读规则");
+		// 批注即材料本体：不再出现「我的批注：」行（防同一段文字两次）
+		expect(messages[1].content).not.toContain("我的批注：");
+	});
+
+	it("104-C audio 有 excerptText 时走纯文本路径（防御：不误判 audio）", () => {
+		const messages = buildCardCommentMessages({
+			note: "批注",
+			excerptText: "已转写的文字",
+			excerptType: "audio",
+		});
+		expect(messages[0].content).not.toContain("录音");
+		expect(messages[1].content).toContain("摘录内容：已转写的文字");
+		expect(messages[1].content).toContain("我的批注：批注");
+	});
+});
+
+describe("canCardAiComment / cardVisionImageRef（104-C 入口判定）", () => {
+	it("有摘录文字恒可（text/blank/已 OCR 的区域）", () => {
+		expect(canCardAiComment({ excerptType: "text", excerptText: "内容" })).toBe(true);
+		expect(canCardAiComment({ excerptType: "blank", excerptText: "留白" })).toBe(true);
+		expect(
+			canCardAiComment({ excerptType: "area", excerptText: "OCR 文字", excerptRef: null }),
+		).toBe(true);
+	});
+
+	it("图片类摘录：带附件引用即可（无文字也行），缺引用不可", () => {
+		expect(
+			canCardAiComment({
+				excerptType: "area",
+				excerptText: null,
+				excerptRef: "assets/a.webp",
+			}),
+		).toBe(true);
+		expect(
+			canCardAiComment({
+				excerptType: "lasso",
+				excerptText: null,
+				excerptRef: "assets/b.png",
+			}),
+		).toBe(true);
+		expect(
+			canCardAiComment({
+				excerptType: "handwriting",
+				excerptText: null,
+				excerptRef: "assets/c.png",
+			}),
+		).toBe(true);
+		expect(
+			canCardAiComment({
+				excerptType: "photo",
+				excerptText: null,
+				excerptRef: "assets/d.webp",
+			}),
+		).toBe(true);
+		expect(canCardAiComment({ excerptType: "area", excerptText: null, excerptRef: null })).toBe(
+			false,
+		);
+		expect(
+			canCardAiComment({ excerptType: "photo", excerptText: null, excerptRef: "  " }),
+		).toBe(false);
+	});
+
+	it("audio：有批注即可、无批注不可；其他无文字无附件类型不可", () => {
+		expect(canCardAiComment({ excerptType: "audio", excerptText: null, note: "批注" })).toBe(
+			true,
+		);
+		expect(canCardAiComment({ excerptType: "audio", excerptText: null, note: null })).toBe(
+			false,
+		);
+		expect(canCardAiComment({ excerptType: "blank", excerptText: null })).toBe(false);
+	});
+
+	it("cardVisionImageRef：图片类返回归一 ref，其余 null", () => {
+		expect(cardVisionImageRef({ excerptType: "lasso", excerptRef: "assets/b.png " })).toBe(
+			"assets/b.png",
+		);
+		expect(cardVisionImageRef({ excerptType: "text", excerptRef: "assets/a.png" })).toBeNull();
+		expect(
+			cardVisionImageRef({ excerptType: "audio", excerptRef: "assets/x.webm" }),
+		).toBeNull();
+		expect(cardVisionImageRef({ excerptType: "photo", excerptRef: null })).toBeNull();
+	});
 });
 
 describe("buildChatMessages（98 文档对话）", () => {
@@ -119,6 +257,26 @@ describe("buildChatMessages（98 文档对话）", () => {
 		// 总消息 = system + 裁剪后历史 + 当前问题
 		expect(messages).toHaveLength(1 + CHAT_HISTORY_LIMIT + 1);
 		expect(messages[1].content).toBe(`问${10 - CHAT_HISTORY_LIMIT / 2}`);
+	});
+
+	it("105 联网分支：webSearch=true 换「文档 + 联网资料」文案，页码幻觉防线保留", () => {
+		const messages = buildChatMessages([], "内容", "问", true);
+		expect(messages[0].content).toContain("联网搜索资料");
+		expect(messages[0].content).toContain("（第 N 页）");
+		expect(messages[0].content).toContain("禁止编造页码");
+		expect(messages[0].content).toContain("注明来源");
+		// 旧文案的硬禁令措辞不出现（放宽为区分文档依据与联网资料）
+		expect(messages[0].content).not.toContain("「文档中未提及」");
+	});
+
+	it("105 不传第 4 参：system 逐字等于现行文案（回归锚点）；user 消息两分支一致", () => {
+		const plain = buildChatMessages([], "内容", "问")[0].content;
+		expect(plain).toBe(
+			"你是严谨的学习助手，依据用户提供的文档内容回答问题。要求：1) 用简体中文回答；2) 引用出处时使用「（第 N 页）」格式，且 N 只能取文档内容中已出现的页标记，禁止编造页码；3) 文档内容中没有依据的部分要明确说明「文档中未提及」，不要自行脑补；4) 直接回答，不加客套。",
+		);
+		expect(buildChatMessages([], "内容", "问", true).at(-1)?.content).toBe(
+			buildChatMessages([], "内容", "问").at(-1)?.content,
+		);
 	});
 });
 

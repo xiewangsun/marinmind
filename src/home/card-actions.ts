@@ -7,7 +7,8 @@ import { CardEditModal } from "./card-edit-modal";
 import { DeckAssignModal } from "./deck-assign-modal";
 import { TextPromptModal } from "../reader/note-edit-modal";
 import { AiActionModal } from "../ai/ai-action-modal";
-import { buildCardCommentMessages } from "../ai/ai-prompts";
+import { buildCardCommentMessages, canCardAiComment, cardVisionImageRef } from "../ai/ai-prompts";
+import { imageToDataUrl } from "../attachments/vision-image";
 import { AiCardgenModal } from "../ai/ai-cardgen-modal";
 import { AiLinkModal } from "../ai/ai-link-modal";
 
@@ -108,20 +109,49 @@ export function promptCardEdit(app: App, plugin: MarinMindPlugin, card: Card): v
 }
 
 /**
- * AI 补充解释（97，MN4 AI 评论对齐）：摘录内容流式解释弹窗，「填入批注」
- * 把结果预填 CardEditModal——经人手确认/修改后落库（AI 不直接写库）。
- * 阅读器高亮菜单与卡片预览 ⋯ 菜单单源共享；无摘录文字的卡（区域/照片等
- * 未 OCR）由调用方守卫不给入口。
+ * AI 补充解释（97，MN4 AI 评论对齐；104-C 扩视觉/语音）：摘录内容流式解释弹窗，
+ * 「填入批注」把结果预填 CardEditModal——经人手确认/修改后落库（AI 不直接写库）。
+ * 阅读器高亮菜单 / 卡片预览 ⋯ 菜单 / 复习翻面按钮单源共享；入口判定
+ * canCardAiComment（有文字 / 图片类摘录带附件 / audio 有批注）。
+ * 图片类摘录（104-C）：读附件 → imageToDataUrl 栅格化压缩 → vision 多模态直发
+ * （需模型支持视觉）；附件读取/栅格化失败且有文字降级纯文本，无文字 Notice 拦下。
  */
-export function promptCardAiComment(app: App, plugin: MarinMindPlugin, card: Card): void {
-	const source = card.excerptText?.trim();
-	if (!source) {
-		return;
+export async function promptCardAiComment(
+	app: App,
+	plugin: MarinMindPlugin,
+	card: Card,
+): Promise<void> {
+	if (!canCardAiComment(card)) {
+		return; // 菜单已按同函数放行，此处兜底防绕过（与旧版 source 守卫同位）
 	}
+	const source = card.excerptText?.trim() ?? "";
+	// 图片类摘录：附件 → dataURL（失败降级纯文本路径）
+	let imageDataUrl: string | null = null;
+	const imageRef = cardVisionImageRef(card);
+	if (imageRef) {
+		try {
+			const bytes = await plugin.attachments.read(imageRef);
+			imageDataUrl = await imageToDataUrl(bytes, imageRef.split(".").pop() ?? "");
+		} catch (err) {
+			// 附件失联/读取异常：imageToDataUrl 永不 reject，这里只兜 read 抛错
+			console.error("[MarinMind] AI 视觉图片读取失败", err);
+		}
+		if (!imageDataUrl && !source) {
+			new Notice("图片附件读取失败，无法发送给 AI");
+			return;
+		}
+	}
+	const isAudioMaterial = !source && card.excerptType === "audio";
 	new AiActionModal(app, {
 		title: "AI 补充解释",
-		sourceText: source,
-		messages: buildCardCommentMessages(card),
+		sourceText: source || (isAudioMaterial ? (card.note ?? "").trim() : ""),
+		sourceImage: imageDataUrl,
+		sourceLabel: isAudioMaterial ? "批注" : undefined,
+		messages: buildCardCommentMessages({
+			...card,
+			imageDataUrl,
+			excerptType: card.excerptType,
+		}),
 		settings: plugin.settings,
 		onUsage: (usage) => plugin.addAiUsage(usage),
 		apply: {
