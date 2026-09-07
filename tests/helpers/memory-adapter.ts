@@ -9,7 +9,13 @@ export class MemoryAdapter implements ListableStorageAdapter {
 	writeCounts = new Map<string, number>();
 
 	exists(path: string): Promise<boolean> {
-		return Promise.resolve(this.files.has(path));
+		if (this.files.has(path)) return Promise.resolve(true);
+		// 目录形态：有任意子文件即视为存在（真实适配器对目录的语义）
+		const prefix = `${path}/`;
+		for (const p of this.files.keys()) {
+			if (p.startsWith(prefix)) return Promise.resolve(true);
+		}
+		return Promise.resolve(false);
 	}
 	mkdir(): Promise<void> {
 		return Promise.resolve();
@@ -44,6 +50,16 @@ export class MemoryAdapter implements ListableStorageAdapter {
 			}
 		}
 		return Promise.resolve({ files, folders });
+	}
+
+	/** 删空目录（124 webclip-migrate 用）：目录本身不单独跟踪，仅当无内容时成功 */
+	rmdir(path: string): Promise<void> {
+		for (const p of this.files.keys()) {
+			if (p.startsWith(`${path}/`)) {
+				return Promise.reject(new Error("目录非空"));
+			}
+		}
+		return Promise.resolve();
 	}
 }
 

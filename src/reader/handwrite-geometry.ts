@@ -1,4 +1,5 @@
 import type { DocRect } from "../types";
+import { encodeCanvasWebpFirst } from "../imaging/canvas-encode";
 import type { PageSize } from "./page-view";
 
 /**
@@ -17,9 +18,9 @@ export interface HandwriteStroke {
 	points: StrokePoint[];
 }
 
-/** 手写导出 PNG 的上限倍率与总像素钳制（4M 像素约 16MB RGBA） */
-const PNG_SCALE = 2;
-const MAX_PNG_PIXELS = 4 * 1024 * 1024;
+/** 手写导出图片的上限倍率与总像素钳制（4M 像素约 16MB RGBA） */
+const EXPORT_SCALE = 2;
+const MAX_EXPORT_PIXELS = 4 * 1024 * 1024;
 /** 笔迹颜色：红色批注笔（覆盖在 PDF 上醒目；与 tesseract 无关，仅视觉） */
 const INK_COLOR = "#d7373f";
 
@@ -165,13 +166,16 @@ export function strokesBBox(
 	};
 }
 
-/** PNG 画布像素尺寸（纯计算便于测试）：bbox × 页基准尺寸 × 2，总像素钳制到 4M */
-export function pngPixelSize(bbox: DocRect, pageBase: PageSize): { width: number; height: number } {
-	let width = Math.max(1, Math.round(bbox.w * pageBase.width * PNG_SCALE));
-	let height = Math.max(1, Math.round(bbox.h * pageBase.height * PNG_SCALE));
+/** 导出画布像素尺寸（纯计算便于测试）：bbox × 页基准尺寸 × 2，总像素钳制到 4M */
+export function exportPixelSize(
+	bbox: DocRect,
+	pageBase: PageSize,
+): { width: number; height: number } {
+	let width = Math.max(1, Math.round(bbox.w * pageBase.width * EXPORT_SCALE));
+	let height = Math.max(1, Math.round(bbox.h * pageBase.height * EXPORT_SCALE));
 	const pixels = width * height;
-	if (pixels > MAX_PNG_PIXELS) {
-		const k = Math.sqrt(MAX_PNG_PIXELS / pixels);
+	if (pixels > MAX_EXPORT_PIXELS) {
+		const k = Math.sqrt(MAX_EXPORT_PIXELS / pixels);
 		width = Math.max(1, Math.round(width * k));
 		height = Math.max(1, Math.round(height * k));
 	}
@@ -179,21 +183,24 @@ export function pngPixelSize(bbox: DocRect, pageBase: PageSize): { width: number
 }
 
 /**
- * 把笔迹渲染为裁剪到 bbox 的 PNG（透明底）。
+ * 把笔迹渲染为裁剪到 bbox 的图片（透明底）。
  * lineWidth 为归一化线宽（相对页宽的比例），输出画布内按比例放大；
  * 逐段按压感调整线宽（84-A 笔锋——鼠标恒 0.5 时与旧版恒宽视觉一致）。
+ * 编码（2026-09 决策反转）：原刻意保 PNG（细线条+全透明底，有损会振铃），
+ * 应统一存库体积需求改 WebP 优先——手写专档 q0.9 缓解振铃，环境不支持
+ * 回退 PNG，ext 跟随实际格式（详见 docs/技术架构）。
  * 无 canvas 环境 / 编码失败返回 null（调用方放弃本次提交）。
  */
-export async function renderStrokesToPNG(
+export async function renderStrokesToImage(
 	strokes: HandwriteStroke[],
 	bbox: DocRect,
 	pageBase: PageSize,
 	lineWidthNorm: number,
-): Promise<ArrayBuffer | null> {
+): Promise<{ bytes: ArrayBuffer; ext: "png" | "webp" } | null> {
 	if (typeof document === "undefined") {
 		return null;
 	}
-	const { width: outW, height: outH } = pngPixelSize(bbox, pageBase);
+	const { width: outW, height: outH } = exportPixelSize(bbox, pageBase);
 	const canvas = document.createElement("canvas");
 	canvas.width = outW;
 	canvas.height = outH;
@@ -238,13 +245,10 @@ export async function renderStrokesToPNG(
 			ctx.fill();
 		}
 	}
-	return await new Promise<ArrayBuffer | null>((resolve) => {
-		canvas.toBlob((blob) => {
-			if (!blob) {
-				resolve(null);
-				return;
-			}
-			void blob.arrayBuffer().then(resolve, () => resolve(null));
-		}, "image/png");
-	});
+	// 编码：WebP 优先 q0.9（手写专档，缓解细线振铃），环境不支持回退 PNG
+	const enc = await encodeCanvasWebpFirst(canvas, 0.9);
+	if (!enc) {
+		return null;
+	}
+	return { bytes: await enc.blob.arrayBuffer(), ext: enc.ext };
 }

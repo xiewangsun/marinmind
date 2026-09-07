@@ -1,7 +1,7 @@
 /**
  * 卡片互链构造（㊻-A，纯函数，零 obsidian 依赖，vitest 直接覆盖）
  *
- * 卡片以标准 md 存储（数据根 `<书名>.md` 内 `> [!excerpt]` callout +
+ * 卡片以标准 md 存储（数据根 `books/<书名>.md` 内 `> [!excerpt]` callout +
  * 尾随 `^card-<id>` 块锚点），Obsidian 原生解析 `[[文件#^card-id|标题]]`
  * 链接与 `![[文件#^card-id]]` 嵌入（普通笔记与 Canvas 白板均可）——
  * 本模块只负责把卡片解析成这两种文本，供「复制卡片链接 / 复制嵌入代码」入口使用。
@@ -15,7 +15,7 @@ import { cardTitle } from "../review/map-context";
 import type { Card } from "../types";
 
 /**
- * 卡片链接目标（`MarinMind/书名#^card-<id>` 形态，无 `.md` 扩展名——
+ * 卡片链接目标（`MarinMind/books/书名#^card-<id>` 形态，无 `.md` 扩展名——
  * Obsidian 链接惯例）。rootDir 为空（数据根即 vault 根）时直接用书文件相对路径。
  */
 export function cardLinkTarget(rootDir: string, bookRelPath: string, cardId: string): string {

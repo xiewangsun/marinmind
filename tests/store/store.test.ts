@@ -137,9 +137,9 @@ describe("MarinMindStore 落盘与恢复", () => {
 		const adapter = new MemoryAdapter();
 		const { d, c } = await seedBookWithCard(adapter);
 
-		expect(adapter.files.has("书籍A.md")).toBe(true);
-		expect(textOf(adapter, "书籍A.md")).toContain("marinmind: book");
-		expect(textOf(adapter, "书籍A.md")).toContain("摘录内容");
+		expect(adapter.files.has("books/书籍A.md")).toBe(true);
+		expect(textOf(adapter, "books/书籍A.md")).toContain("marinmind: book");
+		expect(textOf(adapter, "books/书籍A.md")).toContain("摘录内容");
 
 		const reopened = await MarinMindStore.open(adapter);
 		expect(reopened.stats()).toEqual({ documents: 1, cards: 1, mindmaps: 0, nodes: 0 });
@@ -158,39 +158,39 @@ describe("MarinMindStore 落盘与恢复", () => {
 		dA.cards.set("ca", card({ id: "ca", documentId: dA.doc.id }));
 		dB.cards.set("cb", card({ id: "cb", documentId: dB.doc.id }));
 		await store.flush();
-		const countB = adapter.writeCounts.get("乙书.md");
+		const countB = adapter.writeCounts.get("books/乙书.md");
 
 		// 只改甲书的一张卡
 		dA.cards.get("ca")!.excerptText = "改后的内容";
 		store.markDirty(dA.doc.id);
 		await store.flush();
-		expect(adapter.writeCounts.get("乙书.md")).toBe(countB);
-		expect(textOf(adapter, "甲书.md")).toContain("改后的内容");
+		expect(adapter.writeCounts.get("books/乙书.md")).toBe(countB);
+		expect(textOf(adapter, "books/甲书.md")).toContain("改后的内容");
 		store.close();
 	});
 
 	it("零写入契约：markDirty 但内容未变 → flush 不写盘", async () => {
 		const adapter = new MemoryAdapter();
 		const { store, d } = await seedBookWithCard(adapter);
-		const count = adapter.writeCounts.get("书籍A.md");
+		const count = adapter.writeCounts.get("books/书籍A.md");
 
 		store.markDirty(d.id); // 无任何内容变化
 		await store.flush();
-		expect(adapter.writeCounts.get("书籍A.md")).toBe(count);
+		expect(adapter.writeCounts.get("books/书籍A.md")).toBe(count);
 		store.close();
 	});
 
 	it("重开时未触碰的文件保持原字节（loadAll 不重写）", async () => {
 		const adapter = new MemoryAdapter();
 		const { d } = await seedBookWithCard(adapter);
-		const raw = textOf(adapter, "书籍A.md");
-		const before = adapter.writeCounts.get("书籍A.md");
+		const raw = textOf(adapter, "books/书籍A.md");
+		const before = adapter.writeCounts.get("books/书籍A.md");
 
 		const store = await MarinMindStore.open(adapter);
 		store.markDirty(d.id); // 即使标脏——内容与磁盘一致，零写契约拦下
 		await store.flush();
-		expect(textOf(adapter, "书籍A.md")).toBe(raw);
-		expect(adapter.writeCounts.get("书籍A.md")).toBe(before);
+		expect(textOf(adapter, "books/书籍A.md")).toBe(raw);
+		expect(adapter.writeCounts.get("books/书籍A.md")).toBe(before);
 		store.close();
 	});
 
@@ -200,20 +200,20 @@ describe("MarinMindStore 落盘与恢复", () => {
 		const cardId = seeded.c.id;
 		seeded.store.close();
 		// 模拟 ㊻-A 之前写入的旧文件：序列化尚无块锚点行（callout 直连机器注释）
-		const oldText = textOf(adapter, "书籍A.md").replace(`^card-${cardId}\n`, "");
+		const oldText = textOf(adapter, "books/书籍A.md").replace(`^card-${cardId}\n`, "");
 		expect(oldText).not.toContain(`^card-${cardId}`);
-		writeText(adapter, "书籍A.md", oldText);
+		writeText(adapter, "books/书籍A.md", oldText);
 
 		const store = await MarinMindStore.open(adapter);
 		const book = store.bookOfCard(cardId)!; // 解析对缺失锚点仅警告，卡片照常认领
 		expect(book).toBeDefined();
 		await store.ensureBookWritten(book.doc.id);
-		expect(textOf(adapter, "书籍A.md")).toContain(`^card-${cardId}`);
-		const writes = adapter.writeCounts.get("书籍A.md")!;
+		expect(textOf(adapter, "books/书籍A.md")).toContain(`^card-${cardId}`);
+		const writes = adapter.writeCounts.get("books/书籍A.md")!;
 
 		// 磁盘已最新：再保底不重写（零写契约）
 		await store.ensureBookWritten(book.doc.id);
-		expect(adapter.writeCounts.get("书籍A.md")).toBe(writes);
+		expect(adapter.writeCounts.get("books/书籍A.md")).toBe(writes);
 		store.close();
 	});
 });
@@ -226,7 +226,7 @@ describe("MarinMindStore 孤儿与命名", () => {
 		store.orphanState.cards.set(c.id, c);
 		store.markDirty(ORPHAN_SCOPE);
 		await store.flush();
-		expect(adapter.files.has("未归类卡片.md")).toBe(true);
+		expect(adapter.files.has("books/未归类卡片.md")).toBe(true);
 
 		const reopened = await MarinMindStore.open(adapter);
 		const restored = reopened.orphanState.cards.get(c.id)!;
@@ -243,12 +243,12 @@ describe("MarinMindStore 孤儿与命名", () => {
 		store.orphanState.cards.set(c.id, c);
 		store.markDirty(ORPHAN_SCOPE);
 		await store.flush();
-		expect(adapter.files.has("未归类卡片.md")).toBe(true);
+		expect(adapter.files.has("books/未归类卡片.md")).toBe(true);
 
 		store.orphanState.cards.delete(c.id);
 		store.markDirty(ORPHAN_SCOPE);
 		await store.flush();
-		expect(adapter.files.has("未归类卡片.md")).toBe(false);
+		expect(adapter.files.has("books/未归类卡片.md")).toBe(false);
 		store.close();
 	});
 
@@ -259,9 +259,12 @@ describe("MarinMindStore 孤儿与命名", () => {
 		const d2 = doc({ id: "abcd1234-0000-4000-8000-000000000000" });
 		store.upsertBook(d1);
 		const s2 = store.upsertBook(d2);
-		expect(s2.relPath).toBe("书籍A (abcd).md");
+		expect(s2.relPath).toBe("books/书籍A (abcd).md");
 		await store.flush();
-		expect([...adapter.files.keys()].sort()).toEqual(["书籍A (abcd).md", "书籍A.md"]);
+		expect([...adapter.files.keys()].sort()).toEqual([
+			"books/书籍A (abcd).md",
+			"books/书籍A.md",
+		]);
 		store.close();
 	});
 });
@@ -299,7 +302,7 @@ describe("MarinMindStore 级联删除", () => {
 		expect(mapState.nodes.get("n2")?.parentId).toBeNull(); // 被删节点的子节点上浮为根（对齐旧库 parent_id SET NULL）
 		await store.flush();
 		// 落盘后的文件不再含 c1
-		expect(textOf(adapter, "书籍A.md")).not.toContain("^card-c1");
+		expect(textOf(adapter, "books/书籍A.md")).not.toContain("^card-c1");
 		store.close();
 	});
 
@@ -309,11 +312,11 @@ describe("MarinMindStore 级联删除", () => {
 		const m = map({ documentId: d.id });
 		store.upsertMap(m);
 		await store.flush();
-		expect(adapter.files.has("脑图/学习图.md")).toBe(true);
+		expect(adapter.files.has("mindmaps/学习图.md")).toBe(true);
 
 		expect(store.deleteBook(d.id)).toBe(true);
 		await store.flush();
-		expect(adapter.files.has("书籍A.md")).toBe(false);
+		expect(adapter.files.has("books/书籍A.md")).toBe(false);
 		expect(store.books.size).toBe(0);
 		expect(store.maps.get(m.id)!.map.documentId).toBeNull();
 		store.close();
@@ -328,12 +331,12 @@ describe("MarinMindStore 级联删除", () => {
 		store.upsertMap(m);
 		store.upsertBook({ ...d, collectMapId: m.id });
 		await store.flush();
-		expect(textOf(adapter, "书籍A.md")).toContain("collect_map_id");
+		expect(textOf(adapter, "books/书籍A.md")).toContain("collect_map_id");
 
 		expect(store.deleteMap(m.id)).toBe(true);
 		expect(store.books.get(d.id)!.doc.collectMapId).toBeNull();
 		await store.flush();
-		expect(textOf(adapter, "书籍A.md")).not.toContain("collect_map_id");
+		expect(textOf(adapter, "books/书籍A.md")).not.toContain("collect_map_id");
 		store.close();
 	});
 
@@ -348,10 +351,10 @@ describe("MarinMindStore 级联删除", () => {
 		store.upsertBook({ ...d, category: "学习" });
 		store.upsertBook({ ...d, category: "学习", updatedAt: d.updatedAt + 1 });
 		expect(store.books.get(d.id)).toBeDefined();
-		expect(adapter.files.has("书籍A.md")).toBe(true);
+		expect(adapter.files.has("books/书籍A.md")).toBe(true);
 		expect([...adapter.files.keys()].some((k) => /\(\w{4}\)\.md$/.test(k))).toBe(false);
 		await store.flush();
-		expect(adapter.files.has("书籍A.md")).toBe(true);
+		expect(adapter.files.has("books/书籍A.md")).toBe(true);
 		store.close();
 	});
 });
@@ -360,7 +363,7 @@ describe("MarinMindStore 外部修改回灌", () => {
 	it("非脏窗口：磁盘改动整文件覆盖内存；自写回声被忽略", async () => {
 		const adapter = new MemoryAdapter();
 		const { store, d, c } = await seedBookWithCard(adapter);
-		const rel = "书籍A.md";
+		const rel = "books/书籍A.md";
 
 		// 用户手编文本
 		const edited = textOf(adapter, rel).replace("摘录内容", "用户手编的新内容");
@@ -384,7 +387,7 @@ describe("MarinMindStore 外部修改回灌", () => {
 	it("脏窗口：三字段合并——磁盘文本/批注/标签胜，几何与复习保内存", async () => {
 		const adapter = new MemoryAdapter();
 		const { store, d, c } = await seedBookWithCard(adapter);
-		const rel = "书籍A.md";
+		const rel = "books/书籍A.md";
 
 		// 插件侧待写：改几何 + 复习
 		const memCard = store.books.get(d.id)!.cards.get(c.id)!;
@@ -415,7 +418,7 @@ describe("MarinMindStore 外部修改回灌", () => {
 	it("脏窗口：lineStyle 取磁盘（77——手编机器层 line 键的线型即时生效）", async () => {
 		const adapter = new MemoryAdapter();
 		const { store, d, c } = await seedBookWithCard(adapter);
-		const rel = "书籍A.md";
+		const rel = "books/书籍A.md";
 
 		// 插件侧待写（脏窗口开启）：内存卡是默认下划线（lineStyle null）
 		store.markDirty(d.id);
@@ -435,7 +438,7 @@ describe("MarinMindStore 外部修改回灌", () => {
 	it("脏窗口：文档级合并取磁盘 title 与 category（㉟——手编分类不被内存回退）", async () => {
 		const adapter = new MemoryAdapter();
 		const { store, d } = await seedBookWithCard(adapter);
-		const rel = "书籍A.md";
+		const rel = "books/书籍A.md";
 
 		// 插件侧待写（脏窗口开启，内存 doc 仍是 category: null）
 		store.markDirty(d.id);
@@ -458,7 +461,7 @@ describe("MarinMindStore 外部修改回灌", () => {
 		const m = map({ documentId: d.id });
 		store.upsertMap(m);
 
-		const r = await store.handleExternalChange("书籍A.md", null);
+		const r = await store.handleExternalChange("books/书籍A.md", null);
 		expect(r.removedCards.map((x) => x.id)).toEqual([c.id]);
 		expect(store.books.size).toBe(0);
 		expect(store.maps.get(m.id)!.map.documentId).toBeNull();
@@ -472,18 +475,18 @@ describe("MarinMindStore 外部修改回灌", () => {
 		const ms = store.upsertMap(m);
 		ms.nodes.set("n1", node({ id: "n1", mapId: m.id, cardId: c.id }));
 		await store.flush();
-		expect(textOf(adapter, "脑图/学习图.md")).toContain("[[书籍A#^card-");
+		expect(textOf(adapter, "mindmaps/学习图.md")).toContain("[[书籍A#^card-");
 
 		// vault rename：文件已被移动到新路径，插件收到事件
-		const content = adapter.files.get("书籍A.md")!;
-		adapter.files.delete("书籍A.md");
-		adapter.files.set("改名的书.md", content);
-		store.handleExternalRename("书籍A.md", "改名的书.md");
+		const content = adapter.files.get("books/书籍A.md")!;
+		adapter.files.delete("books/书籍A.md");
+		adapter.files.set("books/改名的书.md", content);
+		store.handleExternalRename("books/书籍A.md", "books/改名的书.md");
 		await store.flush();
-		expect(adapter.files.has("书籍A.md")).toBe(false);
-		expect(adapter.files.has("改名的书.md")).toBe(true);
-		expect(textOf(adapter, "改名的书.md")).toContain("title: 改名的书"); // 标题跟随文件名
-		expect(textOf(adapter, "脑图/学习图.md")).toContain("[[改名的书#^card-");
+		expect(adapter.files.has("books/书籍A.md")).toBe(false);
+		expect(adapter.files.has("books/改名的书.md")).toBe(true);
+		expect(textOf(adapter, "books/改名的书.md")).toContain("title: 改名的书"); // 标题跟随文件名
+		expect(textOf(adapter, "mindmaps/学习图.md")).toContain("[[改名的书#^card-");
 		expect(store.books.get(d.id)!.doc.title).toBe("改名的书");
 		store.close();
 	});
@@ -491,7 +494,7 @@ describe("MarinMindStore 外部修改回灌", () => {
 	it("frontmatter 缺失的外部修改被忽略（防误清库）", async () => {
 		const adapter = new MemoryAdapter();
 		const { store, d, c } = await seedBookWithCard(adapter);
-		const r = await store.handleExternalChange("书籍A.md", "用户把文件搞坏了");
+		const r = await store.handleExternalChange("books/书籍A.md", "用户把文件搞坏了");
 		expect(r.warnings.join()).toContain("忽略");
 		expect(store.books.get(d.id)!.cards.get(c.id)).toBeDefined(); // 内存保住
 		store.close();
@@ -600,7 +603,7 @@ describe("MarinMindStore 分类/卡组清单（76）", () => {
 		await store.flush();
 		const d = doc({ id: "abcd1234-0000-4000-8000-000000000000", title: "分类" });
 		const s = store.upsertBook(d);
-		expect(s.relPath.startsWith("分类 (")).toBe(true);
+		expect(s.relPath.startsWith("books/分类 (")).toBe(true);
 		await store.flush();
 		// 清单文件内容未被书文件覆盖
 		expect(textOf(adapter, "分类.md")).toContain("marinmind: folders");

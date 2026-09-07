@@ -1,13 +1,14 @@
 import type { Card, DocRect, NormPoint } from "../types";
 import { highlightFallbackColor, highlightLineColor, highlightLineStyle } from "./highlight-colors";
+import { encodeCanvasWebpFirst } from "../imaging/canvas-encode";
 
 /**
  * 区域/套索摘录的内容快照（⑳）：从已渲染的页面 canvas 裁剪摘录区域为图片，
  * 存附件（excerptRef）——脑图节点与复习界面据此显示"选择的区域内容"而非占位文字，
  * 与手写/照片同模式（一卡一附件）；摘录区域本身在页面上仍是矢量高亮（缩放不失真）。
  * 编码（㉛）优先 WebP：体积约为 PNG 的 1/3~1/5 且支持 alpha（套索多边形外透明，
- * JPEG 用不了）；iOS WKWebView 的 canvas 不支持编码 WebP（toBlob 静默回退 PNG），
- * 故先探测能力、不支持则落回 PNG——扩展名跟随实际格式写入 excerptRef。
+ * JPEG 用不了）；能力探测与回退逻辑单源于 src/imaging/canvas-encode.ts——
+ * 扩展名跟随实际格式写入 excerptRef。
  */
 
 /** 快照编码结果：bytes 为图片字节，ext 为实际格式（决定附件扩展名） */
@@ -16,41 +17,13 @@ export interface SnapshotImage {
 	ext: "webp" | "png";
 }
 
-/** WebP 有损质量（0-1）：文字页区域 0.85 肉眼无损且体积显著小于 PNG */
-const WEBP_QUALITY = 0.85;
-
-/** WebP 编码能力缓存（null = 尚未探测） */
-let webpSupported: boolean | null = null;
-
-/** 探测当前环境能否用 canvas 编码 WebP：不支持时 toDataURL 静默回退 PNG，以前缀判别 */
-function canEncodeWebp(): boolean {
-	if (webpSupported === null) {
-		const probe = document.createElement("canvas");
-		probe.width = 1;
-		probe.height = 1;
-		webpSupported = probe.toDataURL("image/webp").startsWith("data:image/webp");
+/** canvas → 快照字节（能力探测与编码单源：src/imaging/canvas-encode.ts，2026-09 收敛） */
+async function encodeCanvas(canvas: HTMLCanvasElement): Promise<SnapshotImage> {
+	const enc = await encodeCanvasWebpFirst(canvas);
+	if (!enc) {
+		throw new Error("画布导出图片失败");
 	}
-	return webpSupported;
-}
-
-/** canvas → 图片字节（WebP 优先，环境不支持回退 PNG）；ext 随实际格式返回 */
-function encodeCanvas(canvas: HTMLCanvasElement): Promise<SnapshotImage> {
-	const useWebp = canEncodeWebp();
-	return new Promise((resolve, reject) => {
-		canvas.toBlob(
-			(blob) => {
-				if (!blob) {
-					reject(new Error(`画布导出 ${useWebp ? "WebP" : "PNG"} 失败`));
-					return;
-				}
-				void blob
-					.arrayBuffer()
-					.then((bytes) => resolve({ bytes, ext: useWebp ? "webp" : "png" }), reject);
-			},
-			useWebp ? "image/webp" : "image/png",
-			useWebp ? WEBP_QUALITY : undefined,
-		);
-	});
+	return { bytes: await enc.blob.arrayBuffer(), ext: enc.ext };
 }
 
 /** 画布像素矩形（源画布上的裁剪窗口） */

@@ -68,6 +68,15 @@ export class NodeFsAdapter implements ListableStorageAdapter {
 		await this.fs().promises.rm(this.abs(rel), { recursive: true, force: true });
 	}
 
+	async rmdir(rel: string): Promise<void> {
+		try {
+			// 仅删空目录（recursive:false）；不存在 / 非空静默——调用方仅作尽力清理
+			await this.fs().promises.rmdir(this.abs(rel));
+		} catch {
+			// ENOENT / ENOTEMPTY 均视为无需处理
+		}
+	}
+
 	async list(rel: string): Promise<{ files: string[]; folders: string[] }> {
 		if (!(await this.exists(rel))) {
 			return { files: [], folders: [] };

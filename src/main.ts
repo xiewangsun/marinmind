@@ -26,6 +26,28 @@ import { MarinMindReaderView, READER_VIEW_TYPE } from "./reader/reader-view";
 import { MarinMindHomeView, HOME_VIEW_TYPE } from "./home/home-view";
 import { AiChatView, AI_CHAT_VIEW_TYPE } from "./ai/ai-chat-view";
 import { PdfPickerModal, pickTarget, type ExternalDocEntry } from "./reader/pdf-picker-modal";
+import { WebclipModal } from "./webclip/webclip-modal";
+import {
+	captureAllScreens,
+	captureOutside,
+	focusOwnWindow,
+	registerGlobalHotkey,
+	unregisterGlobalHotkey,
+	validateAccelerator,
+	writePngToClipboard,
+	type CapturedScreen,
+} from "./capture/screen-capture";
+import { cropScreenRegion } from "./capture/image-crop";
+import { clipScreenRegionToNote } from "./capture/screen-clip";
+import {
+	destroyActiveOverlaySession,
+	selectScreenRegion,
+	type OverlayAction,
+	type OverlayOutcome,
+	type ScreenSelectResult,
+} from "./capture/screen-select";
+import { createCaptureTray, destroyCaptureTray, type CaptureTrayLike } from "./capture/tray-icon";
+import { ScreenshotCropModal } from "./capture/screenshot-crop-modal";
 import type { ViewMode } from "./ui/view-mode-bar";
 import { MarinMindReviewView, REVIEW_VIEW_TYPE } from "./review/review-view";
 import type { ReviewScope } from "./review/review-view";
@@ -40,13 +62,18 @@ import { RecordingBar } from "./reader/recording-bar";
 import { CardEventBus } from "./events/card-bus";
 import {
 	ASSETS_SUBDIR,
+	CLIPS_SUBDIR,
 	DEFAULT_BACKUP_DIR,
 	DEFAULT_DATA_DIR,
 	DB_FILENAME,
 	LEGACY_DATA_DIR,
 	MSG_EXTERNAL_DOC_MOBILE,
 } from "./constants";
-import { loadSettings, type MarinMindSettings } from "./settings/settings";
+import {
+	loadSettings,
+	extractLegacyWebclipFolder,
+	type MarinMindSettings,
+} from "./settings/settings";
 import type { AiUsage } from "./ai/ai-provider";
 import { MarinMindSettingTab } from "./settings/settings-tab";
 import { ConfirmModal } from "./mindmap/confirm-modal";
@@ -54,8 +81,9 @@ import { DocumentManagerModal } from "./documents/document-manager-modal";
 import { ExternalDocWatcher } from "./documents/external-watcher";
 import { copyTree } from "./storage/copy-tree";
 import { externalFileExists, pickExternalPath } from "./storage/external-file";
-import { isAbsoluteFsPath, isHiddenVaultDir } from "./storage/paths";
+import { isAbsoluteFsPath, isHiddenVaultDir, joinRel } from "./storage/paths";
 import { buildCardCopyText, type CardCopyMode } from "./links/card-links";
+import { migrateLegacyWebclips } from "./webclip/webclip-migrate";
 import {
 	resolveBackupLocation,
 	resolveDataLocation,
@@ -101,6 +129,11 @@ export default class MarinMindPlugin extends Plugin {
 	 * 绝对路径——本 watcher 对账改名/移动自动跟随（决策见 external-reconcile）。
 	 */
 	externalWatcher?: ExternalDocWatcher;
+	/**
+	 * 已退役的 webclipFolder 旧设置值（124，initStorage 从原始 data.json 提取；
+	 * 仅供存量剪藏迁移定位旧目录，此后不再使用）。
+	 */
+	private legacyWebclipFolder: string | null = null;
 
 	/**
 	 * 全局录音器（84-C：命令面板「录音摘录（自由卡片）」与主页重录入口共用，
@@ -111,6 +144,10 @@ export default class MarinMindPlugin extends Plugin {
 	private globalRecBar: RecordingBar | null = null;
 	/** 当前全局录音的落卡锚点（84-C：start 时同步捕获，保存时消费） */
 	private globalRecAnchor: MediaAnchor | null = null;
+	/** 已注册的截图全局热键（117，空串 = 未注册；onunload 注销） */
+	private captureHotkeyRegistered = "";
+	/** 截图托盘实例（120，空 = 未创建；onunload 销毁） */
+	private captureTray: CaptureTrayLike | null = null;
 
 	/**
 	 * 数据层初始化 promise（失败在内部消化为 db 保持 undefined，不产生未处理拒绝）。
@@ -203,7 +240,8 @@ export default class MarinMindPlugin extends Plugin {
 		this.setupAutoFlashcard();
 
 		// 功能区图标：打开主页（㉟：概览/文档/卡片/脑图导航；PDF 选择器入口移至主页按钮 + 命令面板）
-		this.addRibbonIcon("layout-dashboard", "MarinMind 主页", () => {
+		// 大脑图标（brain）：呼应"思维/记忆"产品定位（Obsidian 1.4+ 捆绑 lucide 含 brain）
+		this.addRibbonIcon("brain", "MarinMind 主页", () => {
 			void this.openHome();
 		});
 
@@ -226,7 +264,32 @@ export default class MarinMindPlugin extends Plugin {
 				name: "打开库外文档（桌面）",
 				callback: () => void this.openExternalPdf(),
 			});
+			// 114 截图工具：desktopCapturer / getDisplayMedia 仅桌面可靠；
+			// 不注册默认热键（用户可在快捷键面板自绑）
+			this.addCommand({
+				id: "capture-screen",
+				name: "截图并复制到剪贴板（桌面）",
+				callback: () => void this.captureScreen(),
+			});
+			// 117 外截：Obsidian 窗口挡住目标时的互补路径——隐藏本窗口后拍摄
+			this.addCommand({
+				id: "capture-screen-outside",
+				name: "截图其他窗口（隐藏本窗口后拍摄，桌面）",
+				callback: () => void this.captureScreenOutside(),
+			});
+			// 119 屏幕区域剪藏：真实屏幕所见即所得（浏览器页面排版不再失真）
+			this.addCommand({
+				id: "clip-screen-region",
+				name: "剪藏屏幕区域为笔记（桌面）",
+				callback: () => void this.runScreenCaptureAction("note"),
+			});
 		}
+		// 113 网页剪藏：抓网页正文转 md 笔记文档（全平台——requestUrl 桌面/移动端均可用）
+		this.addCommand({
+			id: "clip-webpage",
+			name: "保存网页为笔记文档",
+			callback: () => new WebclipModal(this.app, this).open(),
+		});
 		this.addCommand({
 			id: "start-review",
 			name: "开始复习（到期闪卡）",
@@ -373,9 +436,23 @@ export default class MarinMindPlugin extends Plugin {
 
 		// 设置页
 		this.addSettingTab(new MarinMindSettingTab(this.app, this));
+		// 117 截图全局热键：设置非空且桌面时注册（内部自带桌面守卫）
+		this.applyCaptureGlobalHotkey();
+		// 120 截图托盘：设置开启且桌面时创建（内部自带桌面与环境守卫）
+		this.applyCaptureTray();
 	}
 
 	onunload(): void {
+		// 117 截图全局热键：注销（系统级注册不随插件卸载自动释放）
+		if (this.captureHotkeyRegistered) {
+			unregisterGlobalHotkey(this.captureHotkeyRegistered);
+			this.captureHotkeyRegistered = "";
+		}
+		// 120 截图托盘：销毁（系统托盘图标不随插件卸载自动消失）
+		destroyCaptureTray(this.captureTray);
+		this.captureTray = null;
+		// 118 覆盖窗直选会话：销毁置顶窗 + 清临时目录（幂等，无会话时静默）
+		destroyActiveOverlaySession();
 		// 未弹出的自动入图反馈直接丢弃（计时器随插件卸载失效）
 		if (this.autoAddNotice) {
 			window.clearTimeout(this.autoAddNotice.timer);
@@ -529,6 +606,9 @@ export default class MarinMindPlugin extends Plugin {
 	 */
 	private async initStorage(): Promise<void> {
 		this.settings = await loadSettings(this);
+		// 124 剪藏迁移：旧 webclipFolder 字段已退役（loadSettings 不再产出），
+		// 此处从原始记录提取供 initStore 的存量迁移定位旧目录
+		this.legacyWebclipFolder = extractLegacyWebclipFolder(await this.loadData());
 		try {
 			this.dataLoc = await resolveDataLocation(this.app, this.settings.dataDir);
 		} catch (err) {
@@ -552,6 +632,12 @@ export default class MarinMindPlugin extends Plugin {
 	private async initStore(): Promise<void> {
 		try {
 			await this.openAndWire(this.dataLoc);
+			// 123 布局 v2 迁移摘要（幂等；有搬迁才打扰用户）
+			this.notifyLayoutMigration();
+			// 124 存量剪藏迁移（vault 旧 WebClips/ 等 → 数据根 clips/；幂等，
+			// 串行 await 保证此后打开的剪藏文档键已同步）
+			await migrateLegacyWebclips(this, this.legacyWebclipFolder);
+			this.legacyWebclipFolder = null;
 			this.registerVaultFileSync();
 			// 103-C 累计复习口径统一：一次性基线迁移（幂等，见方法注释）
 			this.migrateReviewStatsBaseline();
@@ -585,6 +671,32 @@ export default class MarinMindPlugin extends Plugin {
 			// 失败时 this.store 保持 undefined，调用方以 whenReady + store 判空降级
 			console.error("[MarinMind] 数据层初始化失败", err);
 			new Notice("MarinMind：数据层初始化失败，相关功能不可用");
+		}
+	}
+
+	/**
+	 * 123 布局 v2 迁移摘要 Notice（store.open 内已执行迁移，此处仅播报统计）：
+	 * 书 md → books/、脑图/ → mindmaps/。迁移发生在 registerVaultFileSync 注册
+	 * 监听之前（onload 首开路径），无 vault 事件双处理；搬迁采用 copy+delete，
+	 * 迟到的 create/delete 事件按未知路径兜底为无动作。
+	 */
+	private notifyLayoutMigration(): void {
+		const mig = this.store?.lastLayoutMigration;
+		if (!mig || (mig.booksMoved === 0 && mig.mapsMoved === 0 && mig.conflictsSkipped === 0)) {
+			return;
+		}
+		const parts: string[] = [];
+		if (mig.booksMoved > 0) parts.push(`书文件 ×${mig.booksMoved} → books/`);
+		if (mig.mapsMoved > 0) parts.push(`脑图 ×${mig.mapsMoved} → mindmaps/`);
+		if (parts.length > 0) {
+			new Notice(`MarinMind：数据目录布局已升级（${parts.join("，")}）`, 8000);
+		}
+		if (mig.conflictsSkipped > 0) {
+			new Notice(
+				`MarinMind：布局迁移有 ${mig.conflictsSkipped} 个同名冲突文件未搬迁` +
+					"（原位置保留可照常使用，可手动整理）",
+				8000,
+			);
 		}
 	}
 
@@ -629,10 +741,13 @@ export default class MarinMindPlugin extends Plugin {
 	/**
 	 * 全局文件事件同步（rename 分流 + 数据根内 md 的 modify/delete 回灌）：
 	 * - rename：数据根内 md → 存储引擎回灌（标题/图名跟随新文件名；移出数据根视同删除）；
-	 *   数据根外 → documents.file_path 业务键同步（库内任何 TFile 改名都要跟上，
-	 *   否则卡片回链失联。目录移动时 Obsidian 对每个 TFile 逐个发事件，只处理 TFile 即覆盖）。
-	 * - modify/delete：仅数据根内 md（用户手编即权威，见 store.handleExternalChange；
-	 *   插件自写经 lastWritten 回声过滤）。
+	 *   数据根内 clips/ 剪藏 md → documents.file_path 业务键同步（124：剪藏不归
+	 *   store 管理，改名不断卡片回链）；数据根外 → 同样的业务键同步（库内任何
+	 *   TFile 改名都要跟上，否则卡片回链失联。目录移动时 Obsidian 对每个 TFile
+	 *   逐个发事件，只处理 TFile 即覆盖）。
+	 * - modify/delete：仅数据根内 md 且非 clips/（用户手编即权威，见
+	 *   store.handleExternalChange；插件自写经 lastWritten 回声过滤）——clip md
+	 *   内容不进 store，静默跳过（防未知文件认领告警）。
 	 * - 数据根外文件 delete 刻意不全局级联删——见 reader-view 注释。
 	 * - fs 数据根（桌面绝对路径）不在 vault 事件覆盖范围，无回灌。
 	 */
@@ -643,6 +758,11 @@ export default class MarinMindPlugin extends Plugin {
 				if (file.extension === "md") {
 					const oldRel = this.dataRootRelPath(oldPath);
 					if (oldRel !== null) {
+						if (oldRel.startsWith(`${CLIPS_SUBDIR}/`)) {
+							// 124 剪藏 md 改名：业务键跟随（store 数据不受影响）
+							this.documents.renamePath(oldPath, file.path);
+							return;
+						}
 						const newRel = this.dataRootRelPath(file.path);
 						if (newRel !== null) {
 							this.store?.handleExternalRename(oldRel, newRel);
@@ -659,14 +779,18 @@ export default class MarinMindPlugin extends Plugin {
 			this.app.vault.on("modify", (file) => {
 				if (!(file instanceof TFile) || file.extension !== "md") return;
 				const rel = this.dataRootRelPath(file.path);
-				if (rel !== null) void this.applyExternalChange(rel, file);
+				if (rel !== null && !rel.startsWith(`${CLIPS_SUBDIR}/`)) {
+					void this.applyExternalChange(rel, file);
+				}
 			}),
 		);
 		this.registerEvent(
 			this.app.vault.on("delete", (file) => {
 				if (!(file instanceof TFile) || file.extension !== "md") return;
 				const rel = this.dataRootRelPath(file.path);
-				if (rel !== null) void this.applyExternalChange(rel, null);
+				if (rel !== null && !rel.startsWith(`${CLIPS_SUBDIR}/`)) {
+					void this.applyExternalChange(rel, null);
+				}
 			}),
 		);
 	}
@@ -680,6 +804,54 @@ export default class MarinMindPlugin extends Plugin {
 		const root = this.dataLoc.rootDir;
 		if (!vaultPath.startsWith(`${root}/`)) return null;
 		return vaultPath.slice(root.length + 1);
+	}
+
+	/**
+	 * 文档路径 → 数据根 clips/ 相对路径（124；非剪藏文档返回 null）。
+	 * 两种数据根形态统一判定：vault 相对路径剥数据根前缀、fs 绝对路径
+	 * （桌面）归一正斜杠后剥根前缀——阅读器 docKind 分流与 clip 读取共用。
+	 */
+	clipRelPath(filePath: string): string | null {
+		const loc = this.dataLoc;
+		if (loc.kind === "vault") {
+			const rel = this.dataRootRelPath(filePath);
+			return rel !== null && rel.startsWith(`${CLIPS_SUBDIR}/`) ? rel : null;
+		}
+		const normalized = filePath.replace(/\\/g, "/");
+		const prefix = `${loc.rootDir.replace(/[\\/]+$/, "")}/`;
+		if (!normalized.startsWith(prefix)) return null;
+		const rel = normalized.slice(prefix.length);
+		return rel.startsWith(`${CLIPS_SUBDIR}/`) ? rel : null;
+	}
+
+	/**
+	 * 剪藏 md 的数据根相对路径 → 打开/登记用的目标路径（124）：
+	 * vault 数据根 → vault 相对路径（openInReader(TFile) 与文档业务键形态）；
+	 * fs 数据根 → 本机绝对路径（openInReader 字符串分支，桌面）。
+	 */
+	clipOpenTarget(rel: string): string {
+		const loc = this.dataLoc;
+		return loc.kind === "fs"
+			? `${loc.rootDir.replace(/[\\/]+$/, "")}/${rel}`
+			: joinRel(loc.rootDir, rel);
+	}
+
+	/**
+	 * 打开剪藏笔记（124：saveWebclip / webclip-migrate 的产物入口）。
+	 * vault 数据根经 TFile（文件由 vault.createBinary 落盘，索引即时可解析）；
+	 * fs 数据根转绝对路径走库外文档分支。
+	 */
+	async openClip(rel: string): Promise<void> {
+		if (this.dataLoc.kind === "vault") {
+			const file = this.app.vault.getAbstractFileByPath(joinRel(this.dataLoc.rootDir, rel));
+			if (file instanceof TFile) {
+				await this.openInReader(file);
+				return;
+			}
+			new Notice(`剪藏文件不存在：${rel}`);
+			return;
+		}
+		await this.openInReader(this.clipOpenTarget(rel));
 	}
 
 	/** 数据根内 md 的外部变更回灌：读盘 → store 合并 → removed 发事件、warning 聚合 Notice */
@@ -1049,6 +1221,231 @@ export default class MarinMindPlugin extends Plugin {
 		if (absPath) {
 			await this.openInReader(absPath);
 		}
+	}
+
+	/**
+	 * 截图命令入口（114）：抓全部显示器全屏位图 → 覆盖窗直选（118）→ PNG 写
+	 * 系统剪贴板；覆盖窗不可用降级 114 裁剪弹窗。macOS 无屏幕录制权限/
+	 * 环境不支持分别给专用提示。
+	 */
+	private async captureScreen(): Promise<void> {
+		await this.captureWith(async () => captureAllScreens());
+	}
+
+	/**
+	 * 外截命令入口（117）：隐藏本窗口（最小化 → 500ms 动画余量 → 拍摄 →
+	 * finally 恢复+聚焦）——目标内容被 Obsidian 挡住时的互补路径。118 起
+	 * beforeRestore 钩子先把冻结画面盖满全屏再恢复主窗（恢复动作藏在覆盖
+	 * 窗底下，无活画面闪现），直选在钩子内完成。
+	 */
+	private async captureScreenOutside(): Promise<void> {
+		await this.captureWith((hooks) => captureOutside({ beforeRestore: hooks.beforeRestore }));
+	}
+
+	/**
+	 * 截图共用尾段（118 重构）：抓屏（方式由 fetcher 决定，可收 beforeRestore
+	 * 钩子）→ 覆盖窗直选 → 确认即物理裁剪 + PNG 写系统剪贴板 → 取消静默；
+	 * 覆盖窗不可用（{ok:false}）降级 114 裁剪弹窗。外截模式把直选放进
+	 * beforeRestore（restore 藏于覆盖窗下），直选已完成的标志是 overlayOutcome
+	 * 非空——此时不再重复直选。
+	 */
+	private async captureWith(
+		fetcher: (hooks: {
+			beforeRestore?: (screens: CapturedScreen[]) => Promise<void> | void;
+		}) => Promise<CapturedScreen[]>,
+	): Promise<void> {
+		// 外截模式在 beforeRestore 内完成的直选结局（null = 尚未直选）
+		let overlayOutcome: OverlayOutcome | null = null;
+		let screens: CapturedScreen[];
+		try {
+			screens = await fetcher({
+				beforeRestore: async (shot) => {
+					overlayOutcome = await selectScreenRegion(shot, { actions: ["copy"] });
+				},
+			});
+		} catch (err) {
+			new Notice(err instanceof Error ? err.message : String(err), 6000);
+			return;
+		}
+		if (overlayOutcome) {
+			// 外截模式：直选已在恢复窗口前完成（含降级弹窗——弹窗在恢复后的前台打开）
+			await this.finishOverlayOutcome(screens, overlayOutcome);
+			return;
+		}
+		if (screens.length === 0) {
+			new Notice("当前环境不支持屏幕截图", 4000);
+			return;
+		}
+		const outcome = await selectScreenRegion(screens, { actions: ["copy"] });
+		await this.finishOverlayOutcome(screens, outcome);
+	}
+
+	/** 覆盖窗直选结局分流：确认→复制；取消→静默；不可用→降级 114 弹窗 */
+	private async finishOverlayOutcome(
+		screens: CapturedScreen[],
+		outcome: OverlayOutcome,
+	): Promise<void> {
+		if (outcome.ok) {
+			if (outcome.result) {
+				// 复制后回 Obsidian 前台：Notice 可见 + 阅读器内 Ctrl+V 即可粘贴成卡
+				focusOwnWindow();
+				await this.copyScreenSelection(screens, outcome.result);
+			}
+			return; // 取消（Esc/右键/Win+D）：静默退出
+		}
+		// 降级：114 裁剪弹窗（覆盖窗环境不可用；reason 编号 D1-D5 便于回报定位）
+		focusOwnWindow();
+		new Notice(`当前环境不支持屏幕直选（${outcome.reason}），已回退裁剪弹窗`, 6000);
+		new ScreenshotCropModal(this.app, screens).open();
+	}
+
+	/**
+	 * 覆盖窗选区 → 物理像素裁剪（共用 image-crop）→ PNG 写系统剪贴板。
+	 * 不落任何文件；失败给中文 Notice（119 屏幕剪藏复用同一裁剪入口）。
+	 */
+	private async copyScreenSelection(
+		screens: CapturedScreen[],
+		result: ScreenSelectResult,
+	): Promise<void> {
+		const screen = screens[result.screenIndex];
+		if (!screen) {
+			return;
+		}
+		try {
+			const crop = await cropScreenRegion(screen, result.sel, result.dispW, result.dispH);
+			if (!crop) {
+				throw new Error("PNG 编码失败（环境异常）");
+			}
+			const ok = await writePngToClipboard(crop.blob, crop.dataUrl);
+			if (!ok) {
+				throw new Error("写入剪贴板失败（浏览器与系统通道均不可用）");
+			}
+			new Notice("截图已复制到剪贴板；在阅读器中按 Ctrl+V 可保存为图片卡", 5000);
+		} catch (err) {
+			new Notice(err instanceof Error ? err.message : String(err), 5000);
+			console.error("[MarinMind] 截图复制失败", err);
+		}
+	}
+
+	/**
+	 * 屏幕截图动作统一入口（119 公开：命令 / 全局热键 / 120 托盘共用）。
+	 * copy = 截图框选复制（captureWith 同链路）；note = 剪藏屏幕区域为笔记
+	 * ——覆盖窗工具条双动作（「存为笔记」主按钮 +「复制」），所选即所得。
+	 * Obsidian 挡住目标时用「截图其他窗口」后再 Ctrl+V。
+	 */
+	async runScreenCaptureAction(action: OverlayAction): Promise<void> {
+		if (action === "copy") {
+			await this.captureWith(async () => captureAllScreens());
+			return;
+		}
+		// note：抓屏（不隐藏——用户此刻多半在浏览器，Obsidian 在后台）→
+		// 覆盖窗双动作直选 → 按用户所选分流
+		let screens: CapturedScreen[];
+		try {
+			screens = await captureAllScreens();
+		} catch (err) {
+			new Notice(err instanceof Error ? err.message : String(err), 6000);
+			return;
+		}
+		if (screens.length === 0) {
+			new Notice("当前环境不支持屏幕截图", 4000);
+			return;
+		}
+		const outcome = await selectScreenRegion(screens, { actions: ["note", "copy"] });
+		if (!outcome.ok) {
+			// 降级：114 弹窗仅复制 + 说明（弹窗无「存为笔记」按钮；reason 编号定位）
+			new Notice(
+				`当前环境不支持屏幕直选（${outcome.reason}），已回退裁剪弹窗（仅复制截图）`,
+				6000,
+			);
+			focusOwnWindow();
+			new ScreenshotCropModal(this.app, screens).open();
+			return;
+		}
+		if (!outcome.result) {
+			return; // 取消静默
+		}
+		const result = outcome.result;
+		const screen = screens[result.screenIndex];
+		if (!screen) {
+			return;
+		}
+		focusOwnWindow();
+		if (result.action === "copy") {
+			await this.copyScreenSelection(screens, result);
+			return;
+		}
+		// note：物理裁剪（WebP 优先落库，回退 PNG）→ OCR（可选）→ 剪藏笔记
+		//（screen-clip 内含 Notice/打开）；copy 分支走 copyScreenSelection 保持 PNG 剪贴板
+		const crop = await cropScreenRegion(screen, result.sel, result.dispW, result.dispH, {
+			preferWebp: true,
+		});
+		if (!crop) {
+			new Notice("屏幕剪藏失败：图片编码异常", 5000);
+			return;
+		}
+		await clipScreenRegionToNote(this, crop);
+	}
+
+	/**
+	 * 应用截图全局热键设置（117）：注销旧 → 校验新值 → registerGlobalHotkey
+	 * （isRegistered 核验，冲突时 register 可能静默不生效）→ 失败中文 Notice。
+	 * onload / 设置页变更 / unload 三处调用；非桌面静默跳过。
+	 */
+	applyCaptureGlobalHotkey(): void {
+		if (!Platform.isDesktopApp) {
+			return;
+		}
+		if (this.captureHotkeyRegistered) {
+			unregisterGlobalHotkey(this.captureHotkeyRegistered);
+			this.captureHotkeyRegistered = "";
+		}
+		const accel = this.settings.captureGlobalHotkey.trim();
+		if (!accel || !validateAccelerator(accel)) {
+			return; // 空 = 关闭；非法值 loadSettings 已挡，此处防御
+		}
+		if (!registerGlobalHotkey(accel, () => void this.onCaptureHotkey())) {
+			new Notice(`截图热键「${accel}」注册失败，可能被其他应用占用`, 6000);
+			return;
+		}
+		this.captureHotkeyRegistered = accel;
+	}
+
+	/**
+	 * 应用截图托盘设置（120）：销毁旧 → 设置开启且桌面时 createCaptureTray
+	 * （环境不可用内部静默——托盘只是入口聚合，命令/热键入口不受影响）。
+	 * onload / 设置页变更 / unload 三处调用；非桌面静默跳过。
+	 */
+	applyCaptureTray(): void {
+		if (!Platform.isDesktopApp) {
+			return;
+		}
+		if (this.captureTray) {
+			destroyCaptureTray(this.captureTray);
+			this.captureTray = null;
+		}
+		if (!this.settings.showCaptureTray) {
+			return;
+		}
+		this.captureTray = createCaptureTray(this);
+	}
+
+	/**
+	 * 托盘右键「退出」（125）：销毁托盘图标并置空——设置开关 showCaptureTray
+	 * 不动（区别于设置关闭：用户只是临时收起，重载插件 / 重新应用设置即恢复）。
+	 */
+	exitCaptureTray(): void {
+		destroyCaptureTray(this.captureTray);
+		this.captureTray = null;
+	}
+
+	/**
+	 * 全局热键回调（117→118）：用户此刻在其他应用——直接抓屏（目标就在屏幕
+	 * 上，不隐藏；Obsidian 若挡住目标请用「截图其他窗口」命令）→ 覆盖窗
+	 * 直选（不抢 Obsidian 前台，直选确认/取消后再 focusOwnWindow）。
+	 */
+	private async onCaptureHotkey(): Promise<void> {
+		await this.captureWith(async () => captureAllScreens());
 	}
 
 	/** 选图器入口（命令 / reader 菜单共用）：选中即打开（新建图在弹窗内完成命名） */

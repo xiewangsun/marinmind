@@ -14,6 +14,8 @@ import {
 	MD_FORMAT_VERSION,
 	MINDMAPS_SUBDIR,
 	ORPHAN_BOOK_FILENAME,
+	ORPHAN_BOOK_PATH,
+	BOOKS_SUBDIR,
 	linkOwnerId,
 	linkId,
 	parseBookMd,
@@ -21,6 +23,7 @@ import {
 	serializeBookMd,
 	type ParsedBookFile,
 } from "./book-format";
+import { runLayoutMigration, type LayoutMigrationResult } from "./layout-migrate";
 import { parseMindmapMd, serializeMindmapMd } from "./mindmap-format";
 import {
 	REVIEW_LOG_FILENAME,
@@ -73,7 +76,7 @@ export const ORPHAN_SCOPE = "orphan";
 
 /** 书文件的内存状态（一书一文件） */
 export interface BookState {
-	/** 数据根相对路径（如 "书籍A.md"） */
+	/** 数据根相对路径（如 "books/书籍A.md"） */
 	relPath: string;
 	doc: BookDocument;
 	/** 本书卡片（id → card）；孤儿文件中卡的 documentId 保持 null */
@@ -85,7 +88,7 @@ export interface BookState {
 
 /** 脑图文件的内存状态（一图一文件） */
 export interface MapState {
-	/** 数据根相对路径（如 "脑图/学习图.md"） */
+	/** 数据根相对路径（如 "mindmaps/学习图.md"） */
 	relPath: string;
 	map: Mindmap;
 	nodes: Map<string, MindmapNode>;
@@ -139,7 +142,7 @@ export class MarinMindStore {
 
 	private constructor(private readonly adapter: ListableStorageAdapter) {
 		this.orphan = {
-			relPath: ORPHAN_BOOK_FILENAME,
+			relPath: ORPHAN_BOOK_PATH,
 			doc: {
 				id: ORPHAN_SCOPE,
 				filePath: "",
@@ -157,28 +160,38 @@ export class MarinMindStore {
 		};
 	}
 
-	/** 打开（或创建）存储：扫数据根与 脑图/ 子目录，认领全部 MarinMind md 文件 */
+	/** 最近一次布局迁移统计（open 时执行；main.ts 据此发 Notice，null = 未经过 open） */
+	lastLayoutMigration: LayoutMigrationResult | null = null;
+
+	/**
+	 * 打开（或创建）存储：先布局迁移（123：根层书 md → books/、脑图/ → mindmaps/，
+	 * 幂等），再扫根层系统文件与 books/、mindmaps/ 子目录，认领全部 MarinMind md。
+	 */
 	static async open(adapter: ListableStorageAdapter): Promise<MarinMindStore> {
 		const store = new MarinMindStore(adapter);
+		store.lastLayoutMigration = await runLayoutMigration(adapter);
 		await store.loadAll();
 		return store;
 	}
 
 	private async loadAll(): Promise<void> {
 		// 目录列举与文件读取全部并行（IO 等待占启动耗时大头；adapter.list 对不存在
-		// 目录返回空，脑图子目录缺失无碍）；解析吸收保持文件顺序串行——Map 插入
-		// 顺序即文档列表顺序，不得随读取完成顺序漂移。
-		const [root, mmDir] = await Promise.all([
+		// 目录返回空，子目录缺失无碍）；解析吸收保持文件顺序串行——Map 插入
+		// 顺序即文档列表顺序，不得随读取完成顺序漂移。根层仍保留书 md 扫描：
+		// 布局迁移单文件失败/中断的残留在此兜底认领（下次启动迁移再搬）。
+		const [root, booksDir, mmDir] = await Promise.all([
 			this.adapter.list(""),
+			this.adapter.list(BOOKS_SUBDIR),
 			this.adapter.list(MINDMAPS_SUBDIR),
 		]);
-		const bookFiles = root.files.filter((f) => f.endsWith(".md"));
+		const rootMd = root.files.filter((f) => f.endsWith(".md"));
+		const bookFiles = booksDir.files.filter((f) => f.endsWith(".md"));
 		const mapFiles = mmDir.files.filter((f) => f.endsWith(".md"));
 		const buffers = await Promise.all(
-			[...bookFiles, ...mapFiles].map((f) => this.adapter.readBinary(f)),
+			[...rootMd, ...bookFiles, ...mapFiles].map((f) => this.adapter.readBinary(f)),
 		);
 		let i = 0;
-		for (const file of bookFiles) {
+		for (const file of rootMd) {
 			const text = decodeUtf8(buffers[i++]);
 			// 66 复习日志：机器层为锚灌入；损坏（null）保内存空态且 lastWritten 记磁盘原文
 			// ——此后一旦有新评分标脏，flush 即用完整内存覆盖回规范格式
@@ -197,13 +210,27 @@ export class MarinMindStore {
 				this.lastWritten.set(file, text);
 				continue;
 			}
-			const parsed = parseBookMd(text, { fileName: file });
+			const parsed = parseBookMd(text, { fileName: file.split("/").pop() });
+			// 孤儿文件根层残留（迁移中断）：状态跟随实际磁盘位置，flush 不另起新文件
 			if (file === ORPHAN_BOOK_FILENAME) {
+				this.orphan.relPath = file;
 				this.absorbOrphan(parsed);
 				this.lastWritten.set(file, text);
 				continue;
 			}
 			if (!parsed.claimed) continue; // 用户放进数据根的普通笔记——不认领
+			this.absorbBook(file, parsed);
+			this.lastWritten.set(file, text);
+		}
+		for (const file of bookFiles) {
+			const text = decodeUtf8(buffers[i++]);
+			const parsed = parseBookMd(text, { fileName: file.split("/").pop() });
+			if (file === ORPHAN_BOOK_PATH) {
+				this.absorbOrphan(parsed);
+				this.lastWritten.set(file, text);
+				continue;
+			}
+			if (!parsed.claimed) continue; // 用户拷进 books/ 的普通笔记——不认领
 			this.absorbBook(file, parsed);
 			this.lastWritten.set(file, text);
 		}
@@ -720,7 +747,12 @@ export class MarinMindStore {
 					const book = this.bookOfCard(cardId);
 					const card = book?.cards.get(cardId);
 					if (!book || !card) return undefined;
-					return { fileBase: book.relPath.replace(/\.md$/, ""), title: cardTitle(card) };
+					// wikilink 目标取 basename（[[书名]]）：书文件迁入 books/ 后链接形态
+					// 不变，Obsidian 按文件名解析不受目录影响（123 布局 v2）
+					return {
+						fileBase: book.relPath.split("/").pop()!.replace(/\.md$/, ""),
+						title: cardTitle(card),
+					};
 				},
 			},
 			state.extraFrontmatter,
@@ -766,20 +798,21 @@ export class MarinMindStore {
 	// 文件名分配（标题跟随 + 冲突加 id 短后缀）
 	// -----------------------------------------------------------------------
 
-	/** 分配书文件路径（同名冲突加 id 短后缀）；selfPath=自己现占的路径不算冲突 */
+	/** 分配书文件路径（books/ 下同名冲突加 id 短后缀）；selfPath=自己现占的路径不算冲突 */
 	private allocateBookPath(title: string, id: string, selfPath?: string): string {
 		const base = sanitizeFileName(title);
-		const rel = `${base}.md`;
+		const name = `${base}.md`;
+		const rel = `${BOOKS_SUBDIR}/${name}`;
 		if (rel === selfPath) {
 			return rel;
 		}
 		// 66 复习日志 / 76 清单文件占用守卫：书名恰为「复习日志」「分类」「卡组」时
-		// 让路加后缀，防覆盖这些数据根专属文件
+		// 让路加后缀，防与数据根专属系统文件同形（books/ 内虽不同目录，仍避开命名）
 		return this.booksByPath.has(rel) ||
-			rel === REVIEW_LOG_FILENAME ||
-			rel === FOLDERS_FILENAME ||
-			rel === DECKS_FILENAME
-			? `${base} (${id.slice(0, 4)}).md`
+			name === REVIEW_LOG_FILENAME ||
+			name === FOLDERS_FILENAME ||
+			name === DECKS_FILENAME
+			? `${BOOKS_SUBDIR}/${base} (${id.slice(0, 4)}).md`
 			: rel;
 	}
 
@@ -880,7 +913,8 @@ export class MarinMindStore {
 			return { removedCards, warnings };
 		}
 
-		if (relPath === ORPHAN_BOOK_FILENAME) {
+		// 孤儿文件：books/ 规范位置 + 根层迁移残留两种路径（状态跟随实际磁盘位置）
+		if (relPath === ORPHAN_BOOK_PATH || relPath === ORPHAN_BOOK_FILENAME) {
 			if (content === null) {
 				removedCards.push(...this.orphan.cards.values());
 				this.orphan.cards.clear();
@@ -897,6 +931,7 @@ export class MarinMindStore {
 			} else {
 				this.replaceOrphan(parsed, removedCards);
 			}
+			this.orphan.relPath = relPath;
 			this.lastWritten.set(relPath, content);
 			return { removedCards, warnings };
 		}
@@ -951,6 +986,20 @@ export class MarinMindStore {
 			if (relPath.startsWith(`${MINDMAPS_SUBDIR}/`)) {
 				const parsed = parseMindmapMd(content, { fileName: relPath.split("/").pop() });
 				if (parsed.claimed) this.absorbMap(relPath, parsed);
+			} else if (relPath === ORPHAN_BOOK_PATH) {
+				// 未归类卡片.md 重新出现（外部删除后又拷回）：按孤儿文件吸收，
+				// 不当普通书认领——其 frontmatter id 是哨兵 "orphan"，进 booksById
+				// 会造出幽灵文档并使孤儿路由失效
+				const parsed = parseBookMd(content, { fileName: ORPHAN_BOOK_FILENAME });
+				if (parsed.claimed) {
+					if (this.dirtyScopes.has(ORPHAN_SCOPE)) {
+						this.mergeBookCards(this.orphan, parsed, warnings);
+					} else {
+						this.replaceOrphan(parsed, removedCards);
+					}
+					this.orphan.relPath = relPath;
+					this.lastWritten.set(relPath, content);
+				}
 			} else {
 				const parsed = parseBookMd(content, { fileName: relPath.split("/").pop() });
 				if (parsed.claimed && !this.booksById.has(parsed.doc.id)) {

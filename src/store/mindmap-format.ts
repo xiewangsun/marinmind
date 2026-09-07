@@ -276,7 +276,7 @@ export function escapeWikiTitle(title: string): string {
 	return title.replace(/\[/g, "［").replace(/\]/g, "］").replace(/\r?\n/g, " ");
 }
 
-/** 脑图文件名（数据根相对：脑图/<净化图名>.md，冲突处理由 store 负责） */
+/** 脑图文件名（数据根相对：mindmaps/<净化图名>.md，冲突处理由 store 负责） */
 export function mindmapFileName(name: string): string {
 	return `${sanitizeFileName(name)}.md`;
 }

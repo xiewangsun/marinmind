@@ -6,6 +6,7 @@ import { isAbsoluteFsPath, docExtOf } from "../storage/paths";
 import type MarinMindPlugin from "../main";
 import { applyRelink, planRelink } from "./relink";
 import { copyExternalIntoVault } from "./copy-into-vault";
+import { confirmDeleteDocument } from "./doc-delete";
 import { resolveDocPresence, type DocPresence } from "./doc-presence";
 import { MSG_EXTERNAL_DOC_MOBILE } from "../constants";
 import type { BookDocument } from "../types";
@@ -95,7 +96,9 @@ export class DocumentManagerModal extends Modal {
 			new ButtonComponent(actions)
 				.setButtonText("删除记录")
 				.setWarning()
-				.onClick(() => this.confirmDelete(doc, cardCount));
+				.onClick(() =>
+					confirmDeleteDocument(this.app, this.plugin, doc, () => void this.renderList()),
+				);
 		} else if (!external || !Platform.isMobile) {
 			// 移动端打不开库外文档（无 fs 直读），只留重关联
 			new ButtonComponent(actions)
@@ -170,36 +173,6 @@ export class DocumentManagerModal extends Modal {
 			return;
 		}
 		run();
-	}
-
-	private confirmDelete(doc: BookDocument, cardCount: number): void {
-		new ConfirmModal(
-			this.app,
-			"删除文档记录",
-			`将删除「${doc.title}」的记录，并级联删除其 ${cardCount} 张卡片、复习状态与脑图节点引用，媒体附件文件一并清除。\n` +
-				"此操作不可撤销。若该文档正被阅读器打开，请先关闭对应标签页。继续？",
-			() => void this.deleteDoc(doc),
-		).open();
-	}
-
-	private async deleteDoc(doc: BookDocument): Promise<void> {
-		try {
-			// 附件清理是发起方职责（对齐 reader-view 删卡清附件的模式）：
-			// 先捕获卡片快照逐个删附件文件，再删文档行（级联清卡片等 DB 数据）
-			for (const card of this.plugin.cards.listByDocument(doc.id)) {
-				if (card.excerptRef) {
-					await this.plugin.attachments.remove(card.excerptRef).catch(() => {
-						// 单个附件缺失不阻断整体清理
-					});
-				}
-			}
-			this.plugin.documents.delete(doc.id);
-			new Notice("文档记录已删除");
-			void this.renderList();
-		} catch (err) {
-			console.error("[MarinMind] 删除文档记录失败", err);
-			new Notice(`删除失败：${err instanceof Error ? err.message : String(err)}`);
-		}
 	}
 
 	private async openDoc(doc: BookDocument): Promise<void> {

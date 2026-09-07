@@ -35,7 +35,7 @@ export class AiChatView extends ItemView {
 	private ctxScope: AiContextScope = "page";
 	/** 本次发送绑定的文档（chip 跳页时校验仍在同一文档，换文档 chip 失效） */
 	private chatDocId: string | null = null;
-	private chatKind: "pdf" | "epub" | "md" = "pdf";
+	private chatKind: "pdf" | "epub" | "md" | "clip" = "pdf";
 	private listEl!: HTMLElement;
 	private inputEl!: HTMLTextAreaElement;
 	private webBtn!: HTMLButtonElement;

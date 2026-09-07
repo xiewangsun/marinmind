@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { diffAssetFiles } from "../../src/attachments/attachment-audit";
+import { diffAssetFiles, scanAttachments } from "../../src/attachments/attachment-audit";
+import type MarinMindPlugin from "../../src/main";
+import { MemoryAdapter, writeText } from "../helpers/memory-adapter";
 
-// scanAttachments / removeOrphanAttachments 走 plugin + adapter（DOM/插件耦合），
+// removeOrphanAttachments 走 plugin + adapter（DOM/插件耦合），
 // 对账规则由 diffAssetFiles 纯函数锁死——误删风险全在这一个函数里。
 
 describe("84-E diffAssetFiles 附件对账", () => {
@@ -41,5 +43,37 @@ describe("84-E diffAssetFiles 附件对账", () => {
 		const r = diffAssetFiles(["assets/a.png"], [null, undefined, ""]);
 		expect(r.missing).toEqual([]);
 		expect(r.orphans).toEqual(["assets/a.png"]);
+	});
+
+	it("124 scanAttachments：clips md 引用进保留集（无卡引用的剪藏图不判孤儿）", async () => {
+		const adapter = new MemoryAdapter();
+		writeText(
+			adapter,
+			"clips/网页剪藏.md",
+			"![a](assets/clip-1.png)\n\n![b](assets/clip-2.jpg)\n",
+		);
+		writeText(adapter, "assets/clip-1.png", "图1");
+		writeText(adapter, "assets/clip-2.jpg", "图2");
+		const plugin = {
+			dataLoc: { adapter },
+			cards: { listAll: () => [] }, // 无任何卡片——引用全部来自剪藏 md
+		} as unknown as MarinMindPlugin;
+
+		const r = await scanAttachments(plugin);
+		expect(r.orphans).toEqual([]);
+		expect(r.missing).toEqual([]);
+	});
+
+	it("124 scanAttachments：剪藏引用但仓中缺失的图照常报 missing", async () => {
+		const adapter = new MemoryAdapter();
+		writeText(adapter, "clips/网页剪藏.md", "![a](assets/gone.png)\n");
+		const plugin = {
+			dataLoc: { adapter },
+			cards: { listAll: () => [] },
+		} as unknown as MarinMindPlugin;
+
+		const r = await scanAttachments(plugin);
+		expect(r.orphans).toEqual([]);
+		expect(r.missing).toEqual(["assets/gone.png"]);
 	});
 });

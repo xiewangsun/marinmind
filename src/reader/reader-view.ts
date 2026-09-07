@@ -13,6 +13,7 @@ import { isOcrEngineReady, ocrCanvasPageLines, ocrCanvasRegions } from "../ocr/o
 import { ocrFailNotice, ocrStartNotice } from "../ocr/ocr-text";
 import { docExtOf, fsBasename, isAbsoluteFsPath } from "../storage/paths";
 import { readExternalBinary } from "../storage/external-file";
+import { localizeClipImageRefs } from "../webclip/clip-md";
 import type { Card, DocRect, LineStyle, NormPoint } from "../types";
 import { LINE_STYLES, LINE_STYLE_LABELS } from "../types";
 import { AudioRecorder, audioDurationSec, formatDurSec } from "./audio-recorder";
@@ -93,9 +94,11 @@ const MD_PLACEHOLDER_HEIGHT = 1000;
  * - pdf：pdf.js 位图渲染（懒渲染/尺寸巡检/缩放/手写/AI 摘录/OCR 全量能力）
  * - md：库内 Markdown 单页长文（㊻-B，MarkdownRenderer）
  * - epub：EPUB 章节流（㊼，章=页，EpubSession 懒渲染）
- * md/epub 合称「可重排文档」（isReflowDoc）：共享无位图/固定栏宽/页语义务复用分支
+ * - clip：数据根 clips/ 下的剪藏 md（124）——读取走数据根 adapter、图片
+ *   assets/ 引用渲染前换 blob（clip-md.ts），排版/摘录全链路与 md 同构
+ * md/epub/clip 合称「可重排文档」（isReflowDoc）：共享无位图/固定栏宽/页语义务复用分支
  */
-type DocKind = "pdf" | "md" | "epub";
+type DocKind = "pdf" | "md" | "epub" | "clip";
 
 /** ㊼ 按扩展名判定文档形态（库内/库外路径通吃；未知扩展名按 pdf 走 pdf.js 报错兜底） */
 function docKindOf(filePath: string): DocKind {
@@ -324,6 +327,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	private epubSession: EpubSession | null = null;
 	/** ㊻-B md 文档文本（loadFromPath 读入，renderMdIntoPage 消费后即弃） */
 	private mdText: string | null = null;
+	/** 124 clip 图片 blob URL（渲染期持有；cleanupContent 统一 revoke） */
+	private clipBlobUrls: string[] = [];
 	/** 90 批文件名标题元素（原生标题行隐藏后并入工具行行首；随工具行重建） */
 	private readerTitleEl: HTMLElement | null = null;
 	/** 侧栏当前分页（㉙ 目录/书签 + 83-E 翻译；视图生命周期内保持，重渲染不丢） */
@@ -628,20 +633,45 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			return;
 		}
 
-		// ㊻-B/㊼ 文档分流（核心版）：md/epub 无位图/无懒渲染/固定栏宽；
-		// docKind 三态统一驱动后续全部分支（工具降级/目录/书签）。
+		// ㊻-B/㊼ 文档分流（核心版）：md/epub/clip 无位图/无懒渲染/固定栏宽；
+		// docKind 统一驱动后续全部分支（工具降级/目录/书签）。
 		// 90 批：原头部按钮显隐（syncHeaderActions）随 addAction 迁移废除——
 		// 手写按钮改为 buildToolRow 创建时就地按 isReflowDoc 判定（换文档必经重建）
-		this.docKind = docKindOf(filePath);
+		// 124 clip：数据根 clips/ 下的剪藏 md（vault 相对或 fs 绝对路径形态），
+		// 单列 kind 走「数据根读取 + blob 图片」链路（clip-md.ts）
+		const clipRel = this.plugin.clipRelPath(filePath);
+		this.docKind = clipRel !== null ? "clip" : docKindOf(filePath);
 		if (this.docKind === "md" && this.plugin.dataRootRelPath(filePath) !== null) {
 			// 数据根防御：MarinMind/ 内 md 是插件笔记数据（选择器已排除，此处兜底
 			// openInReader 直开等旁路入口）——双认领会撞书文件路径 + 事件双重路由
+			//（clips/ 下 md 已在上面分流为 clip，不受本防御拦截）
 			throw new Error("数据目录内的 md 是 MarinMind 笔记数据，不能作为文档打开");
 		}
 
-		// 读取内容：md（文本）/epub（zip 字节）/pdf（字节 → pdf.js）分流
+		// 读取内容：clip（数据根文本 + blob 图）/md（文本）/epub（zip 字节）/pdf（字节 → pdf.js）分流
 		let title: string;
-		if (this.docKind === "md") {
+		if (this.docKind === "clip") {
+			const buf = await this.plugin.dataLoc.adapter.readBinary(clipRel!);
+			if (token !== this.loadToken) {
+				return;
+			}
+			// 图片引用渲染前替换 blob：MarkdownRenderer 的相对解析对数据根内路径
+			// 不可用（vault 场景错拼 clips/assets/；fs 场景无 vault 路径可解析）
+			const localized = await localizeClipImageRefs(
+				new TextDecoder().decode(buf),
+				(ref) => this.plugin.attachments.read(ref),
+				(bytes) => URL.createObjectURL(new Blob([bytes])),
+			);
+			if (token !== this.loadToken) {
+				for (const url of localized.blobUrls) {
+					URL.revokeObjectURL(url);
+				}
+				return;
+			}
+			this.clipBlobUrls.push(...localized.blobUrls);
+			this.mdText = localized.text;
+			title = fsBasename(filePath);
+		} else if (this.docKind === "md") {
 			const file = this.app.vault.getAbstractFileByPath(filePath);
 			if (!(file instanceof TFile)) {
 				throw new Error(`文件不在库中：${filePath}`);
@@ -726,8 +756,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		}
 
 		// 滚动容器 + 各页骨架（先用第 1 页尺寸占位）
-		if (this.docKind === "md") {
-			// ㊻-B md 单页长文：栏宽 820 占位（渲染完成后高度由内容驱动），无真实页尺寸
+		if (this.docKind === "md" || this.docKind === "clip") {
+			// ㊻-B md/clip 单页长文：栏宽 820 占位（渲染完成后高度由内容驱动），无真实页尺寸
 			this.basePageWidth = MD_COLUMN_WIDTH;
 			this.firstSize = { width: MD_COLUMN_WIDTH, height: MD_PLACEHOLDER_HEIGHT };
 			this.totalPages = 1;
@@ -811,9 +841,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		this.setupLazyRender();
 		this.buildNextPages(FIRST_SYNC_PAGES);
 		this.scheduleRest();
-		// ㊻-B md：骨架建好后再渲染内容（MarkdownRenderer 异步分块，loadToken 守卫
-		// 丢弃换文档的过期渲染）+ 标题目录抽取
-		if (this.docKind === "md") {
+		// ㊻-B md/124 clip：骨架建好后再渲染内容（MarkdownRenderer 异步分块，
+		// loadToken 守卫丢弃换文档的过期渲染）+ 标题目录抽取
+		if (this.docKind === "md" || this.docKind === "clip") {
 			await this.renderMdIntoPage(token);
 		} else if (this.docKind === "epub") {
 			// ㊼ epub：大纲（epubOutline）已同步就绪，侧栏立刻刷新；章节走 IO 懒渲染
@@ -914,10 +944,15 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	private async renderMdIntoPage(token: number): Promise<void> {
 		const pv = this.pageViewByNumber.get(1);
 		const text = this.mdText;
-		const sourcePath = this.currentFilePath;
-		if (!pv || text == null || sourcePath == null) {
+		if (!pv || text == null || this.currentFilePath == null) {
 			return;
 		}
+		// 124 clip：fs 数据根场景无 vault 路径作相对解析基准（图片已替换 blob，
+		// 渲染不依赖 sourcePath；空串为 Obsidian 允许的「无源」形态）
+		const sourcePath =
+			this.docKind === "clip" && this.plugin.dataLoc.kind === "fs"
+				? ""
+				: this.currentFilePath;
 		const content = document.createElement("div");
 		content.className = "marinmind-md-doc markdown-preview-view";
 		pv.setReflowContent(content, "md");
@@ -1920,8 +1955,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		new DocSearchModal(this.app, this).open();
 	}
 
-	docSearchKind(): "pdf" | "epub" | "md" | null {
-		// 滚动容器在 = 文档骨架已就绪（cleanupContent 后 docKind 复位且 scrollEl 清空）
+	docSearchKind(): "pdf" | "epub" | "md" | "clip" | null {
+		// 滚动容器在 = 文档骨架已就绪（cleanupContent 后 docKind 复位且 scrollEl 清空）；
+		// 124 clip 与 md 同走 DOM 文本搜索（doc-search-modal 的兜底分支）
 		return this.scrollEl ? this.docKind : null;
 	}
 
@@ -2899,7 +2935,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				if (!result || !docId) {
 					return;
 				}
-				const ref = await this.plugin.attachments.save(result.png, "png");
+				// WebP 优先落库（手写专档 q0.9），环境不支持回退 PNG——ext 跟随实际格式
+				const ref = await this.plugin.attachments.save(result.bytes, result.ext);
 				this.plugin.cards.create({
 					documentId: docId,
 					page,
@@ -4861,6 +4898,11 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		this.outlineLoading = null;
 		this.docKind = "pdf"; // ㊻-B 会话态复位（防残留到下一份 PDF）
 		this.mdText = null;
+		// 124 clip 图片 blob 释放（幂等；换文档/关视图均走此处）
+		for (const url of this.clipBlobUrls) {
+			URL.revokeObjectURL(url);
+		}
+		this.clipBlobUrls = [];
 		// ㊼ epub：会话关闭（revoke 全部图片 blob URL + 摘除链接委托，幂等）后再清引用
 		this.epubSession?.close();
 		this.epubSession = null;

@@ -26,8 +26,8 @@ describe("Markdown 存储持久化（㉚）", () => {
 		store1.close();
 
 		// md 文件确实写入（文件名 = 书名）
-		expect(adapter.files.has("强化学习.md")).toBe(true);
-		expect(textOf(adapter, "强化学习.md")).toContain("贝尔曼方程");
+		expect(adapter.files.has("books/强化学习.md")).toBe(true);
+		expect(textOf(adapter, "books/强化学习.md")).toContain("贝尔曼方程");
 
 		const store2 = await MarinMindStore.open(adapter);
 		const restored = new CardRepository(store2).get(card.id);
@@ -44,13 +44,13 @@ describe("Markdown 存储持久化（㉚）", () => {
 		new DocumentRepository(store1).upsertByPath("books/rl.pdf", "强化学习");
 		await store1.flush();
 		store1.close();
-		const raw = textOf(adapter, "强化学习.md");
-		const writes = adapter.writeCounts.get("强化学习.md");
+		const raw = textOf(adapter, "books/强化学习.md");
+		const writes = adapter.writeCounts.get("books/强化学习.md");
 
 		const store2 = await MarinMindStore.open(adapter);
 		await store2.flush(); // 无任何改动
-		expect(textOf(adapter, "强化学习.md")).toBe(raw);
-		expect(adapter.writeCounts.get("强化学习.md")).toBe(writes);
+		expect(textOf(adapter, "books/强化学习.md")).toBe(raw);
+		expect(adapter.writeCounts.get("books/强化学习.md")).toBe(writes);
 		store2.close();
 	});
 
@@ -132,7 +132,7 @@ describe("Markdown 存储持久化（㉚）", () => {
 		await store1.flush();
 		store1.close();
 
-		expect(textOf(adapter, "脑图/学习图.md")).toContain("[[图论#^card-");
+		expect(textOf(adapter, "mindmaps/学习图.md")).toContain("[[图论#^card-");
 
 		const store2 = await MarinMindStore.open(adapter);
 		const maps2 = new MindmapRepository(store2);
@@ -167,12 +167,12 @@ describe("Markdown 存储持久化（㉚）", () => {
 			excerptText: "b",
 		});
 		await store.flush();
-		const writesB = adapter.writeCounts.get("书B.md");
+		const writesB = adapter.writeCounts.get("books/书B.md");
 
 		cards.update(cards.listByDocument(docA.id)[0].id, { note: "只改 A" });
 		await store.flush();
-		expect(adapter.writeCounts.get("书B.md")).toBe(writesB);
-		expect(textOf(adapter, "书A.md")).toContain("只改 A");
+		expect(adapter.writeCounts.get("books/书B.md")).toBe(writesB);
+		expect(textOf(adapter, "books/书A.md")).toContain("只改 A");
 		store.close();
 	});
 
@@ -182,8 +182,8 @@ describe("Markdown 存储持久化（㉚）", () => {
 		const documents = new DocumentRepository(store);
 		documents.upsertByPath("books/rl.pdf", "强化学习");
 		await store.flush();
-		const raw = textOf(adapter, "强化学习.md");
-		const writes = adapter.writeCounts.get("强化学习.md");
+		const raw = textOf(adapter, "books/强化学习.md");
+		const writes = adapter.writeCounts.get("books/强化学习.md");
 		expect(dirtyScopeCount(store)).toBe(0);
 
 		// 同路径同标题重复打开：内存 updatedAt 更新（最近文档排序仍即时），
@@ -192,8 +192,8 @@ describe("Markdown 存储持久化（㉚）", () => {
 		expect(dirtyScopeCount(store)).toBe(0);
 		expect(again.updatedAt).toBeGreaterThan(0);
 		await store.flush();
-		expect(adapter.writeCounts.get("强化学习.md")).toBe(writes);
-		expect(textOf(adapter, "强化学习.md")).toBe(raw);
+		expect(adapter.writeCounts.get("books/强化学习.md")).toBe(writes);
+		expect(textOf(adapter, "books/强化学习.md")).toBe(raw);
 		store.close();
 	});
 
@@ -206,8 +206,8 @@ describe("Markdown 存储持久化（㉚）", () => {
 
 		documents.upsertByPath("books/rl.pdf", "新书名");
 		await store.flush();
-		expect(adapter.files.has("旧书名.md")).toBe(false);
-		expect(adapter.files.has("新书名.md")).toBe(true);
+		expect(adapter.files.has("books/旧书名.md")).toBe(false);
+		expect(adapter.files.has("books/新书名.md")).toBe(true);
 		expect(documents.getByPath("books/rl.pdf")?.id).toBe(doc.id);
 		store.close();
 	});
@@ -232,8 +232,8 @@ describe("Markdown 存储持久化（㉚）", () => {
 		seed.close();
 
 		// 文件顺序 甲乙丙，读取完成顺序故意打乱为 丙乙甲（乙最慢）
-		adapter.delays.set("乙书.md", 30);
-		adapter.delays.set("丙书.md", 15);
+		adapter.delays.set("books/乙书.md", 30);
+		adapter.delays.set("books/丙书.md", 15);
 		const store = await MarinMindStore.open(adapter);
 		const titles = [...store.books.values()].map((b) => b.doc.title);
 		expect(titles).toEqual(["甲书", "乙书", "丙书"]);

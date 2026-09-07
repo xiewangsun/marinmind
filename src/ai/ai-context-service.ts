@@ -11,7 +11,7 @@ import type { AiContextBlock, AiContextScope } from "./ai-context";
 
 /** 收集结果：kind 供页标签/跳页口径，blocks 为带页号的文本块（原文序） */
 export interface AiDocContext {
-	kind: "pdf" | "epub" | "md";
+	kind: "pdf" | "epub" | "md" | "clip";
 	docId: string;
 	/** 范围锚定页（摘要卡落页/「当前页」快照；pdf=当前页码，epub=当前章号） */
 	page: number;
@@ -51,7 +51,7 @@ export async function collectDocContext(
 		}));
 		return { kind, docId, page, blocks: blocks.filter((b) => b.text.trim().length > 0) };
 	}
-	// md：单页形态，全文即当前页
+	// md/clip（124）：单页形态，全文即当前页（clip 的图已渲染进 DOM，文本块同 md 提取）
 	const blocks = [{ page, text: view.docSearchMdBlocks().join("\n") }];
 	return { kind, docId, page, blocks: blocks.filter((b) => b.text.trim().length > 0) };
 }

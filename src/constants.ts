@@ -9,6 +9,12 @@ export const LEGACY_DATA_DIR = ".marinmind";
 /** 默认备份导出目录（vault 内可见路径，便于用户拷走/同步） */
 export const DEFAULT_BACKUP_DIR = "Backups/MarinMind";
 
+/** 旧默认网页剪藏目录（113 版，vault 相对）：124 起剪藏迁入数据根 clips/，此值仅供存量迁移检测回溯 */
+export const DEFAULT_WEBCLIP_FOLDER = "WebClips";
+
+/** 剪藏子目录（124，数据根相对：网页剪藏与屏幕剪藏 md 的落点，图片统一走 assets/） */
+export const CLIPS_SUBDIR = "clips";
+
 /** SQLite 库文件名（数据根相对路径） */
 export const DB_FILENAME = "marinmind.db";
 

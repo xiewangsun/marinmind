@@ -9,6 +9,7 @@ import { ReviewStatsModal } from "../review/review-stats-modal";
 import { copyExternalIntoVault } from "../documents/copy-into-vault";
 import { isAbsoluteFsPath, pageWordOf } from "../storage/paths";
 import { resolveDocPresence, type DocPresence } from "../documents/doc-presence";
+import { confirmDeleteDocument } from "../documents/doc-delete";
 import { highlightFallbackColor, HIGHLIGHT_COLORS } from "../reader/highlight-colors";
 import { MSG_EXTERNAL_DOC_MOBILE } from "../constants";
 import {
@@ -800,7 +801,7 @@ function renderDocTile(
 	return { doc, cover, img };
 }
 
-/** 文档行右键菜单：打开 / 归入分类（扁平项）/ 移入未分类 / 文档管理 */
+/** 文档行右键菜单：打开 / 归入分类（扁平项）/ 移入未分类 / 文档管理 / 删除文档 */
 function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): void {
 	const { plugin } = ctx;
 	const menu = new Menu();
@@ -889,6 +890,14 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 			.setTitle("文档管理…")
 			.setIcon("settings-2")
 			.onClick(() => new DocumentManagerModal(plugin.app, plugin).open()),
+	);
+	// 删除文档：仅删 MarinMind 记录（卡片/附件/脑图关联/数据文件），书籍文件保留；
+	// 与文档管理弹窗「删除记录」单源共享（doc-delete.ts）。危险操作置菜单最末（项目惯例）
+	menu.addItem((item) =>
+		item
+			.setTitle("删除文档…")
+			.setIcon("trash-2")
+			.onClick(() => confirmDeleteDocument(plugin.app, plugin, doc, () => ctx.refresh())),
 	);
 	menu.showAtMouseEvent(evt);
 }

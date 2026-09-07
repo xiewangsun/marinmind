@@ -3,7 +3,7 @@ import {
 	eraseHitStrokeIndices,
 	InkHistory,
 	pressureWidthPx,
-	renderStrokesToPNG,
+	renderStrokesToImage,
 	strokesBBox,
 	type HandwriteStroke,
 	type StrokePoint,
@@ -152,8 +152,8 @@ export class HandwriteLayer {
 		this.onInk?.();
 	}
 
-	/** 提交结果：归一化包围盒 + PNG 字节（由 reader-view 落库建卡） */
-	async commit(): Promise<{ bbox: DocRect; png: ArrayBuffer } | null> {
+	/** 提交结果：归一化包围盒 + 图片字节与实际格式（由 reader-view 落库建卡） */
+	async commit(): Promise<{ bbox: DocRect; bytes: ArrayBuffer; ext: "png" | "webp" } | null> {
 		if (this.destroyed || this.strokes.length === 0) {
 			return null;
 		}
@@ -176,8 +176,13 @@ export class HandwriteLayer {
 		this.redraw(); // 清空画布
 		// 页基准尺寸直取本页 baseSize（㊳ 混合页尺寸：exact 优先，归一化坐标天然
 		// 无关缩放——此前用"容器 ÷ 全局 scale"在混合尺寸文档上本就有偏差）
-		const png = await renderStrokesToPNG(strokes, bbox, this.pageView.baseSize, lineWidthNorm);
-		return png ? { bbox, png } : null;
+		const image = await renderStrokesToImage(
+			strokes,
+			bbox,
+			this.pageView.baseSize,
+			lineWidthNorm,
+		);
+		return image ? { bbox, bytes: image.bytes, ext: image.ext } : null;
 	}
 
 	destroy(): void {

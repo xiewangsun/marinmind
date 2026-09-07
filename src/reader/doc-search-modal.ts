@@ -27,7 +27,7 @@ export function collectBlockEls(root: Element): HTMLElement[] {
 /** 宿主注入项（由 ReaderView 实现）：三形态数据源 + 徽标文案 + 定位回调 */
 export interface DocSearchHost {
 	/** 文档形态；未加载文档返回 null（入口处已守卫，防御双保险） */
-	docSearchKind(): "pdf" | "epub" | "md" | null;
+	docSearchKind(): "pdf" | "epub" | "md" | "clip" | null;
 	/** PDF：总页数 */
 	docSearchPdfPageCount(): number;
 	/** PDF：第 page 页聚行文本（scale=1 spec → 纯逻辑聚行）；无句柄返回 null */

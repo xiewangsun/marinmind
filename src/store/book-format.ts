@@ -41,10 +41,16 @@ const NOTE_PREFIX = "**批注**：";
 export const UNGROUPED_HEADING = "## 未分组";
 /** 书签节标题 */
 export const BOOKMARKS_HEADING = "## 📑 书签";
-/** 脑图子目录（数据根相对） */
-export const MINDMAPS_SUBDIR = "脑图";
+/** 书籍子目录（数据根相对，123 布局 v2：书 md 与 未归类卡片.md 归此目录） */
+export const BOOKS_SUBDIR = "books";
+/** 脑图子目录（数据根相对，123 英文化；原中文目录「脑图」由 layout-migrate 启动迁移） */
+export const MINDMAPS_SUBDIR = "mindmaps";
+/** 旧版中文脑图子目录（仅 layout-migrate 迁移源读取；loadAll 不再扫描） */
+export const LEGACY_MINDMAPS_SUBDIR = "脑图";
 /** 孤儿卡片（documentId=null）兜底文件名 */
 export const ORPHAN_BOOK_FILENAME = "未归类卡片.md";
+/** 孤儿卡片文件完整路径（books/ 下；迁移中断残留根层副本时孤儿状态跟随实际位置） */
+export const ORPHAN_BOOK_PATH = `${BOOKS_SUBDIR}/${ORPHAN_BOOK_FILENAME}`;
 
 /** 七种摘录形态（与 cards 表 CHECK 约束一致） */
 const EXCERPT_TYPES = new Set<string>([

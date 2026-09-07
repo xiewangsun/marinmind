@@ -28,8 +28,8 @@ function sampleManifest(overrides: Partial<BackupManifest> = {}): BackupManifest
 function sampleContent() {
 	return {
 		notes: [
-			{ path: "强化学习.md", bytes: strToU8("---\nmarinmind: book\n---\n内容") },
-			{ path: "脑图/学习图.md", bytes: strToU8("---\nmarinmind: mindmap\n---\n- 节点") },
+			{ path: "books/强化学习.md", bytes: strToU8("---\nmarinmind: book\n---\n内容") },
+			{ path: "mindmaps/学习图.md", bytes: strToU8("---\nmarinmind: mindmap\n---\n- 节点") },
 		],
 		documents: [
 			{ path: "books/rl.pdf", bytes: new Uint8Array([9, 9, 9]) },
@@ -47,7 +47,10 @@ describe("备份 zip 组包/解包（v2 markdown）", () => {
 
 		const parsed = parseBackupZip(zipped);
 		expect(parsed.manifest).toEqual(manifest);
-		expect(parsed.notes.map((n) => n.path)).toEqual(["强化学习.md", "脑图/学习图.md"]);
+		expect(parsed.notes.map((n) => n.path)).toEqual([
+			"books/强化学习.md",
+			"mindmaps/学习图.md",
+		]);
 		expect(strFromU8Bytes(parsed.notes[0].bytes)).toBe(strFromU8Bytes(content.notes[0].bytes));
 		expect(parsed.documents.map((d) => d.path)).toEqual(["books/rl.pdf", "扫描版.pdf"]);
 		expect([...parsed.documents[0].bytes]).toEqual([9, 9, 9]);

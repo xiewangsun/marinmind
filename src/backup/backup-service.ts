@@ -16,6 +16,7 @@ import {
 	type LegacyBackupContent,
 } from "./backup-zip";
 import { legacyDbBytesToNotes } from "../store/legacy-import";
+import { normalizeBackupNotePath } from "../store/layout-migrate";
 
 /**
  * 导出备份（㉚ md 存储版）：数据根 md 树 + 全部文档 PDF + 媒体附件 → 单个 .marginpkg（zip）。
@@ -221,9 +222,12 @@ async function doImport(plugin: MarinMindPlugin, content: BackupContent): Promis
 			await dataAdapter.remove(file);
 		}
 
-		// 4) 写入备份 md 树（数据根相对路径；parseBackupZip 已拷贝独立 buffer）
+		// 4) 写入备份 md 树（parseBackupZip 已拷贝独立 buffer）。
+		//    123 布局归一：旧 v2 包的平铺书 md → books/、「脑图/」前缀 → mindmaps/，
+		//    新布局路径原样——旧包导入后无需等启动迁移即落规范位置
 		for (const note of content.notes) {
-			await dataAdapter.writeBinary(note.path, note.bytes.slice().buffer as ArrayBuffer);
+			const target = normalizeBackupNotePath(note.path, note.bytes);
+			await dataAdapter.writeBinary(target, note.bytes.slice().buffer as ArrayBuffer);
 		}
 
 		// 5) 恢复文档：库内已存在的文件（TFile）跳过，用户本地版本优先
@@ -286,7 +290,7 @@ async function doImport(plugin: MarinMindPlugin, content: BackupContent): Promis
 	}
 }
 
-/** 收集数据根的 md 文件树（快照目录豁免）：书 / 未归类卡片 / 脑图/ 全部进备份 */
+/** 收集数据根的 md 文件树（快照目录豁免）：books/ 书、mindmaps/ 脑图、根层系统文件全部进备份 */
 async function collectNoteEntries(
 	adapter: ListableStorageAdapter,
 ): Promise<{ path: string; bytes: Uint8Array }[]> {

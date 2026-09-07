@@ -4920,3 +4920,246 @@ body [class*="marinmind"] :is(button, [role="button"]) {
 .marinmind-home-empty {
 	text-wrap: balance;
 }
+
+/* ===== 网页剪藏弹窗（113）===== */
+.marinmind-clip-progress {
+	margin-top: 10px;
+	min-height: 20px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.marinmind-clip-progress.is-loading {
+	color: var(--text-muted);
+}
+
+.marinmind-clip-progress.marinmind-clip-error {
+	color: var(--text-error);
+}
+
+.marinmind-clip-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+/* ===== 截图裁剪弹窗（114）===== */
+/* 近全屏模态：Modal 默认居中窄卡改为纵向撑满，内部 stage 弹性占满 */
+.marinmind-crop-modal {
+	display: flex;
+	flex-direction: column;
+	width: min(96vw, 1600px);
+	height: 92vh;
+	padding: 10px;
+}
+
+.marinmind-crop-modal .modal-content {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.marinmind-crop-stage {
+	flex: 1;
+	min-height: 0;
+	display: grid;
+	place-items: center;
+	overflow: hidden;
+}
+
+/* 与图片等大的坐标基准层：遮罩/选框/角柄全部以此为参照 */
+.marinmind-crop-frame {
+	position: relative;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+	cursor: crosshair;
+	box-shadow: 0 0 0 1px var(--background-modifier-border);
+}
+
+.marinmind-crop-img {
+	display: block;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+}
+
+/* 四块遮罩夹出选区洞（pointer-events:none——命中判定交给 frame/选框） */
+.marinmind-crop-mask {
+	position: absolute;
+	background: rgba(0, 0, 0, 0.5);
+	pointer-events: none;
+}
+
+.marinmind-crop-box {
+	position: absolute;
+	border: 1px dashed rgba(255, 255, 255, 0.9);
+	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+	cursor: move;
+}
+
+.marinmind-crop-handle {
+	position: absolute;
+	width: 12px;
+	height: 12px;
+	background: var(--interactive-accent);
+	border: 2px solid #fff;
+	border-radius: 2px;
+	box-sizing: border-box;
+}
+
+.marinmind-crop-handle-nw {
+	left: -7px;
+	top: -7px;
+	cursor: nwse-resize;
+}
+
+.marinmind-crop-handle-ne {
+	right: -7px;
+	top: -7px;
+	cursor: nesw-resize;
+}
+
+.marinmind-crop-handle-sw {
+	left: -7px;
+	bottom: -7px;
+	cursor: nesw-resize;
+}
+
+.marinmind-crop-handle-se {
+	right: -7px;
+	bottom: -7px;
+	cursor: nwse-resize;
+}
+
+/* 尺寸标签：物理像素口径，悬浮在选框上方 */
+.marinmind-crop-size {
+	position: absolute;
+	bottom: calc(100% + 6px);
+	left: 50%;
+	transform: translateX(-50%);
+	padding: 2px 8px;
+	border-radius: 4px;
+	background: rgba(0, 0, 0, 0.75);
+	color: #fff;
+	font-size: var(--font-ui-smaller);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+	pointer-events: none;
+}
+
+.marinmind-crop-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 10px 0 2px;
+}
+
+.marinmind-crop-screens {
+	display: flex;
+	gap: 6px;
+}
+
+.marinmind-crop-screen-btn.is-active {
+	background-color: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.marinmind-crop-tip {
+	flex: 1;
+	text-align: center;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+/* ===== 框选剪藏弹窗（116）===== */
+.marinmind-region-body {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	height: 72vh;
+	margin-top: 8px;
+}
+
+/* 预览区：iframe 与覆盖层（选择态）1:1 叠放 */
+.marinmind-region-preview {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: #fff;
+}
+
+.marinmind-region-frame {
+	width: 100%;
+	height: 100%;
+	border: 0;
+	display: block;
+	background: #fff;
+}
+
+/* 选择态覆盖层：接管指针 + 冻结滚动（wheel 不达 iframe） */
+.marinmind-region-overlay {
+	position: absolute;
+	inset: 0;
+	display: none;
+	cursor: crosshair;
+	touch-action: none;
+}
+
+.marinmind-region-overlay.is-active {
+	display: block;
+}
+
+/* 拖动选框（实时）与命中吸附框（确认目标矩形）同款 */
+.marinmind-region-sel {
+	position: absolute;
+	display: none;
+	border: 2px solid #4d9fff;
+	border-radius: 2px;
+	background: rgba(77, 159, 255, 0.12);
+	pointer-events: none;
+}
+
+.marinmind-region-sel.is-active {
+	display: block;
+}
+
+/* 命中元素标签（div.article-content 形态，悬浮在选框上方） */
+.marinmind-region-label {
+	position: absolute;
+	display: none;
+	max-width: 60%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 2px 8px;
+	border-radius: 4px;
+	background: #4d9fff;
+	color: #fff;
+	font-size: var(--font-ui-smaller);
+	pointer-events: none;
+}
+
+.marinmind-region-label.is-active {
+	display: block;
+}
+
+.marinmind-region-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.marinmind-region-hint {
+	flex: 1;
+	min-width: 200px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}

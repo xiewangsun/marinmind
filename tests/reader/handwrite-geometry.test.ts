@@ -3,7 +3,7 @@ import {
 	InkHistory,
 	INK_HISTORY_LIMIT,
 	eraseHitStrokeIndices,
-	pngPixelSize,
+	exportPixelSize,
 	pressureWidthPx,
 	strokesBBox,
 } from "../../src/reader/handwrite-geometry";
@@ -66,22 +66,22 @@ describe("手写几何 strokesBBox", () => {
 	});
 });
 
-describe("手写导出 pngPixelSize", () => {
+describe("手写导出 exportPixelSize", () => {
 	it("bbox × 页基准尺寸 × 2 倍率", () => {
-		const size = pngPixelSize({ x: 0, y: 0, w: 0.5, h: 0.25 }, { width: 600, height: 800 });
+		const size = exportPixelSize({ x: 0, y: 0, w: 0.5, h: 0.25 }, { width: 600, height: 800 });
 		expect(size).toEqual({ width: 600, height: 400 });
 	});
 
 	it("总像素超过 4M 时按面积比例钳制（宽高同缩）", () => {
 		// 0.9 × 0.9 × 3000 × 2000 × 4 = 19.44M 像素，超限约 4.86 倍
-		const size = pngPixelSize({ x: 0, y: 0, w: 0.9, h: 0.9 }, { width: 3000, height: 2000 });
+		const size = exportPixelSize({ x: 0, y: 0, w: 0.9, h: 0.9 }, { width: 3000, height: 2000 });
 		expect(size.width * size.height).toBeLessThanOrEqual(4 * 1024 * 1024 + 2); // 取整余量
 		expect(size.width).toBeGreaterThan(1000);
 		expect(size.height).toBeGreaterThan(700);
 	});
 
 	it("极小 bbox 至少 1×1 像素", () => {
-		const size = pngPixelSize(
+		const size = exportPixelSize(
 			{ x: 0.5, y: 0.5, w: 0.0001, h: 0.0001 },
 			{ width: 600, height: 800 },
 		);

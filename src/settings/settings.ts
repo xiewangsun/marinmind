@@ -1,6 +1,8 @@
 import type { Plugin } from "obsidian";
 import { DEFAULT_BACKUP_DIR, DEFAULT_DATA_DIR } from "../constants";
 import { DEFAULT_OCR_LANGS, isOcrLangs } from "../ocr/ocr-text";
+import { validateWebclipFolder } from "../webclip/clip-url";
+import { validateAccelerator } from "../capture/screen-capture";
 import {
 	DEFAULT_TRANSLATE_TARGET,
 	isTranslateEngineId,
@@ -178,6 +180,30 @@ export interface MarinMindSettings {
 	aiCustomPrompts: AiCustomPrompt[];
 	/** 累计用量（96）：请求次数与 token 数（流式为估算值），设置页展示 + 可清零 */
 	aiUsage: AiUsage;
+	/**
+	 * 剪藏时下载正文图片到本地（113，默认开；关闭则全部保留远程链接）。
+	 * 124 起剪藏落点固定数据根 clips/（webclipFolder 设置退役，旧值由
+	 * extractLegacyWebclipFolder 提取供存量迁移检测）。
+	 */
+	webclipDownloadImages: boolean;
+	/**
+	 * 截图全局热键（117，默认空 = 关闭）：Electron accelerator 形态（如
+	 * Ctrl+Shift+S），任何应用内按下即截全屏进裁剪弹窗；仅桌面生效。存档守卫
+	 * 与设置页校验双闸：非法词形回空（validateAccelerator）。
+	 */
+	captureGlobalHotkey: string;
+	/**
+	 * 屏幕剪藏 OCR（119，默认开）：「剪藏屏幕区域为笔记」对选中区域做文字
+	 * 识别，识别文字进笔记正文与标题；关闭或识别失败只存图。首次识别需联网
+	 * 下载语言包（与既有 OCR 设置共用 ocrLangs）。
+	 */
+	screenClipOcr: boolean;
+	/**
+	 * 截图托盘常驻（120，默认开，仅桌面生效）：系统托盘聚合截图/屏幕剪藏
+	 * 入口（左键=截图框选复制，右键菜单=剪藏为笔记/打开设置）。环境不支持
+	 * 时静默不建（命令/热键入口不受影响）。
+	 */
+	showCaptureTray: boolean;
 }
 
 export const DEFAULT_SETTINGS: MarinMindSettings = {
@@ -216,6 +242,10 @@ export const DEFAULT_SETTINGS: MarinMindSettings = {
 	aiAutoFlashcard: true,
 	aiCustomPrompts: [],
 	aiUsage: EMPTY_AI_USAGE,
+	webclipDownloadImages: true,
+	captureGlobalHotkey: "",
+	screenClipOcr: true,
+	showCaptureTray: true,
 };
 
 /**
@@ -365,7 +395,47 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 		typeof rawAi?.aiAutoFlashcard === "boolean" ? rawAi.aiAutoFlashcard : true;
 	merged.aiCustomPrompts = sanitizeAiCustomPrompts(rawAi?.aiCustomPrompts);
 	merged.aiUsage = sanitizeAiUsage(rawAi?.aiUsage);
+	// 124 网页剪藏：落点固定数据根 clips/，webclipFolder 字段退役（不再进设置对象）；
+	// 布尔脏值回默认开（镜像 photoCompress 写法）
+	const rawClip = raw as { webclipDownloadImages?: unknown } | null;
+	merged.webclipDownloadImages =
+		typeof rawClip?.webclipDownloadImages === "boolean" ? rawClip.webclipDownloadImages : true;
+	// 117 截图热键：字符串 + validateAccelerator 双闸，非法（空/坏词形/手编脏值）回空关闭
+	// 119 屏幕剪藏 OCR / 120 截图托盘：布尔守卫，脏值回默认开（镜像 webclipDownloadImages 写法）
+	const rawCap = raw as {
+		captureGlobalHotkey?: unknown;
+		screenClipOcr?: unknown;
+		showCaptureTray?: unknown;
+	} | null;
+	merged.captureGlobalHotkey =
+		typeof rawCap?.captureGlobalHotkey === "string" &&
+		validateAccelerator(rawCap.captureGlobalHotkey)
+			? rawCap.captureGlobalHotkey.trim()
+			: "";
+	// 119 屏幕剪藏 OCR：布尔守卫，脏值回默认开（镜像 webclipDownloadImages 写法）
+	merged.screenClipOcr = typeof rawCap?.screenClipOcr === "boolean" ? rawCap.screenClipOcr : true;
+	// 120 截图托盘：布尔守卫，脏值回默认开
+	merged.showCaptureTray =
+		typeof rawCap?.showCaptureTray === "boolean" ? rawCap.showCaptureTray : true;
 	return merged;
+}
+
+/**
+ * 提取已退役的 webclipFolder 旧设置值（124，供存量剪藏迁移定位旧目录）：
+ * 原始 data.json 记录里存在且校验通过 → 返回规范化 vault 相对目录；否则 null
+ * （迁移模块会另行扫描默认 WebClips/，两者互补不重不漏）。
+ */
+export function extractLegacyWebclipFolder(raw: unknown): string | null {
+	const value = (raw as { webclipFolder?: unknown } | null)?.webclipFolder;
+	if (typeof value !== "string" || !value.trim()) {
+		return null;
+	}
+	const dataDir =
+		typeof (raw as { dataDir?: unknown } | null)?.dataDir === "string"
+			? (raw as { dataDir: string }).dataDir
+			: DEFAULT_DATA_DIR;
+	const check = validateWebclipFolder(value, dataDir);
+	return check.ok ? check.normalized : null;
 }
 
 /**

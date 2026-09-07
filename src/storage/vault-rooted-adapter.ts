@@ -10,6 +10,8 @@ export interface ListableStorageAdapter extends StorageAdapter {
 	remove(path: string): Promise<void>;
 	/** 列出目录的直接子项（files/folders 均为根相对路径）；目录不存在返回空 */
 	list(dir: string): Promise<{ files: string[]; folders: string[] }>;
+	/** 删除空目录（可选能力：123 布局迁移搬空旧「脑图/」目录用；不存在时静默） */
+	rmdir?(path: string): Promise<void>;
 }
 
 /** vault 内数据根适配器：根相对路径 → vault 相对路径（加 rootDir 前缀）后委托 vault.adapter */
@@ -73,6 +75,14 @@ export class VaultRootedAdapter implements ListableStorageAdapter {
 			files: listed.files.map((f) => stripRoot(f, this.rootDir)),
 			folders: listed.folders.map((f) => stripRoot(f, this.rootDir)),
 		};
+	}
+
+	async rmdir(rel: string): Promise<void> {
+		try {
+			await this.vaultAdapter.rmdir(this.abs(rel), false);
+		} catch {
+			// 不存在 / 非空（有残留文件）时静默——调用方仅作尽力清理
+		}
 	}
 }
 

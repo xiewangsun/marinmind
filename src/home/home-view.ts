@@ -1,6 +1,7 @@
 import { ItemView, setIcon } from "obsidian";
 import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
+import { WebclipModal } from "../webclip/webclip-modal";
 import type { CardsPageState, CategorySelection } from "./home-data";
 import {
 	renderCardsPage,
@@ -169,6 +170,16 @@ export class MarinMindHomeView extends ItemView {
 		const iconEl = openPdf.createDiv({ cls: "marinmind-home-nav-icon" });
 		setIcon(iconEl, "file-plus");
 		openPdf.createDiv({ cls: "marinmind-home-nav-label", text: "打开文档" });
+
+		// 113 剪藏网页：footer 第二入口（与打开文档同为「获取素材」动作）
+		const clip = footer.createDiv({
+			cls: "marinmind-home-nav-item marinmind-home-sidebar-open",
+		});
+		clip.addEventListener("click", () => new WebclipModal(this.plugin.app, this.plugin).open());
+		enableKeyboardActivation(clip); // P0-1：底部「剪藏网页」键盘可达
+		const clipIcon = clip.createDiv({ cls: "marinmind-home-nav-icon" });
+		setIcon(clipIcon, "globe");
+		clip.createDiv({ cls: "marinmind-home-nav-label", text: "剪藏网页" });
 
 		this.contentEl.createDiv({ cls: "marinmind-home-content" });
 	}

@@ -26,6 +26,7 @@ import { AiPresetModal } from "../ai/ai-preset-modal";
 import { AiCustomPromptModal } from "../ai/ai-custom-prompt-modal";
 import { sanitizeAiCustomPrompts, sanitizeAiPresets } from "../ai/ai-provider";
 import { testAiConnection } from "../ai/ai-service";
+import { validateAccelerator } from "../capture/screen-capture";
 
 /** R3（W-14）：路径/凭据输入关拼写检查与自动填充——防红线误报与密码管理器误触发 */
 function noAssist(text: TextComponent): void {
@@ -58,6 +59,8 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		this.renderAppearanceSection(containerEl);
 		this.renderWorkspaceSection(containerEl);
 		this.renderDataSection(containerEl);
+		this.renderWebclipSection(containerEl);
+		this.renderCaptureSection(containerEl);
 		this.renderBackupSection(containerEl);
 		this.renderReaderSection(containerEl);
 		this.renderOcrSection(containerEl);
@@ -620,6 +623,87 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		return Platform.isDesktopApp
 			? "存放 md 笔记与媒体附件。vault 内相对路径（如 MarinMind），或本机绝对路径（如 D:\\MarinMindData）。更改后需迁移数据。"
 			: "存放 md 笔记与媒体附件，vault 内相对路径（移动端不支持本机路径）。更改后需迁移数据。";
+	}
+
+	/** 网页剪藏（113 起 / 124 落点固定）：图片本地化开关（存量剪藏已由启动迁移搬入数据根 clips/） */
+	private renderWebclipSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "网页剪藏" });
+
+		new Setting(containerEl)
+			.setName("剪藏落点")
+			.setDesc(
+				`网页剪藏与屏幕剪藏保存到数据目录的 clips/ 子文件夹（与 books/、mindmaps/ 同级），正文图片统一存 assets/。`,
+			);
+
+		new Setting(containerEl)
+			.setName("图片下载到本地")
+			.setDesc(
+				"剪藏时把正文图片下载到数据目录 assets/（并发 3、至多 20 张、单张 ≤20MB）；失败与超限的图片自动回退为远程链接。",
+			)
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.webclipDownloadImages)
+					.onChange(async (value) => {
+						this.plugin.settings.webclipDownloadImages = value;
+						await this.plugin.saveData({ ...this.plugin.settings });
+					});
+			});
+	}
+
+	/** 屏幕截图（117/119）：全局热键 + 屏幕剪藏 OCR 开关（仅桌面） */
+	private renderCaptureSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: "屏幕截图" });
+
+		const hotkeyDesc =
+			"在任何应用内按下即冻结全屏直接框选（仅桌面）。格式：修饰键+单键，如 Ctrl+Shift+S；修饰键 Ctrl/Cmd/Alt/Shift/Super（macOS Cmd），至少一个。留空关闭。热键被其他应用占用时注册会失败并提示。";
+		const hotkeySetting = new Setting(containerEl).setName("全局截图热键").setDesc(hotkeyDesc);
+		hotkeySetting.addText((text) => {
+			noAssist(text); // R3（W-14）：热键输入
+			text.setValue(this.plugin.settings.captureGlobalHotkey).onChange((value) => {
+				const trimmed = value.trim();
+				if (trimmed && !validateAccelerator(trimmed)) {
+					hotkeySetting.descEl.textContent =
+						"热键格式无效：需「修饰键+单键」（如 Ctrl+Shift+S），且至少一个修饰键。";
+					hotkeySetting.descEl.style.color = "var(--text-error)";
+					return;
+				}
+				hotkeySetting.descEl.textContent = hotkeyDesc;
+				hotkeySetting.descEl.style.color = "";
+				if (trimmed === this.plugin.settings.captureGlobalHotkey) {
+					return; // 值未变化不写盘
+				}
+				this.plugin.settings.captureGlobalHotkey = trimmed;
+				void this.plugin.saveData({ ...this.plugin.settings });
+				// 即时生效：注销旧热键注册新热键（冲突时 Notice）
+				this.plugin.applyCaptureGlobalHotkey();
+			});
+		});
+
+		new Setting(containerEl)
+			.setName("屏幕剪藏识别文字（OCR）")
+			.setDesc(
+				"「剪藏屏幕区域为笔记」对选中区域做文字识别，识别文字写入笔记正文与标题；关闭或识别失败则只存截图。首次识别需联网下载语言包（语言同 OCR 设置）。",
+			)
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.screenClipOcr).onChange(async (value) => {
+					this.plugin.settings.screenClipOcr = value;
+					await this.plugin.saveData({ ...this.plugin.settings });
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("任务栏托盘常驻图标")
+			.setDesc(
+				"系统托盘常驻 MarinMind 截图入口（仅桌面）：左键单击 = 截图（框选）复制；右键菜单 = 剪藏屏幕区域为笔记 / 打开设置。关闭即移除；环境不支持时静默不显示（命令与热键入口不受影响）。",
+			)
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.showCaptureTray).onChange(async (value) => {
+					this.plugin.settings.showCaptureTray = value;
+					await this.plugin.saveData({ ...this.plugin.settings });
+					// 即时生效：销毁旧托盘按新设置重建（关闭即移除）
+					this.plugin.applyCaptureTray();
+				});
+			});
 	}
 
 	/** 备份：目录即时保存（只影响后续导出落点，无数据迁移） */

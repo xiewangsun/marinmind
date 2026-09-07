@@ -15,12 +15,12 @@ export interface AiContextBlock {
 /** 上下文范围（98 首档两态：当前页/全文；pdf 大纲章范围留后续批次） */
 export type AiContextScope = "page" | "doc";
 
-/** 页标签文案（与 docSearchHitLabel 同口径：pdf 页 / epub 章 / md 段） */
-export function aiPageLabel(kind: "pdf" | "epub" | "md", page: number): string {
+/** 页标签文案（与 docSearchHitLabel 同口径：pdf 页 / epub 章 / md·clip 段） */
+export function aiPageLabel(kind: "pdf" | "epub" | "md" | "clip", page: number): string {
 	if (kind === "epub") {
 		return `第 ${page} 章`;
 	}
-	if (kind === "md") {
+	if (kind === "md" || kind === "clip") {
 		return "全文";
 	}
 	return `第 ${page} 页`;
@@ -33,7 +33,7 @@ export function aiPageLabel(kind: "pdf" | "epub" | "md", page: number): string {
  */
 export function buildContextText(
 	blocks: readonly AiContextBlock[],
-	kind: "pdf" | "epub" | "md",
+	kind: "pdf" | "epub" | "md" | "clip",
 ): string {
 	const parts: string[] = [];
 	for (const block of blocks) {

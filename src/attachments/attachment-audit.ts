@@ -1,13 +1,15 @@
-import { ASSETS_SUBDIR } from "../constants";
+import { ASSETS_SUBDIR, CLIPS_SUBDIR } from "../constants";
 import type MarinMindPlugin from "../main";
 import { normalizeAssetRef } from "../storage/paths";
+import { collectClipAssetRefs } from "../webclip/clip-md";
 import type { ListableStorageAdapter } from "../storage/vault-rooted-adapter";
 
 /**
- * 附件仓健康对账（84-E）：assets/ 实际文件 ↔ 卡片 excerptRef 交叉比对——
- * 孤儿（文件无卡引用：删卡级联中断/异常残留，纯占库体积）与缺失（卡有 ref
- * 无文件：附件被外部移动/删除，媒体卡显示占位）。删除动作必须经用户确认
- * （默认取消，宁拒不赌——误删的附件无法从库内恢复）。
+ * 附件仓健康对账（84-E）：assets/ 实际文件 ↔ 引用面（卡片 excerptRef + 124 起
+ * clips/ 剪藏 md 内的 assets 引用）交叉比对——孤儿（文件无任何引用：删卡级联
+ * 中断/异常残留，纯占库体积）与缺失（引用了但仓中无文件：附件被外部移动/删除，
+ * 媒体卡显示占位、剪藏图裂图）。删除动作必须经用户确认（默认取消，宁拒不赌
+ * ——误删的附件无法从库内恢复）。
  */
 
 /** 对账结果：paths 均为数据根相对路径（如 assets/xxx.png） */
@@ -19,9 +21,10 @@ export interface AssetAuditResult {
 }
 
 /**
- * 纯函数对账（测试锁死归一规则）：files = 仓内实际文件路径，refs = 卡片引用。
- * 两侧均先 normalizeAssetRef 归一（旧 .marinmind/assets/ 前缀兼容）；
- * null/undefined 引用忽略；重复 ref 天然去重（Set）。
+ * 纯函数对账（测试锁死归一规则）：files = 仓内实际文件路径，refs = 引用面
+ * （卡片 excerptRef 与剪藏 md 引用的并集）。两侧均先 normalizeAssetRef 归一
+ * （旧 .marinmind/assets/ 前缀兼容）；null/undefined 引用忽略；重复 ref
+ * 天然去重（Set）。
  */
 export function diffAssetFiles(
 	files: string[],
@@ -52,13 +55,23 @@ async function collectFiles(adapter: ListableStorageAdapter, dir: string): Promi
 	return files;
 }
 
-/** 全库扫描：枚举 assets/ 实际文件，对照全部卡片的 excerptRef */
+/** 全库扫描：枚举 assets/ 实际文件，对照卡片 excerptRef + clips/ 剪藏 md 引用 */
 export async function scanAttachments(plugin: MarinMindPlugin): Promise<AssetAuditResult> {
 	const files = await collectFiles(plugin.dataLoc.adapter, ASSETS_SUBDIR);
-	return diffAssetFiles(
-		files,
-		plugin.cards.listAll().map((c) => c.excerptRef),
-	);
+	const refs: (string | null | undefined)[] = plugin.cards.listAll().map((c) => c.excerptRef);
+	// 124 剪藏 md 的 assets 引用进保留集（无卡片引用的剪藏图不判孤儿）
+	for (const clip of await collectFiles(plugin.dataLoc.adapter, CLIPS_SUBDIR)) {
+		if (!clip.endsWith(".md")) {
+			continue;
+		}
+		try {
+			const text = new TextDecoder().decode(await plugin.dataLoc.adapter.readBinary(clip));
+			refs.push(...collectClipAssetRefs(text));
+		} catch (err) {
+			console.warn("[MarinMind] 剪藏 md 读取失败（跳过其引用）", clip, err);
+		}
+	}
+	return diffAssetFiles(files, refs);
 }
 
 /** 删除孤儿附件（逐个走 attachments.remove——幂等，不存在静默）；返回成功删除数 */

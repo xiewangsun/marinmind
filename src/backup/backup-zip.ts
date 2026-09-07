@@ -29,7 +29,7 @@ export interface BackupManifest {
 /** 解包后的备份内容（v2） */
 export interface BackupContent {
 	manifest: BackupManifest;
-	/** 数据根的 md 文件树（path 为数据根相对路径，如 "书名.md"、"脑图/图名.md"） */
+	/** 数据根的 md 文件树（path 为数据根相对路径，如 "books/书名.md"、"mindmaps/图名.md"） */
 	notes: { path: string; bytes: Uint8Array }[];
 	/** path 为 vault 相对路径 */
 	documents: { path: string; bytes: Uint8Array }[];
@@ -127,7 +127,7 @@ export function parseBackupZip(bytes: Uint8Array): BackupContent {
 
 /**
  * 校验并拆出指定前缀下的条目相对路径；前缀不符或路径非法（zip-slip）返回 null。
- * entry 形如 "notes/脑图/图名.md" → "脑图/图名.md"。
+ * entry 形如 "notes/mindmaps/图名.md" → "mindmaps/图名.md"。
  */
 function splitEntry(entry: string, prefix: EntryPrefix): string | null {
 	if (!entry.startsWith(prefix)) return null;

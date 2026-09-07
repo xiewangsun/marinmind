@@ -87,9 +87,9 @@ describe("旧库迁移（legacy-import，㉚）", () => {
 		await store.flush();
 		store.close();
 
-		// md 文件按书名落盘，旧库文件未被改动
-		expect(target.files.has("强化学习.md")).toBe(true);
-		expect(target.files.has("脑图/学习图.md")).toBe(true);
+		// md 文件按书名落盘（123 布局 v2：books/ 与 mindmaps/），旧库文件未被改动
+		expect(target.files.has("books/强化学习.md")).toBe(true);
+		expect(target.files.has("mindmaps/学习图.md")).toBe(true);
 		expect(legacyAdapter.files.has("marinmind.db")).toBe(true);
 
 		// 重开（走 md 解析）后经仓储断言
@@ -176,14 +176,14 @@ describe("旧库迁移（legacy-import，㉚）", () => {
 		const result = store.importLegacy(converted);
 		expect(result.warnings.some((w) => w.includes("强化学习"))).toBe(true);
 		expect(documents.getByPath("books/rl.pdf")?.id).toBe(occupied.id); // 现有文档不被覆盖
-		// doc1 被跳过，其卡片（c1/c2）兜底进未归类卡片.md
+		// doc1 被跳过，其卡片（c1/c2）兜底进 books/未归类卡片.md
 		expect(cards.get("c1")?.documentId).toBeNull();
 		expect(cards.get("c2")?.documentId).toBeNull();
 		// doc2 正常导入
 		expect(cards.get("c3")?.documentId).toBe("doc2");
 		expect(result.warnings.some((w) => w.includes("未归类"))).toBe(true);
 		await store.flush();
-		expect(textOf(target, "未归类卡片.md")).toContain("贝尔曼方程");
+		expect(textOf(target, "books/未归类卡片.md")).toContain("贝尔曼方程");
 		store.close();
 	});
 
@@ -217,9 +217,9 @@ describe("旧库迁移（legacy-import，㉚）", () => {
 		const { notes, warnings } = await legacyDbBytesToNotes(dbBytes);
 		expect(warnings).toEqual([]);
 		const paths = notes.map((n) => n.path).sort();
-		expect(paths).toContain("强化学习.md");
-		expect(paths).toContain("图论.md");
-		expect(paths).toContain("脑图/学习图.md");
+		expect(paths).toContain("books/强化学习.md");
+		expect(paths).toContain("books/图论.md");
+		expect(paths).toContain("mindmaps/学习图.md");
 
 		// md 文件集写入目标根后能被 store 正常认领（备份导入链路的后半段）
 		const target = new MemoryAdapter();
