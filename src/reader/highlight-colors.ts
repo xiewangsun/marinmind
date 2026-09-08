@@ -14,7 +14,8 @@ import type { Card, LineStyle } from "../types";
  *   建卡线型 = settings.excerptLineStyle 全局单值（只属 text 形态，无 per-tool）
  * - 旧 7 色中 teal/orange/purple/pink 为存量卡色相（CSS 保留旧变量定义继续渲染，
  *   新建卡不再产生）；blue 是四色化前文字摘录/AI 正文的历史值（视觉一直是黄），
- *   读取层归一为 yellow（book-format/legacy-import），㊹ 起 blue = 浅蓝真义
+ *   读取层归一为 yellow（book-format；旧 legacy-import 同语义，129 批随 sql.js 移除），
+ *   ㊹ 起 blue = 浅蓝真义
  */
 export type HighlightColorValue = "red" | "green" | "blue" | "yellow";
 

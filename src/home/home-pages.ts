@@ -2,7 +2,7 @@ import { DropdownComponent, Menu, Notice, Platform, setIcon, TFile } from "obsid
 import type { App } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { BookDocument, Card, Mindmap } from "../types";
-import { now, mapLimit } from "../utils";
+import { now } from "../utils";
 import { ConfirmModal } from "../mindmap/confirm-modal";
 import { DocumentManagerModal } from "../documents/document-manager-modal";
 import { ReviewStatsModal } from "../review/review-stats-modal";
@@ -38,7 +38,9 @@ import {
 	type CategoryTree,
 } from "./home-data";
 import { getDocCover } from "./doc-covers";
+import { createLazyQueue } from "./lazy-cover-queue";
 import { CardPreviewModal } from "./card-preview-modal";
+import { DocumentAssignModal } from "./document-assign-modal";
 import { deleteCardCascade, promptPathName } from "./card-actions";
 
 /** 主页导航页标识（与 home-view NAV_ITEMS 对应） */
@@ -334,6 +336,10 @@ export function renderOverviewPage(container: HTMLElement, ctx: HomeRenderCtx): 
 // 文档页（分类 = 虚拟文件夹）
 // ---------------------------------------------------------------------------
 
+/** 书架封面视口观察器（127 惰性渲染）：列表局部刷新/整页重渲染重建前 disconnect
+ *  旧观察器，防脱离文档的瓷片仍被持有（在途渲染由 isConnected 守卫丢弃） */
+let gridCoverObserver: IntersectionObserver | null = null;
+
 /** 文档页：左列分类文件夹树 + 右侧搜索框与文档列表（归档经右键菜单/拖拽） */
 export async function renderDocumentsPage(
 	container: HTMLElement,
@@ -407,6 +413,8 @@ export async function renderDocumentsPage(
 	const rowsHost = listWrap.createDiv();
 
 	const rerenderList = async (): Promise<void> => {
+		gridCoverObserver?.disconnect(); // 127：上一轮视口观察器随列表重建失效
+		gridCoverObserver = null;
 		const fresh = plugin.documents.list();
 		const inCategory = filterDocsByCategory(fresh, ctx.selectedCategory);
 		const filtered = filterDocsByQuery(inCategory, ctx.docQuery);
@@ -429,8 +437,8 @@ export async function renderDocumentsPage(
 		);
 		const ts = now();
 		if (plugin.settings.homeDocsView === "grid") {
-			// ㊵ 窗格：先铺占位瓷片，封面批量按需渲染（并发 ≤ 3；getDocCover 契约
-			// 永不 reject、DOM 段不抛——mapLimit「任一 fn 抛错整批 reject」的前提不存在）
+			// 127 视口惰性：占位瓷片滚入视口（rootMargin 预载一屏）才入队渲染——
+			// 书库数百本不再首屏一次性排队；LRU 缓存/在途单飞语义不变，只改「何时发起」
 			const grid = rowsHost.createDiv({ cls: "marinmind-home-doc-grid" });
 			const pending: { doc: BookDocument; cover: HTMLElement; img: HTMLImageElement }[] = [];
 			filtered.forEach((doc, i) => {
@@ -439,7 +447,10 @@ export async function renderDocumentsPage(
 					pending.push(entry);
 				}
 			});
-			void mapLimit(pending, 3, async (e) => {
+			// 并发 ≤ 3；getDocCover 契约永不 reject、DOM 段不抛——mapLimit「任一
+			// fn 抛错整批 reject」的顾虑在队列层同样自吞（createLazyQueue 防御）
+			type TileEntry = { doc: BookDocument; cover: HTMLElement; img: HTMLImageElement };
+			const queue = createLazyQueue<TileEntry>(3, async (e) => {
 				const url = await getDocCover(plugin, e.doc);
 				if (!e.cover.isConnected) {
 					return; // 渲染期间列表已重建（输入/切模式/翻类）——丢弃
@@ -453,6 +464,22 @@ export async function renderDocumentsPage(
 					setIcon(e.cover.createSpan({ cls: "marinmind-home-tile-fallback" }), "file");
 				}
 			});
+			const byCover = new Map<Element, TileEntry>(pending.map((e) => [e.cover, e]));
+			const io = new IntersectionObserver(
+				(entries) => {
+					for (const en of entries) {
+						if (!en.isIntersecting) continue;
+						io.unobserve(en.target); // 每瓷片只入队一次
+						const e = byCover.get(en.target);
+						if (e) queue.add(e);
+					}
+				},
+				// 滚动容器 = 主页内容区（.marinmind-home-content overflow-y:auto）；
+				// 结构变化时 closest 落空回退视口根（祖先裁剪仍被计算，仅预载边距参照不同）
+				{ root: grid.closest(".marinmind-home-content"), rootMargin: "240px" },
+			);
+			gridCoverObserver = io; // 局部/整页重建前 disconnect（见 rerenderList 开头）
+			for (const e of pending) io.observe(e.cover);
 		} else {
 			const list = rowsHost.createDiv({ cls: "marinmind-home-rows" });
 			filtered.forEach((doc, i) => {
@@ -530,7 +557,45 @@ function renderFolderTree(
 	enableKeyboardActivation(createBtn);
 }
 
-/** 递归渲染分类树节点（多层缩进；个人规模默认全展开，不做折叠态） */
+/** 用户手动折叠过的分类/卡组节点 key（127 会话态不持久化；key = fullName 唯一路径，
+ *  默认全展开，重开主页/重启回全展开——镜像阅读器 tocCollapsedKeys 先例） */
+const folderCollapsedKeys = new Set<string>();
+const deckCollapsedKeys = new Set<string>();
+
+/** 树节点折叠钮接线（127）：键盘可达 + click/keydown 双向 stopPropagation——
+ *  行 click 有实质语义（选中分类/卡组），与阅读器 TOC 先例（行 click 无冲突）的关键差异 */
+function wireTreeChevron(chev: HTMLElement, toggle: () => void): void {
+	chev.setAttribute("role", "button");
+	chev.tabIndex = 0;
+	chev.setAttribute("aria-label", "展开/折叠");
+	chev.addEventListener("click", (evt) => {
+		evt.stopPropagation();
+		toggle();
+	});
+	chev.addEventListener("keydown", (evt) => {
+		if (evt.key !== "Enter" && evt.key !== " ") return;
+		evt.preventDefault();
+		evt.stopPropagation(); // 防冒泡触发行键盘激活（行 Enter = 选中分类/卡组）
+		toggle();
+	});
+}
+
+/** 折叠开关动作：翻转子级容器显隐 + 图标 + aria + 会话态 key 集 */
+function toggleTreeCollapse(
+	chev: HTMLElement,
+	kids: HTMLElement,
+	keys: Set<string>,
+	key: string,
+): void {
+	const collapsed = kids.classList.toggle("is-collapsed");
+	setIcon(chev, collapsed ? "chevron-right" : "chevron-down");
+	chev.setAttribute("aria-expanded", String(!collapsed));
+	if (collapsed) keys.add(key);
+	else keys.delete(key);
+}
+
+/** 递归渲染分类树节点（127 节点级折叠：chevron 开关 + 子级 kids 容器承担缩进；
+ *  行内 paddingLeft 恒定 8px，层级缩进改嵌套式——镜像阅读器目录先例） */
 function renderFolderNode(
 	container: HTMLElement,
 	ctx: HomeRenderCtx,
@@ -539,13 +604,22 @@ function renderFolderNode(
 	depth: number,
 ): void {
 	const isActive = ctx.selectedCategory === node.fullName;
+	const open = !folderCollapsedKeys.has(node.fullName);
 	const entry = container.createDiv({
 		cls: `marinmind-home-folder marinmind-home-folder-nested${isActive ? " is-active" : ""}`,
 		// 74 可达性：重命名/删除入口由右键（移动端长按）承载，hover 提示降低发现门槛
 		attr: { title: "右键或长按：重命名 / 删除" },
 	});
-	// 94 批：第一层分类与「全部/未分类」同以 8px 顶格左对齐，子层每级再缩 14px
-	entry.style.paddingLeft = `${8 + depth * 14}px`;
+	// DOM 序：行在前、子级容器随后（chevron 闭包引用，先建后接线）
+	const kids =
+		node.children.length > 0
+			? container.createDiv({ cls: "marinmind-home-folder-kids" })
+			: null;
+	if (kids) {
+		kids.classList.toggle("is-collapsed", !open);
+		kids.classList.toggle("is-max", depth >= 6); // 超深截断缩进（R2 挂账顺带消化）
+	}
+	entry.style.paddingLeft = "8px";
 	entry.addEventListener("click", () => ctx.setSelectedCategory(node.fullName));
 	entry.addEventListener("contextmenu", (evt) => {
 		evt.preventDefault();
@@ -553,11 +627,22 @@ function renderFolderNode(
 	});
 	enableKeyboardActivation(entry);
 	enableFolderDrop(entry, ctx, node.fullName);
+	if (kids) {
+		const chev = entry.createDiv({ cls: "marinmind-home-folder-chev" });
+		setIcon(chev, open ? "chevron-down" : "chevron-right");
+		chev.setAttribute("aria-expanded", String(open));
+		wireTreeChevron(chev, () =>
+			toggleTreeCollapse(chev, kids, folderCollapsedKeys, node.fullName),
+		);
+	} else {
+		// 叶子占位（保持与有子级条目的图标列对齐，镜像 TOC is-leaf）
+		entry.createDiv({ cls: "marinmind-home-folder-chev is-leaf" });
+	}
 	const iconEl = entry.createSpan({ cls: "marinmind-home-folder-icon" });
 	setIcon(iconEl, "folder");
 	entry.createSpan({ cls: "marinmind-home-folder-label", text: node.name });
 	entry.createSpan({ cls: "marinmind-home-folder-count", text: String(node.total) });
-	for (const child of node.children) renderFolderNode(container, ctx, child, docs, depth + 1);
+	for (const child of node.children) renderFolderNode(kids!, ctx, child, docs, depth + 1);
 }
 
 /** 新建分类：写入显式清单持久保留（76——空分类重开主页/重启仍在树上）；支持多层路径 */
@@ -954,7 +1039,7 @@ function renderDeckTree(
 	enableKeyboardActivation(createBtn);
 }
 
-/** 递归渲染卡组树节点（多层缩进；count 徽标 = total 含子孙，镜像分类树节点） */
+/** 递归渲染卡组树节点（127 节点级折叠：与分类树同构；count 徽标 = total 含子孙） */
 function renderDeckNode(
 	container: HTMLElement,
 	ctx: HomeRenderCtx,
@@ -963,13 +1048,21 @@ function renderDeckNode(
 	depth: number,
 ): void {
 	const isActive = ctx.cardsFilter.deck === node.fullName;
+	const open = !deckCollapsedKeys.has(node.fullName);
 	const entry = container.createDiv({
 		cls: `marinmind-home-folder marinmind-home-folder-nested${isActive ? " is-active" : ""}`,
 		// 74 可达性：重命名/删除入口由右键（移动端长按）承载，hover 提示降低发现门槛
 		attr: { title: "右键或长按：重命名 / 删除" },
 	});
-	// 94 批：第一层卡组与「全部/未分组」同以 8px 顶格左对齐，子层每级再缩 14px
-	entry.style.paddingLeft = `${8 + depth * 14}px`;
+	const kids =
+		node.children.length > 0
+			? container.createDiv({ cls: "marinmind-home-folder-kids" })
+			: null;
+	if (kids) {
+		kids.classList.toggle("is-collapsed", !open);
+		kids.classList.toggle("is-max", depth >= 6);
+	}
+	entry.style.paddingLeft = "8px";
 	entry.addEventListener("click", () => ctx.setCardsFilter({ deck: node.fullName }));
 	entry.addEventListener("contextmenu", (evt) => {
 		evt.preventDefault();
@@ -977,11 +1070,21 @@ function renderDeckNode(
 	});
 	enableKeyboardActivation(entry);
 	enableDeckDrop(entry, ctx, node.fullName);
+	if (kids) {
+		const chev = entry.createDiv({ cls: "marinmind-home-folder-chev" });
+		setIcon(chev, open ? "chevron-down" : "chevron-right");
+		chev.setAttribute("aria-expanded", String(open));
+		wireTreeChevron(chev, () =>
+			toggleTreeCollapse(chev, kids, deckCollapsedKeys, node.fullName),
+		);
+	} else {
+		entry.createDiv({ cls: "marinmind-home-folder-chev is-leaf" });
+	}
 	const iconEl = entry.createSpan({ cls: "marinmind-home-folder-icon" });
 	setIcon(iconEl, "folder");
 	entry.createSpan({ cls: "marinmind-home-folder-label", text: node.name });
 	entry.createSpan({ cls: "marinmind-home-folder-count", text: String(node.total) });
-	for (const child of node.children) renderDeckNode(container, ctx, child, cards, depth + 1);
+	for (const child of node.children) renderDeckNode(kids!, ctx, child, cards, depth + 1);
 }
 
 /** 新建卡组：写入显式清单持久保留（76——镜像空分类先例）；支持多层路径 */
@@ -1410,6 +1513,52 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 				},
 			).open();
 		});
+		// 127 批量移动文档：选目标（文档或未归类）→ 含锚点卡先警告（移动即清锚点）
+		// → 逐卡 move（异常逐卡跳过计数）——目标消失等竞态不阻断整批
+		const moveBtn = filterRow.createEl("button", {
+			cls: "marinmind-home-cards-review",
+			text: `移动 ${batchSelectedIds.size} 张`,
+			attr: { type: "button", title: "移动所选卡片到其他文档（原文锚点将清除）" },
+		});
+		moveBtn.addEventListener("click", () => {
+			const ids = [...batchSelectedIds];
+			if (ids.length === 0) return;
+			const first = plugin.cards.get(ids[0]);
+			new DocumentAssignModal(plugin.app, plugin, first?.documentId ?? null, (item) => {
+				const targetId = item.kind === "doc" ? item.doc.id : null;
+				const targetLabel = item.kind === "doc" ? item.doc.title : "未归类卡片";
+				const doMove = (): void => {
+					let moved = 0;
+					for (const id of ids) {
+						if (!plugin.cards.get(id)) continue; // 已被外部删除（存活修剪兜底）
+						try {
+							plugin.cards.move(id, targetId);
+							moved++;
+						} catch (err) {
+							console.warn("[MarinMind] 卡片移动失败（已跳过）", err);
+						}
+					}
+					new Notice(`已移动 ${moved} 张卡片到「${targetLabel}」`);
+					clearBatchSelection();
+					ctx.refresh();
+				};
+				// 带原文锚点的卡移动即清锚点——确认弹窗明示（不静默丢定位）
+				const anchored = ids.filter((id) => {
+					const c = plugin.cards.get(id);
+					return c != null && (c.page != null || c.rects.length > 0 || c.polygon != null);
+				}).length;
+				if (anchored > 0) {
+					new ConfirmModal(
+						plugin.app,
+						"移动卡片",
+						`所选 ${ids.length} 张卡片中 ${anchored} 张带原文锚点，移动后页码/区域定位将被清除（卡片内容、附件与复习进度保留）。继续？`,
+						doMove,
+					).open();
+				} else {
+					doMove();
+				}
+			}).open();
+		});
 		batchUiSync = () => {
 			countEl.setText(`已选 ${batchSelectedIds.size} / ${filtered.length} 张`);
 			const pageIds = pageCards.map((c) => c.id);
@@ -1422,6 +1571,9 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 			deleteBtn.setText(`删除 ${n} 张`);
 			deleteBtn.classList.toggle("is-disabled", n === 0);
 			deleteBtn.setAttribute("aria-disabled", String(n === 0));
+			moveBtn.setText(`移动 ${n} 张`);
+			moveBtn.classList.toggle("is-disabled", n === 0);
+			moveBtn.setAttribute("aria-disabled", String(n === 0));
 		};
 		batchUiSync();
 	} else {

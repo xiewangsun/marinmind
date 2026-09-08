@@ -10,12 +10,9 @@ import {
 	BACKUP_VERSION,
 	buildBackupZip,
 	parseBackupZip,
-	parseLegacyBackupZip,
 	type BackupContent,
 	type BackupManifest,
-	type LegacyBackupContent,
 } from "./backup-zip";
-import { legacyDbBytesToNotes } from "../store/legacy-import";
 import { normalizeBackupNotePath } from "../store/layout-migrate";
 
 /**
@@ -119,29 +116,14 @@ export function promptImportBackup(plugin: MarinMindPlugin): void {
 	input.click();
 }
 
-/** 校验备份包并弹确认框；真正落地在 doImport（v1 旧包先确认再转换） */
+/** 校验备份包并弹确认框；真正落地在 doImport（v1 旧包在 parseBackupZip 一层即被拒） */
 export function importBackupFromBytes(plugin: MarinMindPlugin, bytes: ArrayBuffer): void {
 	const u8 = new Uint8Array(bytes);
 	let content: BackupContent;
 	try {
 		content = parseBackupZip(u8);
 	} catch (err) {
-		// v1 旧包（SQLite 形态）：转换后仍可导入；其他错误原样报出
-		let legacy: LegacyBackupContent;
-		try {
-			legacy = parseLegacyBackupZip(u8);
-		} catch {
-			new Notice(`MarinMind：导入失败：${err instanceof Error ? err.message : String(err)}`);
-			return;
-		}
-		const m = legacy.manifest;
-		new ConfirmModal(
-			plugin.app,
-			"导入旧格式备份",
-			`这是 SQLite 存储时代的 v1 备份（文档 ${m.documentCount} · 卡片 ${m.cardCount} · 导出于 ${m.exportedAt}）。\n` +
-				"导入时将自动转换为 Markdown 存储。\n当前数据会先自动快照到数据目录；导入后 Obsidian 将重载。\n继续？",
-			() => void doLegacyImport(plugin, legacy),
-		).open();
+		new Notice(`MarinMind：导入失败：${err instanceof Error ? err.message : String(err)}`);
 		return;
 	}
 	const m = content.manifest;
@@ -152,45 +134,6 @@ export function importBackupFromBytes(plugin: MarinMindPlugin, bytes: ArrayBuffe
 			"当前数据会先自动快照到数据目录；导入后 Obsidian 将重载（未保存的其他编辑会丢失）。\n继续？",
 		() => void doImport(plugin, content),
 	).open();
-}
-
-/**
- * v1 旧包导入：库字节 → md 文件集（legacy-import 转换，含 wikilink 全格式序列化）
- * → 组装 v2 内容走既有 doImport 整库替换链路。
- */
-async function doLegacyImport(plugin: MarinMindPlugin, legacy: LegacyBackupContent): Promise<void> {
-	const notice = new Notice(
-		"MarinMind：正在转换旧格式备份（SQLite → Markdown）…（大库可能卡顿数秒）",
-		0,
-	);
-	try {
-		const { notes, warnings } = await legacyDbBytesToNotes(legacy.dbBytes);
-		notice.hide();
-		if (warnings.length > 0) {
-			new Notice(
-				`MarinMind：转换警告 ${warnings.length} 条：\n${warnings.slice(0, 5).join("\n")}` +
-					(warnings.length > 5 ? "\n…" : ""),
-				10000,
-			);
-		}
-		if (notes.length === 0) {
-			new Notice("MarinMind：旧备份中未读到任何数据，已中止导入（原数据未动）");
-			return;
-		}
-		const content: BackupContent = {
-			manifest: { ...legacy.manifest, version: BACKUP_VERSION, storage: "markdown" },
-			notes,
-			documents: legacy.documents,
-			assets: legacy.assets,
-		};
-		await doImport(plugin, content);
-	} catch (err) {
-		console.error("[MarinMind] 旧格式备份转换失败", err);
-		notice.hide();
-		new Notice(
-			`MarinMind：旧格式备份导入失败：${err instanceof Error ? err.message : String(err)}`,
-		);
-	}
 }
 
 /** 导入落地（㉚）：快照旧 md 树 → 停写 → 清空现有 md → 写入备份 md 树 → 恢复文档与附件 → 重载 */

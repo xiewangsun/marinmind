@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { strToU8, unzipSync, zipSync } from "fflate";
+import { strToU8, zipSync } from "fflate";
 import {
 	BACKUP_FORMAT,
 	BACKUP_VERSION,
 	buildBackupZip,
 	parseBackupZip,
-	parseLegacyBackupZip,
 	type BackupManifest,
 } from "../../src/backup/backup-zip";
-import { MarinMindDatabase } from "../../src/db/database";
-import { MemoryAdapter } from "../helpers/memory-adapter";
 
 function sampleManifest(overrides: Partial<BackupManifest> = {}): BackupManifest {
 	return {
@@ -77,14 +74,14 @@ describe("备份 zip 组包/解包（v2 markdown）", () => {
 		expect(parseBackupZip(empty).notes).toEqual([]);
 	});
 
-	it("v1 旧包（含 marinmind.db 条目）拒绝并给出迁移指引", () => {
+	it("v1 旧包（含 marinmind.db 条目）永久拒绝（129 批移除转换通道）", () => {
 		const v1 = zipSync({
 			"manifest.json": strToU8(
 				JSON.stringify(sampleManifest({ version: 1, storage: undefined })),
 			),
 			"marinmind.db": new Uint8Array([1, 2, 3]),
 		});
-		expect(() => parseBackupZip(v1)).toThrow(/旧版本/);
+		expect(() => parseBackupZip(v1)).toThrow(/不再支持导入 v1 备份/);
 
 		// version 字段为 1 但没有 db 条目同样按 v1 拒绝（形态不明）
 		const v1NoDb = zipSync({
@@ -92,7 +89,15 @@ describe("备份 zip 组包/解包（v2 markdown）", () => {
 				JSON.stringify(sampleManifest({ version: 1, storage: undefined })),
 			),
 		});
-		expect(() => parseBackupZip(v1NoDb)).toThrow(/旧版本/);
+		expect(() => parseBackupZip(v1NoDb)).toThrow(/不再支持导入 v1 备份/);
+
+		// version 为 2 却夹带 marinmind.db 条目（异常混合包）同样拒绝
+		const mixed = zipSync({
+			"manifest.json": strToU8(JSON.stringify(sampleManifest())),
+			"notes/书.md": strToU8("x"),
+			"marinmind.db": new Uint8Array([1]),
+		});
+		expect(() => parseBackupZip(mixed)).toThrow(/不再支持导入 v1 备份/);
 	});
 
 	it("zip-slip：含 .. 段 / 绝对路径 / 前缀不符的条目拒绝", () => {
@@ -125,67 +130,6 @@ describe("备份 zip 组包/解包（v2 markdown）", () => {
 
 	it("坏 zip 字节解析失败抛错（不静默）", () => {
 		expect(() => parseBackupZip(new Uint8Array([1, 2, 3, 4]))).toThrow();
-	});
-});
-
-describe("v1 旧包解包（SQLite 形态，㉚ 兼容导入）", () => {
-	/** 构造一个真实 v1 包：内存 SQL 库落盘字节 + manifest + documents/assets */
-	async function makeV1Package() {
-		const adapter = new MemoryAdapter();
-		const db = await MarinMindDatabase.open({ adapter, path: "marinmind.db" });
-		db.run(
-			`INSERT INTO documents (id, title, file_path, created_at, updated_at) VALUES
-			('d1', '旧书', 'books/old.pdf', 1, 1)`,
-		);
-		db.run(
-			`INSERT INTO cards (id, document_id, page, rects, excerpt_type, excerpt_text,
-				excerpt_ref, note, color, tags, polygon, created_at, updated_at) VALUES
-			('c1', 'd1', 3, '[]', 'text', '旧卡', NULL, NULL, NULL, '[]', NULL, 2, 2)`,
-		);
-		await db.flush();
-		db.close();
-		const dbBytes = new Uint8Array(adapter.files.get("marinmind.db")!);
-		const manifest = sampleManifest({ version: 1, storage: undefined });
-		const zipped = zipSync({
-			"manifest.json": strToU8(JSON.stringify(manifest)),
-			"marinmind.db": dbBytes,
-			"documents/books/old.pdf": new Uint8Array([9, 9]),
-			"assets/a.png": new Uint8Array([1]),
-		});
-		return { zipped, dbBytes, manifest };
-	}
-
-	it("v1 包解包：库字节原样取出，documents/assets 分类正确", async () => {
-		const { zipped, dbBytes, manifest } = await makeV1Package();
-		const parsed = parseLegacyBackupZip(zipped);
-		expect(parsed.manifest.documentCount).toBe(manifest.documentCount);
-		expect([...parsed.dbBytes]).toEqual([...dbBytes]);
-		expect(parsed.documents.map((d) => d.path)).toEqual(["books/old.pdf"]);
-		expect(parsed.assets.map((a) => a.path)).toEqual(["a.png"]);
-	});
-
-	it("缺 marinmind.db / 缺 manifest 拒绝；v2 包交给 parseLegacyBackupZip 也拒绝", async () => {
-		const onlyDb = zipSync({ "marinmind.db": new Uint8Array([1]) });
-		expect(() => parseLegacyBackupZip(onlyDb)).toThrow(/manifest/);
-
-		const noDb = zipSync({
-			"manifest.json": strToU8(JSON.stringify(sampleManifest({ version: 1 }))),
-		});
-		expect(() => parseLegacyBackupZip(noDb)).toThrow(/marinmind\.db/);
-
-		// v2 包（无 db 条目）走 legacy 解析器 → 同样报缺 db 条目
-		const v2 = buildBackupZip(sampleContent(), sampleManifest());
-		expect(() => parseLegacyBackupZip(v2)).toThrow(/marinmind\.db/);
-	});
-
-	it("v1 包 zip-slip 拒绝（意外前缀与穿越段）", async () => {
-		const { zipped } = await makeV1Package();
-		const unzipped = unzipSync(zipped);
-		const evil = zipSync({
-			...unzipped,
-			"notes/../../evil.md": new Uint8Array(),
-		} as Record<string, Uint8Array>);
-		expect(() => parseLegacyBackupZip(evil)).toThrow(/意外条目/);
 	});
 });
 

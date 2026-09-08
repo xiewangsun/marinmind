@@ -17,7 +17,6 @@ import {
 	ORPHAN_BOOK_PATH,
 	BOOKS_SUBDIR,
 	linkOwnerId,
-	linkId,
 	parseBookMd,
 	sanitizeFileName,
 	serializeBookMd,
@@ -99,25 +98,6 @@ export interface MapState {
 export interface ExternalChangeResult {
 	/** 被外部删除的卡片（视图 DOM 清理需要快照） */
 	removedCards: Card[];
-	warnings: string[];
-}
-
-/**
- * 旧 SQLite 库的整库数据集（legacy-import 转换产物；v1 备份包兼容导入共用）。
- * 字段与 types.ts 领域模型一一对应，id/时间戳保持原值。
- */
-export interface LegacyImportData {
-	documents: BookDocument[];
-	cards: Card[];
-	bookmarks: DocumentBookmark[];
-	links: CardLink[];
-	reviews: ReviewState[];
-	mindmaps: Mindmap[];
-	nodes: MindmapNode[];
-}
-
-/** 旧库一次性迁移灌入的结果（调用方 Notice 聚合用） */
-export interface LegacyImportResult {
 	warnings: string[];
 }
 
@@ -526,6 +506,32 @@ export class MarinMindStore {
 		return card;
 	}
 
+	/**
+	 * 卡片移库（127 批量移动文档）：换归属桶（books ↔ orphan），卡对象更新
+	 * documentId + updatedAt。复习态/链接归属**不做迁移**——序列化时按桶派生
+	 * （serializeBookMd 从全局 reviewsById/linksById 按本文件卡片集过滤），
+	 * 原/新双 scope 标脏即自动跟随。脑图节点引用 cardId 稳定不动。
+	 * 目标文档不存在抛中文 Error（外键语义同卡片创建）；同桶 no-op 返回原卡。
+	 */
+	moveCard(cardId: string, targetDocumentId: string | null): Card | undefined {
+		const source = this.bookOfCard(cardId);
+		const card = source?.cards.get(cardId);
+		if (!source || !card) return undefined;
+		const target =
+			targetDocumentId == null ? this.orphan : this.booksById.get(targetDocumentId);
+		if (!target) {
+			throw new Error(`卡片目标文档不存在：${targetDocumentId}`);
+		}
+		if (source === target) return card;
+		const oldScope = source === this.orphan ? ORPHAN_SCOPE : source.doc.id;
+		source.cards.delete(cardId);
+		const next: Card = { ...card, documentId: targetDocumentId, updatedAt: now() };
+		target.cards.set(cardId, next);
+		this.markDirty(oldScope);
+		this.markDirty(target === this.orphan ? ORPHAN_SCOPE : target.doc.id);
+		return next;
+	}
+
 	/** 卡片消失后的脑图节点级联：删引用节点 + 固定根解钉 + 子节点上浮为根（SET NULL）+ 涉事图标脏 */
 	private cascadeNodesForRemovedCard(cardId: string): void {
 		for (const ms of this.mapsById.values()) {
@@ -554,82 +560,6 @@ export class MarinMindStore {
 				this.markDirty(ms.map.id);
 			}
 		}
-	}
-
-	/**
-	 * 旧库一次性迁移灌入（legacy-import / v1 备份包兼容导入消费）：
-	 * 按原样吸收全部集合（id/时间戳不变），冲突防御在此收口——
-	 * file_path 已被占用的文档整组跳过（对齐旧库 UNIQUE）、归属缺失的卡兜底孤儿
-	 * （不静默丢卡）、引用缺失的书签/复习/链接/节点跳过（对齐旧库外键）。
-	 * 灌入后全部 scope 标脏，由调用方 flush 落盘。
-	 */
-	importLegacy(data: LegacyImportData): LegacyImportResult {
-		const warnings: string[] = [];
-		// 文档：file_path 判重（库内已有同路径的其他文档 → 整组跳过）
-		for (const doc of data.documents) {
-			if (this.booksById.has(doc.id)) continue; // 幂等防御（重复导入）
-			const occupied = doc.filePath ? this.bookByFilePath(doc.filePath) : undefined;
-			if (occupied) {
-				warnings.push(
-					`文档《${doc.title}》（${doc.filePath}）与现有文档《${occupied.doc.title}》路径相同，未导入`,
-				);
-				continue;
-			}
-			this.upsertBook(doc);
-		}
-		// 卡片：按 documentId 路由；文档未导入（路径冲突/引用悬空）→ 孤儿兜底
-		let orphaned = 0;
-		for (const card of data.cards) {
-			if (this.bookOfCard(card.id)) continue; // 幂等防御
-			const book = card.documentId ? this.booksById.get(card.documentId) : undefined;
-			if (book) {
-				book.cards.set(card.id, card);
-			} else {
-				this.orphan.cards.set(card.id, { ...card, documentId: null });
-				orphaned += 1;
-			}
-		}
-		if (orphaned > 0) {
-			warnings.push(`${orphaned} 张卡片的归属文档未导入，已放入「未归类卡片」`);
-		}
-		// 书签 / 复习 / 链接：任一端引用缺失即跳过（对齐旧库外键拒绝）
-		for (const bm of data.bookmarks) {
-			const book = this.booksById.get(bm.documentId);
-			if (book && !book.bookmarks.has(bm.id)) book.bookmarks.set(bm.id, bm);
-		}
-		for (const r of data.reviews) {
-			if (this.bookOfCard(r.cardId)) this.reviewsById.set(r.cardId, r);
-		}
-		for (const l of data.links) {
-			if (!this.bookOfCard(l.sourceId) || !this.bookOfCard(l.targetId)) continue;
-			const id = linkId(l.sourceId, l.targetId); // 规范化派生（md 机器层的键形态）
-			this.linksById.set(id, { ...l, id });
-		}
-		// 脑图：documentId 引用悬空或一书一图冲突 → 退化为普通图（对齐 SET NULL + UNIQUE）
-		for (const map of data.mindmaps) {
-			if (this.mapsById.has(map.id)) continue; // 幂等防御
-			let documentId = map.documentId;
-			if (documentId != null) {
-				const bindable =
-					this.booksById.has(documentId) &&
-					![...this.mapsById.values()].some((ms) => ms.map.documentId === documentId);
-				if (!bindable) documentId = null;
-			}
-			this.upsertMap({ ...map, documentId });
-		}
-		// 节点：图或卡片缺失即跳过（对齐旧库外键）；fixedRoot 悬空引用由
-		// repo fixedRoot() 的存在性过滤兜底（与 SQL EXISTS 过滤脏行同语义）
-		for (const node of data.nodes) {
-			const ms = this.mapsById.get(node.mapId);
-			if (!ms || ms.nodes.has(node.id)) continue;
-			if (!this.bookOfCard(node.cardId)) continue;
-			ms.nodes.set(node.id, node);
-		}
-		// 全量标脏（导入是显式动作，立即安排落盘；调用方通常再显式 flush）
-		for (const id of this.booksById.keys()) this.markDirty(id);
-		for (const id of this.mapsById.keys()) this.markDirty(id);
-		if (this.orphan.cards.size > 0) this.markDirty(ORPHAN_SCOPE);
-		return { warnings };
 	}
 
 	// -----------------------------------------------------------------------

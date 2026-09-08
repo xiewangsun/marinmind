@@ -1,7 +1,6 @@
 import { Notice, Platform, Plugin, TFile } from "obsidian";
 import type { App, PluginManifest, WorkspaceLeaf, WorkspaceSplit } from "obsidian";
 import { MarinMindStore } from "./store/marinmind-store";
-import { convertLegacyDb, openLegacyDb } from "./store/legacy-import";
 import { loggedReviewTotal, totalReviewsApprox } from "./store/review-log";
 import { CardRepository } from "./db/repositories/card-repo";
 import { DocumentRepository } from "./db/repositories/document-repo";
@@ -61,12 +60,9 @@ import { AudioRecorder, audioDurationSec } from "./reader/audio-recorder";
 import { RecordingBar } from "./reader/recording-bar";
 import { CardEventBus } from "./events/card-bus";
 import {
-	ASSETS_SUBDIR,
 	CLIPS_SUBDIR,
 	DEFAULT_BACKUP_DIR,
 	DEFAULT_DATA_DIR,
-	DB_FILENAME,
-	LEGACY_DATA_DIR,
 	MSG_EXTERNAL_DOC_MOBILE,
 } from "./constants";
 import {
@@ -79,7 +75,6 @@ import { MarinMindSettingTab } from "./settings/settings-tab";
 import { ConfirmModal } from "./mindmap/confirm-modal";
 import { DocumentManagerModal } from "./documents/document-manager-modal";
 import { ExternalDocWatcher } from "./documents/external-watcher";
-import { copyTree } from "./storage/copy-tree";
 import { externalFileExists, pickExternalPath } from "./storage/external-file";
 import { isAbsoluteFsPath, isHiddenVaultDir, joinRel } from "./storage/paths";
 import { buildCardCopyText, type CardCopyMode } from "./links/card-links";
@@ -373,11 +368,6 @@ export default class MarinMindPlugin extends Plugin {
 			callback: () => promptImportBackup(this),
 		});
 		this.addCommand({
-			id: "import-legacy-db",
-			name: "从旧版数据库导入（SQLite → Markdown 迁移）",
-			callback: () => void this.promptLegacyImport(),
-		});
-		this.addCommand({
 			id: "manage-documents",
 			name: "文档管理（重关联失联文档）",
 			callback: () => new DocumentManagerModal(this.app, this).open(),
@@ -649,9 +639,7 @@ export default class MarinMindPlugin extends Plugin {
 					`文档 ${stats.documents}，卡片 ${stats.cards}，` +
 					`待复习 ${this.reviews.dueCount()}，脑图 ${stats.mindmaps}（${stats.nodes} 节点）`,
 			);
-			// 旧版 SQLite 库迁移引导（不阻塞启动；库为空 + 发现旧库才弹）
-			void this.detectLegacyDb();
-			// 84-E 附件仓对账（fire-and-forget 镜像 detectLegacyDb 先例）：静默路径，
+			// 84-E 附件仓对账（fire-and-forget）：静默路径，
 			// 发现孤儿才弹确认清理；失败仅 console 不打扰启动
 			void this.auditAttachments(true);
 			// ㊻-A-2：数据根为 vault 隐藏目录（点开头，如旧版 .marinmind）——Obsidian
@@ -880,118 +868,6 @@ export default class MarinMindPlugin extends Plugin {
 		}
 		for (const warning of result.warnings) {
 			new Notice(`MarinMind：${warning}`);
-		}
-	}
-
-	// ---------- 旧版 SQLite 库迁移（㉚；sql.js 保留在 bundle 供此路径使用） ----------
-
-	/** 命令入口：发现旧库 → 确认弹窗（默认取消）；无旧库 Notice 告知 */
-	private async promptLegacyImport(): Promise<void> {
-		await this.whenReady();
-		const legacy = await this.findLegacyDb();
-		if (!legacy) {
-			new Notice("MarinMind：未找到旧版数据库（marinmind.db）");
-			return;
-		}
-		new ConfirmModal(
-			this.app,
-			"从旧版数据库导入",
-			`将把 ${legacy.rootDir} 下的 SQLite 旧数据转换为 Markdown 存储并入当前库。\n` +
-				"旧数据库文件原样保留（可回退到旧版插件）。\n注意：与现有库同路径的文档会被跳过。继续？",
-			() => void this.runLegacyImport(legacy),
-		).open();
-	}
-
-	/**
-	 * 启动迁移引导：当前库为空且发现旧库 → 确认弹窗（默认取消，宁拒不赌）。
-	 * 默认目录用户在 DEFAULT_DATA_DIR 改名后数据仍在 .marinmind/，首次启动由此引导。
-	 */
-	private async detectLegacyDb(): Promise<void> {
-		try {
-			if (!this.store) return;
-			const stats = this.store.stats();
-			if (stats.documents > 0 || stats.mindmaps > 0 || stats.cards > 0) return;
-			const legacy = await this.findLegacyDb();
-			if (!legacy) return;
-			const fromDir =
-				legacy === this.dataLoc ? "当前数据目录" : `旧默认目录 ${LEGACY_DATA_DIR}/`;
-			new ConfirmModal(
-				this.app,
-				"检测到旧版数据库",
-				`发现 SQLite 存储时代的旧数据（${fromDir}）。\n` +
-					"是否迁移为 Markdown 文件存储？旧文件将原样保留，可随时回退。",
-				() => void this.runLegacyImport(legacy),
-			).open();
-		} catch (err) {
-			console.warn("[MarinMind] 旧库检测失败", err);
-		}
-	}
-
-	/**
-	 * 旧库位置：当前数据根优先（自定义目录用户旧库就在同一根下），
-	 * 回溯历史默认目录 .marinmind/（存在性先经 vault 查询，避免解析定位时建空目录）。
-	 */
-	private async findLegacyDb(): Promise<ResolvedLocation | null> {
-		if (await this.dataLoc.adapter.exists(DB_FILENAME)) {
-			return this.dataLoc;
-		}
-		if (
-			this.app.vault.getAbstractFileByPath(`${LEGACY_DATA_DIR}/${DB_FILENAME}`) instanceof
-			TFile
-		) {
-			try {
-				return await resolveDataLocation(this.app, LEGACY_DATA_DIR);
-			} catch {
-				return null;
-			}
-		}
-		return null;
-	}
-
-	/**
-	 * 旧库迁移执行：读库（内存升到 v8，不回写源文件）→ 转换 → 灌入 →
-	 * 附件复制（跨根时）→ 落盘。全程不动旧库文件；失败可重试（灌入幂等）。
-	 */
-	private async runLegacyImport(source: ResolvedLocation): Promise<void> {
-		if (!this.store) {
-			new Notice("MarinMind：数据层未就绪，无法迁移");
-			return;
-		}
-		const before = this.store.stats();
-		const notice = new Notice("MarinMind：正在从旧版数据库迁移…", 0);
-		try {
-			const db = await openLegacyDb(source.adapter);
-			let converted: ReturnType<typeof convertLegacyDb>;
-			try {
-				converted = convertLegacyDb(db);
-			} finally {
-				db.close();
-			}
-			const result = this.store.importLegacy(converted);
-			// 旧库在不同根（默认目录用户）：附件整树复制到新根（excerptRef 已在转换层归一为根相对）
-			if (source !== this.dataLoc) {
-				await copyTree(source.adapter, this.dataLoc.adapter, ASSETS_SUBDIR);
-			}
-			await this.store.flush();
-			notice.hide();
-			const after = this.store.stats();
-			new Notice(
-				`迁移完成：文档 +${after.documents - before.documents}，卡片 +${after.cards - before.cards}，` +
-					`脑图 +${after.mindmaps - before.mindmaps}。旧数据库保留在 ${source.rootDir}`,
-				6000,
-			);
-			const warnings = [...converted.warnings, ...result.warnings];
-			if (warnings.length > 0) {
-				new Notice(
-					`迁移警告 ${warnings.length} 条：\n${warnings.slice(0, 5).join("\n")}` +
-						(warnings.length > 5 ? "\n…" : ""),
-					10000,
-				);
-			}
-		} catch (err) {
-			console.error("[MarinMind] 旧库迁移失败", err);
-			notice.hide();
-			new Notice("MarinMind：旧库迁移失败（旧文件未动），详见控制台", 10000);
 		}
 	}
 

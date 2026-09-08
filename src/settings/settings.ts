@@ -27,6 +27,7 @@ import {
 	type AiPreset,
 	type AiUsage,
 } from "../ai/ai-provider";
+import { isWebSearchServiceId, type WebSearchServiceId } from "../ai/web-search-engine";
 
 /**
  * 隐藏侧缓存（79-3）：单窗格模式切走（detach）的一侧状态，随 data.json
@@ -181,6 +182,20 @@ export interface MarinMindSettings {
 	/** 累计用量（96）：请求次数与 token 数（流式为估算值），设置页展示 + 可清零 */
 	aiUsage: AiUsage;
 	/**
+	 * 联网搜索服务（128 AI 联网后备）："off"（默认，关闭）/"tavily"/"bocha"/
+	 * "searxng"。普通模型端点（DeepSeek 等）无法联网时，插件先经所选搜索 API
+	 * 取资料再以 RAG 拼进 prompt；厂商自带搜索（GLM/search-preview/sonar/
+	 * :online）的模型优先走厂商能力不经此服务。凭据明文存 data.json
+	 * （与翻译/AI 凭据同惯例，设置页 desc 有提示）。
+	 */
+	webSearchService: WebSearchServiceId;
+	/** Tavily API Key（app.tavily.com 注册获取；免费档每月 1000 次） */
+	webSearchTavilyKey: string;
+	/** 博查 API Key（open.bochaai.com 注册获取；按次计费） */
+	webSearchBochaKey: string;
+	/** SearXNG 自建实例地址（如 http://127.0.0.1:8080；实例需开启 json 输出格式） */
+	webSearchSearxngUrl: string;
+	/**
 	 * 剪藏时下载正文图片到本地（113，默认开；关闭则全部保留远程链接）。
 	 * 124 起剪藏落点固定数据根 clips/（webclipFolder 设置退役，旧值由
 	 * extractLegacyWebclipFolder 提取供存量迁移检测）。
@@ -242,6 +257,10 @@ export const DEFAULT_SETTINGS: MarinMindSettings = {
 	aiAutoFlashcard: true,
 	aiCustomPrompts: [],
 	aiUsage: EMPTY_AI_USAGE,
+	webSearchService: "off",
+	webSearchTavilyKey: "",
+	webSearchBochaKey: "",
+	webSearchSearxngUrl: "",
 	webclipDownloadImages: true,
 	captureGlobalHotkey: "",
 	screenClipOcr: true,
@@ -395,6 +414,21 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 		typeof rawAi?.aiAutoFlashcard === "boolean" ? rawAi.aiAutoFlashcard : true;
 	merged.aiCustomPrompts = sanitizeAiCustomPrompts(rawAi?.aiCustomPrompts);
 	merged.aiUsage = sanitizeAiUsage(rawAi?.aiUsage);
+	// 128 联网搜索服务：服务脏值回 off（镜像翻译引擎守卫）；凭据非字符串/空白
+	// 归空串、SearXNG 地址去尾斜杠（resolveSearchCall 用时已归一，此处持久层兜底）
+	merged.webSearchService = isWebSearchServiceId(
+		(raw as { webSearchService?: unknown } | null)?.webSearchService,
+	)
+		? merged.webSearchService
+		: "off";
+	const rawSearch = raw as {
+		webSearchTavilyKey?: unknown;
+		webSearchBochaKey?: unknown;
+		webSearchSearxngUrl?: unknown;
+	} | null;
+	merged.webSearchTavilyKey = trimStr(rawSearch?.webSearchTavilyKey);
+	merged.webSearchBochaKey = trimStr(rawSearch?.webSearchBochaKey);
+	merged.webSearchSearxngUrl = trimStr(rawSearch?.webSearchSearxngUrl).replace(/\/+$/, "");
 	// 124 网页剪藏：落点固定数据根 clips/，webclipFolder 字段退役（不再进设置对象）；
 	// 布尔脏值回默认开（镜像 photoCompress 写法）
 	const rawClip = raw as { webclipDownloadImages?: unknown } | null;

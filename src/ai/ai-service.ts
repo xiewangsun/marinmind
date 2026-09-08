@@ -298,7 +298,7 @@ export async function sendChat(
 		const kind = webSearchKind(preset);
 		if (!kind) {
 			throw new Error(
-				"当前模型不支持联网搜索：请到 设置 → AI 换用 GLM（glm-*）、gpt-4o-search-preview 或 sonar 系列模型",
+				"当前模型不支持联网搜索：请到 设置 → AI 换用 GLM（glm-*）、gpt-4o-search-preview 或 sonar 系列模型（OpenRouter 模型名加 :online 后缀）；或在 设置 → AI → 联网搜索服务 配置插件侧搜索（Tavily / 博查 / SearXNG）后用普通模型 RAG 联网",
 			);
 		}
 		webSearch = kind;

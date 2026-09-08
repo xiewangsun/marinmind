@@ -317,6 +317,50 @@ describe("loadSettings 翻译引擎字段（83）", () => {
 	});
 });
 
+describe("loadSettings 联网搜索字段（128）", () => {
+	function fakePlugin(raw: unknown): Plugin {
+		return { loadData: async () => raw } as unknown as Plugin;
+	}
+
+	it("旧版 data.json 缺字段取默认（服务关闭 + 凭据全空）", async () => {
+		const merged = await loadSettings(fakePlugin({ dataDir: "X" }));
+		expect(merged.webSearchService).toBe("off");
+		expect(merged.webSearchTavilyKey).toBe("");
+		expect(merged.webSearchBochaKey).toBe("");
+		expect(merged.webSearchSearxngUrl).toBe("");
+	});
+
+	it("合法服务与凭据原样保留（trim 收敛 + SearXNG 地址去尾斜杠）", async () => {
+		const merged = await loadSettings(
+			fakePlugin({
+				webSearchService: "searxng",
+				webSearchTavilyKey: " tvly-1 ",
+				webSearchBochaKey: "sk-2",
+				webSearchSearxngUrl: "http://127.0.0.1:8080///",
+			}),
+		);
+		expect(merged.webSearchService).toBe("searxng");
+		expect(merged.webSearchTavilyKey).toBe("tvly-1");
+		expect(merged.webSearchBochaKey).toBe("sk-2");
+		expect(merged.webSearchSearxngUrl).toBe("http://127.0.0.1:8080");
+	});
+
+	it("服务脏值归一 off、凭据非字符串归空串（引擎层凭据守卫不受脏值冲击）", async () => {
+		const merged = await loadSettings(
+			fakePlugin({
+				webSearchService: "google",
+				webSearchTavilyKey: 42,
+				webSearchBochaKey: true,
+				webSearchSearxngUrl: null,
+			}),
+		);
+		expect(merged.webSearchService).toBe("off");
+		expect(merged.webSearchTavilyKey).toBe("");
+		expect(merged.webSearchBochaKey).toBe("");
+		expect(merged.webSearchSearxngUrl).toBe("");
+	});
+});
+
 describe("validateDirInput", () => {
 	it("桌面端：vault 相对路径规范化通过", () => {
 		const v = validateDirInput(" .marinmind/ ", true);

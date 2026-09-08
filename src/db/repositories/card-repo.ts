@@ -159,6 +159,35 @@ export class CardRepository {
 		return next;
 	}
 
+	/**
+	 * 移动卡片到其他文档（127 批量移动）：store 换桶 + **清原文锚点收口在此**——
+	 * page/rects/polygon 指向原文档页面，保留会在新文档静默错链（违背「宁拒不赌」）；
+	 * 移动后卡变手工卡语义（同 84-C 自由媒体卡），内容/附件/卡组/复习进度/脑图
+	 * 节点全保留。遮挡块：photo 卡为图内 0-1 坐标保留，其余（页面坐标系）清空。
+	 * 同文档目标 no-op 返回原卡（不更新时间戳不发事件）；目标文档不存在抛中文
+	 * Error（store.moveCard）。发 changed（id 稳定不发 removed——阅读器高亮经
+	 * changed 回环后因 listByDocument 不再含此卡而消失，脑图节点照常渲染）。
+	 */
+	move(id: string, documentId: string | null): Card | undefined {
+		const current = this.store.bookOfCard(id)?.cards.get(id);
+		if (!current) return undefined;
+		if ((current.documentId ?? null) === (documentId ?? null)) return current;
+		const moved = this.store.moveCard(id, documentId);
+		if (!moved) return undefined;
+		const next: Card = {
+			...moved,
+			page: null,
+			rects: [],
+			polygon: null,
+			occlusions: current.excerptType === "photo" ? moved.occlusions : [],
+		};
+		const book = this.store.bookOfCard(id);
+		book?.cards.set(id, next);
+		this.store.markDirty(this.store.scopeOfCard(id));
+		this.bus?.emitCardChanged(next);
+		return next;
+	}
+
 	/** 删除卡片（复习状态、链接、脑图节点由 store 级联删除，子节点上浮为根） */
 	delete(id: string): boolean {
 		const last = this.store.deleteCardCascade(id);

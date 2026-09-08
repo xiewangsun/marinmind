@@ -4231,6 +4231,55 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	opacity: 0.4;
 }
 
+/* —— 127 树节点级折叠（文件夹树/卡组树共用；镜像 marinmind-toc-chev/kids 先例） —— */
+
+/* 折叠钮：div 承载（行内首列），hover 底色作点击暗示 */
+.marinmind-home-folder-chev {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: none;
+	width: 16px;
+	height: 16px;
+	border-radius: var(--radius-s);
+	color: var(--text-faint);
+	cursor: var(--cursor);
+}
+
+.marinmind-home-folder-chev:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+
+/* 叶子条目的占位（保持与有子级条目的图标列对齐） */
+.marinmind-home-folder-chev.is-leaf {
+	visibility: hidden;
+	cursor: default;
+}
+
+.marinmind-home-folder-chev:focus-visible:hover {
+	background: transparent;
+}
+
+.marinmind-home-folder-chev svg {
+	width: 11px;
+	height: 11px;
+}
+
+/* 子级容器累计缩进 = 层级缩进来源（127 起替代行内 paddingLeft 嵌套式） */
+.marinmind-home-folder-kids {
+	margin-left: 14px;
+}
+
+/* 超深层级不再累计缩进（防极端深路径把标签挤出栏宽，R2 挂账顺带消化） */
+.marinmind-home-folder-kids.is-max {
+	margin-left: 0;
+}
+
+.marinmind-home-folder-kids.is-collapsed {
+	display: none;
+}
+
 .marinmind-home-folder-icon {
 	display: inline-flex;
 	align-items: center;

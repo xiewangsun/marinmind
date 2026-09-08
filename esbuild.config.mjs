@@ -41,10 +41,6 @@ const context = await esbuild.context({
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
 	outfile: "main.js",
-	loader: {
-		// 将 sql.js 的 WASM 二进制内联进 main.js，插件分发无需携带独立 .wasm 文件
-		".wasm": "binary",
-	},
 });
 
 if (prod) {

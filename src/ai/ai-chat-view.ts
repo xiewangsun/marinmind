@@ -13,6 +13,14 @@ import {
 import { collectDocContext } from "./ai-context-service";
 import { sendChat } from "./ai-service";
 import { resolveAiPreset, webSearchKind, type WebSource } from "./ai-provider";
+import {
+	buildWebContextText,
+	resolveSearchCall,
+	searchServiceReady,
+	toWebSources,
+	type SearchEngineCall,
+} from "./web-search-engine";
+import { runWebSearch } from "./web-search-service";
 import { setIconSafe } from "../ui/icon-resolve";
 
 /** AI 助手对话视图的 viewType（右停靠侧栏叶） */
@@ -25,8 +33,12 @@ export const AI_CHAT_VIEW_TYPE = "marinmind-ai-chat";
  * 提取为跳页 chip，点击经 reader.revealPage 定位。105 增联网叠加开关（🌐）：
  * 文档上下文照常携带，另注入模型厂商自带搜索（智谱 web_search 工具 /
  * OpenAI search-preview 的 web_search_options / Perplexity sonar 系零参数），
- * 来源提取为可点外链 chip。obsidian 耦合不单测（镜像 reader/review 视图分层
- * 先例）；上下文纯逻辑在 ai-context、联网识别/来源提取在 ai-provider（vitest 覆盖）。
+ * 来源提取为可点外链 chip。128 联网三态：厂商搜索（模型自带）→ 插件侧
+ * RAG 后备（设置搜索服务后，普通模型先搜后拼【联网搜索资料】围栏；搜索
+ * 失败 Notice 降级继续不联网）→ 都无才拦截（文案给双出路）。obsidian
+ * 耦合不单测（镜像 reader/review 视图分层先例）；上下文纯逻辑在
+ * ai-context、联网识别/来源提取在 ai-provider、引擎层在 web-search-engine
+ * （vitest 覆盖）。
  */
 export class AiChatView extends ItemView {
 	private readonly plugin: MarinMindPlugin;
@@ -144,24 +156,29 @@ export class AiChatView extends ItemView {
 		this.listEl.empty();
 		this.listEl.createDiv({
 			cls: "marinmind-ai-chat-empty",
-			text: "基于当前文档问答：先在阅读器打开文档，选择上下文范围（当前页 / 全文），然后提问。回答中的「第 N 页」可点击跳转。点 🌐 可叠加联网搜索（需 GLM / gpt-4o-search-preview / sonar 系模型，联网可能产生额外费用，经中转站时搜索参数可能不被透传）。",
+			text: "基于当前文档问答：先在阅读器打开文档，选择上下文范围（当前页 / 全文），然后提问。回答中的「第 N 页」可点击跳转。点 🌐 可叠加联网搜索：模型自带搜索（GLM / gpt-4o-search-preview / sonar 系列，或 OpenRouter 模型名加 :online 后缀）直接用；普通模型可到 设置 → AI → 联网搜索服务 配置 Tavily / 博查 / SearXNG 后，插件先搜后拼资料作答（联网可能产生额外费用）。",
 		});
 	}
 
-	/** 切换联网开关（105）：开启时现查当前预设能力——未配置/不支持则 Notice 引导且不点亮 */
+	/**
+	 * 切换联网开关（128 三态）：开启时现查能力——厂商搜索（模型自带）或
+	 * 插件侧搜索服务（RAG 后备）任一可用即点亮；都无则 Notice 给双出路
+	 * （换模型 / 配置搜索服务）且不点亮。
+	 */
 	private toggleWeb(): void {
 		if (!this.webOn) {
+			let vendor: boolean;
 			try {
-				const kind = webSearchKind(resolveAiPreset(this.plugin.settings));
-				if (!kind) {
-					new Notice(
-						"当前模型不支持联网搜索：请到 设置 → AI 换用 GLM（glm-*）、gpt-4o-search-preview 或 sonar 系列模型",
-					);
-					return;
-				}
+				vendor = webSearchKind(resolveAiPreset(this.plugin.settings)) !== null;
 			} catch (err) {
-				// 未配置预设：resolveAiPreset 的中文引导直接透出
+				// 未配置预设：AI 无从对话——resolveAiPreset 的中文引导直接透出
 				new Notice(err instanceof Error ? err.message : String(err));
+				return;
+			}
+			if (!vendor && !searchServiceReady(this.plugin.settings)) {
+				new Notice(
+					"联网需任选其一：到 设置 → AI 换用自带搜索的模型（GLM / gpt-4o-search-preview / sonar 系列，OpenRouter 模型名加 :online 后缀），或到 设置 → AI → 联网搜索服务 配置插件侧搜索（Tavily / 博查 / SearXNG）后用普通模型联网",
+				);
 				return;
 			}
 		}
@@ -187,17 +204,31 @@ export class AiChatView extends ItemView {
 		if (!question) {
 			return;
 		}
-		// 联网二次校验（105）：开关开启后预设可能已被换掉，发送前再查一次
+		// 联网路径选择（105 厂商优先 / 128 RAG 后备）：开关开启后预设可能已被
+		// 换掉，发送前现查——厂商搜索可用走注入；否则插件侧服务可用走 RAG；
+		// 都无才拦截（双出路文案同 toggleWeb）
+		let vendorWeb = false;
+		let ragCall: SearchEngineCall | null = null;
 		if (this.webOn) {
 			try {
-				if (!webSearchKind(resolveAiPreset(this.plugin.settings))) {
+				vendorWeb = webSearchKind(resolveAiPreset(this.plugin.settings)) !== null;
+			} catch {
+				// 未配置预设：落到下方 sendChat 的 resolveAiPreset 统一报错路径
+			}
+			if (!vendorWeb) {
+				try {
+					ragCall = resolveSearchCall(this.plugin.settings);
+				} catch (err) {
+					// 选了服务但凭据没配全：明确告知并拦截（宁拒不赌——用户点名要联网）
+					new Notice(err instanceof Error ? err.message : String(err));
+					return;
+				}
+				if (!ragCall) {
 					new Notice(
-						"当前模型不支持联网搜索：请到 设置 → AI 换用 GLM（glm-*）、gpt-4o-search-preview 或 sonar 系列模型",
+						"联网需任选其一：到 设置 → AI 换用自带搜索的模型（GLM / gpt-4o-search-preview / sonar 系列，OpenRouter 模型名加 :online 后缀），或到 设置 → AI → 联网搜索服务 配置插件侧搜索（Tavily / 博查 / SearXNG）后用普通模型联网",
 					);
 					return;
 				}
-			} catch {
-				// 未配置预设：落到下方 sendChat 的 resolveAiPreset 统一报错路径
 			}
 		}
 		const reader = this.activeReader();
@@ -237,10 +268,32 @@ export class AiChatView extends ItemView {
 
 		this.abort = new AbortController();
 		let reply = "";
+		// RAG 后备（128）：普通模型先经插件侧搜索取资料（提问词即查询词）——
+		// 失败 Notice 降级继续不联网作答（联网是增强不是依赖，同封面语义）
+		let webContextText: string | undefined;
+		let ragSources: WebSource[] | null = null;
+		if (ragCall) {
+			try {
+				const results = await runWebSearch(question, ragCall);
+				webContextText = buildWebContextText(results);
+				ragSources = toWebSources(results);
+			} catch (err) {
+				console.error("[MarinMind] 联网搜索失败", err);
+				new Notice(
+					`联网搜索失败，已降级为不联网作答：${err instanceof Error ? err.message : String(err)}`,
+				);
+			}
+		}
 		try {
 			reply = await sendChat(
 				this.plugin.settings,
-				buildChatMessages(this.turns, contextText, question, this.webOn),
+				buildChatMessages(
+					this.turns,
+					contextText,
+					question,
+					vendorWeb, // 厂商路径 system 用联网版文案；RAG 路径由 webContextText 触发同款
+					webContextText,
+				),
 				{
 					signal: this.abort.signal,
 					onDelta: (delta) => {
@@ -253,8 +306,9 @@ export class AiChatView extends ItemView {
 					},
 					onDegraded: () => new Notice("当前网络不支持流式输出，已切换整包返回"),
 					onUsage: (usage) => this.plugin.addAiUsage(usage),
-					// 联网来源（105）：流式收尾/非流式整包各回调一次，与页 chip 同节奏
-					...(this.webOn
+					// 厂商注入路径（105）：body 注入 + 来源回调；RAG 路径不传 webSearch
+					// （普通模型零注入，资料已在 prompt 里），来源 chip 流完成后渲染
+					...(vendorWeb
 						? {
 								webSearch: true,
 								onSources: (sources: WebSource[]) =>
@@ -268,6 +322,9 @@ export class AiChatView extends ItemView {
 					{ role: "user", content: question },
 					{ role: "assistant", content: reply },
 				);
+				if (ragSources) {
+					this.renderWebChips(bubble, ragSources);
+				}
 				this.renderPageChips(bubble, reply);
 			} else {
 				bubble.setText("（AI 返回内容为空，请重试或更换模型）");

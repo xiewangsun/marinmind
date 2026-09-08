@@ -10,7 +10,7 @@ let documents: DocumentRepository;
 let cards: CardRepository;
 let mindmaps: MindmapRepository;
 
-/** 每个用例使用独立的内存存储（㉚ md 存储版；v2 老库升级类用例由 legacy-import 测试取代） */
+/** 每个用例使用独立的内存存储（㉚ md 存储版；老 SQLite 库升级路径已于 129 批移除） */
 beforeEach(async () => {
 	store = await MarinMindStore.open(new MemoryAdapter());
 	documents = new DocumentRepository(store);

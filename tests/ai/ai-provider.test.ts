@@ -176,6 +176,16 @@ describe("webSearchKind（105 联网能力识别）", () => {
 		expect(webSearchKind(presetOf("gpt-4o-mini-search-preview"))).toBe("openai");
 	});
 
+	it("128 OpenRouter :online 后缀识别：模型名结尾命中即 openrouter（大小写不敏感，任意基底模型）", () => {
+		expect(webSearchKind(presetOf("gpt-4o:online"))).toBe("openrouter");
+		expect(webSearchKind(presetOf("GPT-4O:ONLINE"))).toBe("openrouter");
+		expect(webSearchKind(presetOf("openrouter/auto:online"))).toBe("openrouter");
+		expect(webSearchKind(presetOf("deepseek-chat:online"))).toBe("openrouter");
+		// 后缀必须是结尾：":online" 出现在中间或后缀缺失不命中
+		expect(webSearchKind(presetOf(":online-guide"))).toBeNull();
+		expect(webSearchKind(presetOf("deepseek-chat"))).toBeNull();
+	});
+
 	it("host 兜底：官方端点（bigmodel / z.ai / perplexity.ai）+ 中性模型名", () => {
 		expect(webSearchKind(presetOf("my-model", "https://open.bigmodel.cn/paas/v4"))).toBe(
 			"zhipu",
@@ -239,6 +249,20 @@ describe("buildChatRequest 联网注入（105）", () => {
 		const body = JSON.parse(spec.body) as Record<string, unknown>;
 		expect(body.tools).toBeUndefined();
 		expect(body.web_search_options).toBeUndefined();
+	});
+
+	it("128 openrouter：零注入（服务端按模型名后缀注入搜索，body 键集与不传一致）且模型名原样含后缀", () => {
+		const preset = { ...PRESET, model: "gpt-4o:online" };
+		const spec = buildChatRequest(preset, MESSAGES, { temperature: 0.3 }, false, "openrouter");
+		const body = JSON.parse(spec.body) as Record<string, unknown>;
+		expect(body.tools).toBeUndefined();
+		expect(body.web_search_options).toBeUndefined();
+		expect(Object.keys(body).sort()).toEqual(
+			Object.keys(
+				JSON.parse(buildChatRequest(PRESET, MESSAGES, { temperature: 0.3 }, false).body),
+			).sort(),
+		);
+		expect(body.model).toBe("gpt-4o:online"); // 后缀不剥离——服务端识别依赖它
 	});
 });
 

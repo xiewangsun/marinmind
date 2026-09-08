@@ -278,6 +278,35 @@ describe("buildChatMessages（98 文档对话）", () => {
 			buildChatMessages([], "内容", "问").at(-1)?.content,
 		);
 	});
+
+	it("128 RAG 分支：webContextText 非空时资料围栏在文档围栏之前，system 复用联网版文案", () => {
+		const messages = buildChatMessages([], "文档内容", "问题", false, "搜索资料文本");
+		const user = messages.at(-1)?.content as string;
+		expect(user).toContain("【联网搜索资料开始】\n搜索资料文本\n【联网搜索资料结束】");
+		// 顺序：搜索资料围栏在文档围栏之前
+		expect(user.indexOf("【联网搜索资料开始】")).toBeLessThan(user.indexOf("【文档内容开始】"));
+		expect(user).toContain("我的问题：问题");
+		expect(messages[0].content).toContain("联网搜索资料"); // 联网版 system
+		expect(messages[0].content).not.toContain("「文档中未提及」");
+	});
+
+	it("128 RAG 分支：webSearch 与 webContextText 同时为真不冲突（同款联网版文案）；空串等价不传", () => {
+		const both = buildChatMessages([], "内容", "问", true, "资料")[0].content;
+		const ragOnly = buildChatMessages([], "内容", "问", false, "资料")[0].content;
+		expect(both).toBe(ragOnly);
+		const emptyRag = buildChatMessages([], "内容", "问", false, "");
+		expect(emptyRag[0].content).toBe(buildChatMessages([], "内容", "问")[0].content);
+		expect((emptyRag.at(-1)?.content as string).startsWith("【文档内容开始】")).toBe(true);
+	});
+
+	it("128 不传第 5 参：输出与旧签名逐字一致（既有断言零破坏的硬约束）", () => {
+		expect(buildChatMessages([], "内容", "问", true)).toEqual(
+			buildChatMessages([], "内容", "问", true, undefined),
+		);
+		expect(buildChatMessages([], "内容", "问")).toEqual(
+			buildChatMessages([], "内容", "问", undefined, undefined),
+		);
+	});
 });
 
 describe("buildSummary*（98 摘要）", () => {

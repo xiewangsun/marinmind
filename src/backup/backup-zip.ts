@@ -5,13 +5,10 @@ export const BACKUP_FORMAT = "marinmind-marginpkg";
 
 /**
  * 备份格式版本（结构变化时递增）：
- * - v1：SQLite 库（marinmind.db 条目）+ documents/ + assets/
+ * - v1：SQLite 库（marinmind.db 条目）+ documents/ + assets/（129 批起不再支持导入）
  * - v2：Markdown 数据（notes/ 树 = 数据根 md 相对路径）+ documents/ + assets/
  */
 export const BACKUP_VERSION = 2;
-
-/** v1 备份包内 SQLite 库的固定条目名（兼容识别用） */
-const DB_ENTRY = "marinmind.db";
 
 /** 备份清单：包内 manifest.json 的结构 */
 export interface BackupManifest {
@@ -67,7 +64,7 @@ export function buildBackupZip(
 /**
  * 解包并校验备份 zip。任何校验失败抛中文 Error（调用方 Notice 展示）：
  * - 必须含 manifest.json，且 manifest.format / version 合法；
- * - v1 包（SQLite 形态）暂不兼容（后续版本经 legacy-import 转换支持）；
+ * - v1 包（SQLite 形态）永久不再支持导入（129 批随 sql.js 一并移除转换通道）；
  * - 条目路径防 zip-slip：拒绝 `..` 段、绝对路径与前缀不符的条目；
  * - manifest.version 高于当前版本时拒绝（备份来自更新版本的插件）。
  */
@@ -93,9 +90,9 @@ export function parseBackupZip(bytes: Uint8Array): BackupContent {
 			`备份来自更新版本的插件（v${manifest.version} > 当前 v${BACKUP_VERSION}），请先升级插件`,
 		);
 	}
-	if (manifest.version < 2 || unzipped[DB_ENTRY]) {
+	if (manifest.version < 2 || unzipped["marinmind.db"]) {
 		throw new Error(
-			"该备份来自 SQLite 存储的旧版本（v1），当前版本暂不支持直接导入，请先用旧版插件或从旧版数据库导入功能迁移",
+			"该备份来自 SQLite 存储的旧版本（v1），当前版本已不再支持导入 v1 备份，请改用新版本插件导出的 v2 备份",
 		);
 	}
 
@@ -103,7 +100,7 @@ export function parseBackupZip(bytes: Uint8Array): BackupContent {
 	const documents: BackupContent["documents"] = [];
 	const assets: BackupContent["assets"] = [];
 	for (const [entry, data] of Object.entries(unzipped)) {
-		if (entry === "manifest.json" || entry === DB_ENTRY) continue;
+		if (entry === "manifest.json") continue;
 		const noteRel = splitEntry(entry, "notes/");
 		if (noteRel !== null) {
 			notes.push({ path: noteRel, bytes: data });
@@ -138,63 +135,4 @@ function splitEntry(entry: string, prefix: EntryPrefix): string | null {
 	if (segs.some((s) => s === "" || s === "." || s === "..")) return null;
 	if (rel.startsWith("/") || /^[a-zA-Z]:/.test(rel)) return null;
 	return rel;
-}
-
-/** v1 旧包（SQLite 形态）解包结果（㉚ 兼容导入：库字节 → md 转换见 legacy-import） */
-export interface LegacyBackupContent {
-	manifest: BackupManifest;
-	dbBytes: Uint8Array;
-	/** path 为 vault 相对路径 */
-	documents: { path: string; bytes: Uint8Array }[];
-	/** path 相对 assets/ */
-	assets: { path: string; bytes: Uint8Array }[];
-}
-
-/**
- * 解包 v1 旧备份（含 marinmind.db 条目；v2 包请用 parseBackupZip）。
- * 校验同 v2：manifest 必备 + format/version 合法 + zip-slip 防护。
- */
-export function parseLegacyBackupZip(bytes: Uint8Array): LegacyBackupContent {
-	const unzipped = unzipSync(bytes);
-
-	const manifestRaw = unzipped["manifest.json"];
-	if (!manifestRaw) {
-		throw new Error("备份包缺少 manifest.json，不是有效的 MarinMind 备份");
-	}
-	let manifest: BackupManifest;
-	try {
-		manifest = JSON.parse(strFromU8(manifestRaw)) as BackupManifest;
-	} catch {
-		throw new Error("备份清单解析失败，文件可能已损坏");
-	}
-	if (manifest.format !== BACKUP_FORMAT) {
-		throw new Error(`未知的备份格式：${manifest.format ?? "(空)"}`);
-	}
-	if (manifest.version > BACKUP_VERSION) {
-		throw new Error(
-			`备份来自更新版本的插件（v${manifest.version} > 当前 v${BACKUP_VERSION}），请先升级插件`,
-		);
-	}
-	const dbBytes = unzipped[DB_ENTRY];
-	if (!dbBytes) {
-		throw new Error("旧格式备份缺少 marinmind.db 条目");
-	}
-
-	const documents: LegacyBackupContent["documents"] = [];
-	const assets: LegacyBackupContent["assets"] = [];
-	for (const [entry, data] of Object.entries(unzipped)) {
-		if (entry === "manifest.json" || entry === DB_ENTRY) continue;
-		const docRel = splitEntry(entry, "documents/");
-		if (docRel !== null) {
-			documents.push({ path: docRel, bytes: data });
-			continue;
-		}
-		const assetRel = splitEntry(entry, "assets/");
-		if (assetRel !== null) {
-			assets.push({ path: assetRel, bytes: data });
-			continue;
-		}
-		throw new Error(`备份包含意外条目：${entry}`);
-	}
-	return { manifest, dbBytes, documents, assets };
 }

@@ -66,8 +66,8 @@ export interface ChatRequestSpec {
 	stream: boolean;
 }
 
-/** 联网搜索实现方式（105）：按模型厂商自带能力注入不同请求字段 */
-export type WebSearchKind = "zhipu" | "openai" | "perplexity";
+/** 联网搜索实现方式（105；128 增 openrouter）：按模型厂商自带能力注入不同请求字段 */
+export type WebSearchKind = "zhipu" | "openai" | "perplexity" | "openrouter";
 
 /** 联网来源归一形态（105）：title 可为空串（perplexity citations 纯 URL 场景，UI 兜底显示 host） */
 export interface WebSource {
@@ -76,13 +76,16 @@ export interface WebSource {
 }
 
 /**
- * 识别预设的联网搜索能力（105）：**模型名优先于 host**——中转站场景下模型名
- * 是唯一可靠信号（中转域名与真实后端无关）。不支持联网的端点（DeepSeek、
+ * 识别预设的联网搜索能力（105；128 增 OpenRouter :online）：**模型名优先于
+ * host**——中转站场景下模型名是唯一可靠信号（中转域名与真实后端无关）。不支持联网的端点（DeepSeek、
  * 普通 gpt-4o / gpt-4.1 / o 系等——openai SDK 类型已证实 chat/completions 的
  * tools 联合类型无内置搜索工具）返回 null，由调用方前置拦截引导换预设。
  */
 export function webSearchKind(preset: AiPreset): WebSearchKind | null {
 	const model = preset.model.toLowerCase();
+	if (model.endsWith(":online")) {
+		return "openrouter"; // OpenRouter :online 后缀（gpt-4o:online 等）——服务端注入搜索，按次计费
+	}
 	if (model.includes("search-preview")) {
 		return "openai"; // gpt-4o-search-preview / gpt-4o-mini-search-preview（放宽匹配覆盖未来变体）
 	}
@@ -103,10 +106,12 @@ export function webSearchKind(preset: AiPreset): WebSearchKind | null {
 }
 
 /**
- * 联网搜索的请求体注入字段（105，各厂商形态经官方文档/SDK 类型核实）：
+ * 联网搜索的请求体注入字段（105，各厂商形态经官方文档/SDK 类型核实；128 增
+ * openrouter）：
  * 智谱 web_search 工具（search_engine 是 schema 必填，search_std 为默认引擎；
  * search_result:true 才回传来源列表）；OpenAI 顶层 web_search_options（仅
- * search-preview 系模型支持）；Perplexity sonar 系自带搜索，无需注入。
+ * search-preview 系模型支持）；Perplexity sonar 系与 OpenRouter :online 自带
+ * 搜索，无需注入（:online 模型名原样含后缀发送，服务端按后缀注入搜索）。
  */
 function webSearchBodyFields(kind: WebSearchKind): Record<string, unknown> {
 	if (kind === "zhipu") {

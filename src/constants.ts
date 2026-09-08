@@ -3,9 +3,6 @@
 /** 默认数据目录（vault 相对路径，㉚ md 存储起改为显式目录名，用户在文件列表可见可管理） */
 export const DEFAULT_DATA_DIR = "MarinMind";
 
-/** 旧版 SQLite 时代的默认数据目录（㉚ 启动迁移检测的回溯位置；库文件在 <该目录>/marinmind.db） */
-export const LEGACY_DATA_DIR = ".marinmind";
-
 /** 默认备份导出目录（vault 内可见路径，便于用户拷走/同步） */
 export const DEFAULT_BACKUP_DIR = "Backups/MarinMind";
 
@@ -14,9 +11,6 @@ export const DEFAULT_WEBCLIP_FOLDER = "WebClips";
 
 /** 剪藏子目录（124，数据根相对：网页剪藏与屏幕剪藏 md 的落点，图片统一走 assets/） */
 export const CLIPS_SUBDIR = "clips";
-
-/** SQLite 库文件名（数据根相对路径） */
-export const DB_FILENAME = "marinmind.db";
 
 /** 媒体附件子目录（数据根相对路径，照片/手写/语音） */
 export const ASSETS_SUBDIR = "assets";

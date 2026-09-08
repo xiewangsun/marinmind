@@ -174,23 +174,32 @@ export const CHAT_HISTORY_LIMIT = 8;
  * 105 联网分支：webSearch 为 true 时 system 换「文档内容 + 联网资料」文案
  * ——页码约束保留，「未提及要说明」放宽为「区分文档依据与联网资料并注明
  * 来源」；不传（其他调用方）文案逐字不变。
+ * 128 RAG 后备分支：webContextText 非空（插件侧搜索结果经 buildWebContextText
+ * 拼好）时 user 在【文档内容】围栏**之前**加【联网搜索资料】围栏、system 复用
+ * 联网版文案（与 105 同一语义——厂商注入与插件 RAG 对模型口径一致）；不传
+ * 时输出逐字不变（既有断言零破坏的硬约束）。
  */
 export function buildChatMessages(
 	history: ChatTurn[],
 	contextText: string,
 	question: string,
 	webSearch?: boolean,
+	webContextText?: string,
 ): ChatMessage[] {
 	const trimmed = history.slice(-CHAT_HISTORY_LIMIT);
-	const system = webSearch
-		? "你是严谨的学习助手，结合用户提供的文档内容与联网搜索资料回答问题。要求：1) 用简体中文回答；2) 引用文档出处时使用「（第 N 页）」格式，且 N 只能取文档内容中已出现的页标记，禁止编造页码；3) 优先依据文档内容，文档中未提及的部分可参考联网搜索资料并注明来源；4) 文档内容与联网资料冲突时明确指出差异；5) 直接回答，不加客套。"
-		: "你是严谨的学习助手，依据用户提供的文档内容回答问题。要求：1) 用简体中文回答；2) 引用出处时使用「（第 N 页）」格式，且 N 只能取文档内容中已出现的页标记，禁止编造页码；3) 文档内容中没有依据的部分要明确说明「文档中未提及」，不要自行脑补；4) 直接回答，不加客套。";
+	const rag = webContextText != null && webContextText.length > 0;
+	const system =
+		webSearch || rag
+			? "你是严谨的学习助手，结合用户提供的文档内容与联网搜索资料回答问题。要求：1) 用简体中文回答；2) 引用文档出处时使用「（第 N 页）」格式，且 N 只能取文档内容中已出现的页标记，禁止编造页码；3) 优先依据文档内容，文档中未提及的部分可参考联网搜索资料并注明来源；4) 文档内容与联网资料冲突时明确指出差异；5) 直接回答，不加客套。"
+			: "你是严谨的学习助手，依据用户提供的文档内容回答问题。要求：1) 用简体中文回答；2) 引用出处时使用「（第 N 页）」格式，且 N 只能取文档内容中已出现的页标记，禁止编造页码；3) 文档内容中没有依据的部分要明确说明「文档中未提及」，不要自行脑补；4) 直接回答，不加客套。";
 	return [
 		{ role: "system", content: system },
 		...trimmed,
 		{
 			role: "user",
-			content: `【文档内容开始】\n${contextText}\n【文档内容结束】\n\n我的问题：${question}`,
+			content: rag
+				? `【联网搜索资料开始】\n${webContextText}\n【联网搜索资料结束】\n\n【文档内容开始】\n${contextText}\n【文档内容结束】\n\n我的问题：${question}`
+				: `【文档内容开始】\n${contextText}\n【文档内容结束】\n\n我的问题：${question}`,
 		},
 	];
 }

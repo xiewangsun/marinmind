@@ -26,6 +26,12 @@ import { AiPresetModal } from "../ai/ai-preset-modal";
 import { AiCustomPromptModal } from "../ai/ai-custom-prompt-modal";
 import { sanitizeAiCustomPrompts, sanitizeAiPresets } from "../ai/ai-provider";
 import { testAiConnection } from "../ai/ai-service";
+import {
+	WEB_SEARCH_ENGINES,
+	isWebSearchServiceId,
+	searchServiceReady,
+} from "../ai/web-search-engine";
+import { testSearchConnection } from "../ai/web-search-service";
 import { validateAccelerator } from "../capture/screen-capture";
 
 /** R3（W-14）：路径/凭据输入关拼写检查与自动填充——防红线误报与密码管理器误触发 */
@@ -552,6 +558,117 @@ export class MarinMindSettingTab extends PluginSettingTab {
 					this.display();
 				}),
 			);
+
+		// ---------- 联网搜索服务（128 AI 联网后备） ----------
+
+		new Setting(containerEl)
+			.setName("联网搜索服务")
+			.setDesc(
+				"普通模型（DeepSeek 等）无联网能力时，插件先经所选搜索服务取回资料、拼进提问上下文（RAG）让回答带网络信息；GLM / search-preview / sonar / :online 等自带搜索的模型优先走厂商能力、不经此服务。搜索按服务方计费（Tavily 免费档每月 1000 次、博查按次计费、SearXNG 自建免费）。",
+			)
+			.addDropdown((dropdown) => {
+				dropdown.addOption("off", "关闭（默认）");
+				for (const engine of WEB_SEARCH_ENGINES) {
+					dropdown.addOption(engine.id, engine.label);
+				}
+				const current = this.plugin.settings.webSearchService;
+				dropdown
+					.setValue(isWebSearchServiceId(current) ? current : "off")
+					.onChange((value) => {
+						if (!isWebSearchServiceId(value)) {
+							return;
+						}
+						this.plugin.settings.webSearchService = value;
+						void this.plugin.saveData({ ...this.plugin.settings });
+						// 凭据输入按服务显隐：整页重建最简实现（镜像翻译引擎切换先例）
+						this.display();
+					});
+			});
+
+		if (this.plugin.settings.webSearchService === "tavily") {
+			new Setting(containerEl)
+				.setName("Tavily API Key")
+				.setDesc(
+					"app.tavily.com 注册获取（免费档每月 1000 次调用）。凭据明文存于插件数据文件，请勿在共享库中使用。",
+				)
+				.addText((text) => {
+					noAssist(text); // R3（W-14）：凭据输入
+					text.setPlaceholder("tvly-…").setValue(this.plugin.settings.webSearchTavilyKey);
+					text.onChange((value) => {
+						this.plugin.settings.webSearchTavilyKey = value.trim();
+						void this.plugin.saveData({ ...this.plugin.settings });
+					});
+				});
+		}
+
+		if (this.plugin.settings.webSearchService === "bocha") {
+			new Setting(containerEl)
+				.setName("博查 API Key")
+				.setDesc(
+					"open.bochaai.com 注册获取（按次计费，Web Search 每千次 ¥40 起）。国内直连可用。凭据明文存于插件数据文件，请勿在共享库中使用。",
+				)
+				.addText((text) => {
+					noAssist(text); // R3（W-14）：凭据输入
+					text.setPlaceholder("sk-…").setValue(this.plugin.settings.webSearchBochaKey);
+					text.onChange((value) => {
+						this.plugin.settings.webSearchBochaKey = value.trim();
+						void this.plugin.saveData({ ...this.plugin.settings });
+					});
+				});
+		}
+
+		if (this.plugin.settings.webSearchService === "searxng") {
+			new Setting(containerEl)
+				.setName("SearXNG 实例地址")
+				.setDesc(
+					"自建聚合搜索引擎（searx.github.io/searxng）的地址，如 http://127.0.0.1:8080；实例需在设置中开启 json 输出格式（search.formats 含 json）。自建免费且数据不出本地网络。",
+				)
+				.addText((text) => {
+					noAssist(text); // R3（W-14）：地址输入
+					text.setPlaceholder("http://127.0.0.1:8080").setValue(
+						this.plugin.settings.webSearchSearxngUrl,
+					);
+					text.onChange((value) => {
+						this.plugin.settings.webSearchSearxngUrl = value.trim().replace(/\/+$/, "");
+						void this.plugin.saveData({ ...this.plugin.settings });
+					});
+				});
+		}
+
+		// 搜索测试连接：off 时隐藏（与 AI 测试连接并列；凭据缺失时按钮禁用 + desc 引导）
+		if (this.plugin.settings.webSearchService !== "off") {
+			const callReady = searchServiceReady(this.plugin.settings);
+			new Setting(containerEl)
+				.setName("测试搜索连接")
+				.setDesc(
+					callReady
+						? "用固定词搜一次，验证服务地址与凭据可用。"
+						: "凭据未填写完整——补全上方输入后自动启用测试。",
+				)
+				.addButton((button) => {
+					button
+						.setButtonText("测试搜索")
+						.setDisabled(!callReady)
+						.onClick(async () => {
+							button.setDisabled(true).setButtonText("测试中…");
+							try {
+								const results = await testSearchConnection(this.plugin.settings);
+								new Notice(
+									results && results.length > 0
+										? `搜索连接成功：返回 ${results.length} 条结果`
+										: "搜索连接成功（无结果，可换个词再试）",
+								);
+							} catch (err) {
+								console.error("[MarinMind] 搜索测试连接失败", err);
+								new Notice(
+									`搜索连接失败：${err instanceof Error ? err.message : String(err)}`,
+								);
+							} finally {
+								button.setDisabled(false).setButtonText("测试搜索");
+							}
+						});
+				});
+		}
 	}
 
 	/** 复习（65）：批次张数与每日新卡上限（68 起消费——due 分批与新卡混排） */
