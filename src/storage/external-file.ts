@@ -1,4 +1,5 @@
 import { loadModule } from "./node-fs-adapter";
+import { MOBI_EXTS } from "./paths";
 
 /**
  * 库外文件（桌面绝对路径）直读桥：阅读 vault 外 PDF 的地基。
@@ -59,8 +60,8 @@ export async function externalFileExists(absPath: string): Promise<boolean> {
 }
 
 /**
- * 弹系统文件对话框选择一个库外文档（㊼ 起收 PDF/EPUB），返回其绝对路径；
- * 取消 / 环境不支持返回 null。
+ * 弹系统文件对话框选择一个库外文档（㊼ 起收 PDF/EPUB，㊽ 起 MOBI 家族），
+ * 返回其绝对路径；取消 / 环境不支持返回 null。
  * Obsidian 桌面把 @electron/remote 挂在 window.electron.remote（守卫式访问，任何缺口返回 null 不抛）。
  */
 export async function pickExternalPath(): Promise<string | null> {
@@ -86,7 +87,7 @@ export async function pickExternalPath(): Promise<string | null> {
 	const result = await dialog.showOpenDialog({
 		title: "选择库外文档",
 		properties: ["openFile"],
-		filters: [{ name: "文档", extensions: ["pdf", "epub"] }],
+		filters: [{ name: "文档", extensions: ["pdf", "epub", ...MOBI_EXTS] }],
 	});
 	if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
 		return null;

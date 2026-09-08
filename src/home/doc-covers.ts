@@ -3,8 +3,9 @@ import type MarinMindPlugin from "../main";
 import type { BookDocument } from "../types";
 import { acquirePdf, pdfCacheKey, type PdfHandle } from "../reader/pdf-cache";
 import { epubCoverBytes } from "../reader/epub-document";
+import { mobiCoverBytes } from "../reader/mobi-document";
 import { readExternalBinary } from "../storage/external-file";
-import { docExtOf, isAbsoluteFsPath } from "../storage/paths";
+import { docExtOf, isAbsoluteFsPath, isMobiExt } from "../storage/paths";
 
 /**
  * 文档封面渲染服务（㊵ 主页文档页「窗格」书架视图）：
@@ -69,7 +70,7 @@ async function renderCoverOnce(
 	doc: BookDocument,
 ): Promise<string | null> {
 	const ext = docExtOf(doc.filePath);
-	if (ext !== "pdf" && ext !== "epub") {
+	if (ext !== "pdf" && ext !== "epub" && !isMobiExt(ext)) {
 		cacheCover(key, null); // md/未知扩展（㊼）：无封面可渲，null 占位防重复白试
 		return null;
 	}
@@ -87,7 +88,15 @@ async function renderCoverOnce(
 			buf = await plugin.app.vault.readBinary(file);
 		}
 		let url: string | null;
-		if (ext === "epub") {
+		if (isMobiExt(ext)) {
+			// ㊽ MOBI 封面：EXTH 201/202 指针直取记录字节（永不抛；无 EXTH → 确定性 null）
+			const cover = mobiCoverBytes(new Uint8Array(buf));
+			url = cover ? await encodeCoverImage(cover.href, cover.bytes) : null;
+			if (url === null) {
+				cacheCover(key, null); // 书内无封面（EXTH 未声明）——确定性 null
+				return null;
+			}
+		} else if (ext === "epub") {
 			// ㊼ EPUB 封面：filter 限次解压只取封面条目（不整包解析）
 			const cover = epubCoverBytes(new Uint8Array(buf));
 			url = cover ? await encodeCoverImage(cover.href, cover.bytes) : null;

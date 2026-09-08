@@ -239,7 +239,14 @@ describe("filterCards deck 三态 + activeDeckPath（73 路径化）", () => {
 		card({ id: "p4", deck: null }),
 		card({ id: "p5", deck: "学习 /  数学" }), // 空白变体
 	];
-	const all = { documentId: null, excerptType: null, deck: null, tag: null, color: null };
+	const all = {
+		documentId: null,
+		excerptType: null,
+		deck: null,
+		tag: null,
+		color: null,
+		flashcard: null,
+	};
 
 	it("路径选中含子树；前缀不误伤（斜杠边界）；归一变体同命中", () => {
 		expect(filterCards(deckCards, { ...all, deck: "学习" }).map((c) => c.id)).toEqual([
@@ -307,7 +314,14 @@ describe("filterCards + paginate（㊲ 卡片筛选分页；卡组批扩四维�
 		card({ id: "a1", documentId: "d1", excerptType: "area" }),
 		card({ id: "t2", documentId: null, excerptType: "text" }),
 	];
-	const all = { documentId: null, excerptType: null, deck: null, tag: null, color: null };
+	const all = {
+		documentId: null,
+		excerptType: null,
+		deck: null,
+		tag: null,
+		color: null,
+		flashcard: null,
+	};
 
 	it("null 不限全量；按书籍/形态单独与组合筛选", () => {
 		expect(filterCards(cards, all)).toHaveLength(3);
@@ -384,8 +398,35 @@ describe("filterCards + paginate（㊲ 卡片筛选分页；卡组批扩四维�
 				deck: "G",
 				tag: "a",
 				color: null,
+				flashcard: null,
 			}).map((c) => c.id),
 		).toEqual(["z1"]);
+	});
+
+	it("130：闪卡维——null 不限 / true 只含集合内 / 漏传集合显式空 / 与其他维度 AND", () => {
+		const cards = [
+			card({ id: "f1", documentId: "d1", excerptType: "text" }),
+			card({ id: "f2", documentId: "d1", excerptType: "area" }),
+			card({ id: "f3", documentId: null, excerptType: "text" }),
+		];
+		const flash = new Set(["f1", "f3"]);
+		// null 不限：不传集合也不影响
+		expect(filterCards(cards, all).map((c) => c.id)).toEqual(["f1", "f2", "f3"]);
+		// true 只看集合内
+		expect(filterCards(cards, { ...all, flashcard: true }, flash).map((c) => c.id)).toEqual([
+			"f1",
+			"f3",
+		]);
+		// true 但调用方漏传集合：显式失败返回空（不误放行）
+		expect(filterCards(cards, { ...all, flashcard: true })).toEqual([]);
+		// 空集 + true = 空
+		expect(filterCards(cards, { ...all, flashcard: true }, new Set())).toEqual([]);
+		// 与书籍维度 AND 组合
+		expect(
+			filterCards(cards, { ...all, documentId: "d1", flashcard: true }, flash).map(
+				(c) => c.id,
+			),
+		).toEqual(["f1"]);
 	});
 
 	it("卡组批：distinctDecks / distinctTags 去重 + 拼音序，空输入空数组", () => {

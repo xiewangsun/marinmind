@@ -46,6 +46,7 @@ function rewindOf(nodes: MindmapNodeWithCard[]) {
 				order: n.order,
 				collapsed: n.collapsed,
 				branchStyle: n.branchStyle,
+				w: n.w,
 			},
 		]),
 	);
@@ -233,6 +234,43 @@ describe("undo-stack 真 repo 集成（capture/diff/重放）", () => {
 		const viewCopy: MindmapNodeWithCard = { ...n, x: 999, y: 999 };
 		expect(viewCopy.x).toBe(999);
 		expect(before.get(n.id)?.x).toBe(10); // 快照来自 repo，仍是操作前
+	});
+
+	// ---------- 130 手动调宽 ----------
+
+	it("130 宽度-only 变化进栈：undo 还原默认宽 / redo 恢复新宽；清除宽也可撤销", () => {
+		const map = mindmaps.create("图");
+		const n = mindmaps.addNode(map.id, makeCard("卡").id, null, 0, 0)!;
+		const before = captureMapState(mindmaps, map.id);
+
+		// 命令：undefined → 360（仅宽变化，坐标等全不动）
+		mindmaps.setNodeWidth(n.id, 360);
+		const after = captureMapState(mindmaps, map.id);
+		const entry = buildUndoEntry(map.id, "调整节点宽度", before, after, null)!;
+		expect(entry.nodes.size).toBe(1); // samePatch 含 w——仅宽差异也成条
+		expect(entry.nodes.get(n.id)?.before.w).toBeUndefined();
+		expect(entry.nodes.get(n.id)?.after.w).toBe(360);
+
+		// 撤销：重放 before → setNodeWidth(id, null) 恢复默认宽
+		applyUndoEntry(mindmaps, entry, "before");
+		expect(mindmaps.getNode(n.id)?.w).toBeUndefined();
+		// 重做：重放 after → setNodeWidth(id, 360)
+		applyUndoEntry(mindmaps, entry, "after");
+		expect(mindmaps.getNode(n.id)?.w).toBe(360);
+
+		// 清除宽（双击把手恢复默认）：360 → undefined 同样可撤销找回
+		const mid = captureMapState(mindmaps, map.id);
+		mindmaps.setNodeWidth(n.id, null);
+		const reset = buildUndoEntry(
+			map.id,
+			"恢复默认宽度",
+			mid,
+			captureMapState(mindmaps, map.id),
+			null,
+		)!;
+		expect(reset.nodes.size).toBe(1);
+		applyUndoEntry(mindmaps, reset, "before");
+		expect(mindmaps.getNode(n.id)?.w).toBe(360);
 	});
 });
 

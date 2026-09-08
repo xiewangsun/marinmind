@@ -275,6 +275,9 @@ export interface MindmapNode {
 	/** 兄弟序（㉜，手动重排）：同父兄弟的显示/堆叠顺序；缺省回退创建序。
 	 *  md 存储不落该字段——由文件中嵌套列表的顺序承载（序列化按 order 排、解析按下标赋） */
 	order?: number;
+	/** 节点自定义宽（px；手动拖右缘把手设定）。缺省 = 默认宽 200（styles.css）。
+	 *  md 机器注释键名 w，缺省省键（零写入契约） */
+	w?: number;
 	createdAt: number;
 }
 

@@ -98,6 +98,48 @@ describe("脑图仓储", () => {
 		expect(moved.y).toBe(-3);
 	});
 
+	it("130 setNodeWidth：设值取整 / null 清除 / 持久化重开后保留", async () => {
+		const adapter = new MemoryAdapter();
+		const store1 = await MarinMindStore.open(adapter);
+		const cards1 = new CardRepository(store1);
+		const maps1 = new MindmapRepository(store1);
+		const map = maps1.create("图");
+		const node = maps1.addNode(
+			map.id,
+			cards1.create({
+				documentId: null,
+				page: null,
+				rects: [],
+				excerptType: "text",
+				excerptText: "卡",
+			}).id,
+			null,
+			0,
+			0,
+		)!;
+
+		// 新节点默认无自定义宽
+		expect(maps1.getNode(node.id)?.w).toBeUndefined();
+		// 设值（小数取整）
+		maps1.setNodeWidth(node.id, 360.6);
+		expect(maps1.getNode(node.id)?.w).toBe(361);
+		// 清除 = 恢复默认宽（undefined）
+		maps1.setNodeWidth(node.id, null);
+		expect(maps1.getNode(node.id)?.w).toBeUndefined();
+		// 悬空 id 静默跳过
+		maps1.setNodeWidth("ghost", 300);
+
+		// 持久化往返：重设值 → 落盘 → 重开仍保留
+		maps1.setNodeWidth(node.id, 420);
+		await store1.flush();
+		store1.close();
+
+		const store2 = await MarinMindStore.open(adapter);
+		const maps2 = new MindmapRepository(store2);
+		expect(maps2.getNode(node.id)?.w).toBe(420);
+		store2.close();
+	});
+
 	it("setParent：同图成功；跨图/自身返回 undefined", () => {
 		const c1 = makeCard("1");
 		const c2 = makeCard("2");

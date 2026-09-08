@@ -189,15 +189,14 @@ export class ExternalDocWatcher {
 		}
 	}
 
-	/** 目录内文档文件名集合（㊼ 起 .pdf/.epub；失败/空目录返回空集合；保留原名，比较在纯函数内小写归一） */
+	/** 目录内文档文件名集合（㊼ 起 .pdf/.epub，㊽ 起 MOBI 家族；失败/空目录返回空集合；保留原名，比较在纯函数内小写归一） */
 	private listDocs(fs: typeof import("fs"), dir: string): Set<string> {
 		const names = new Set<string>();
 		try {
 			// readdir 同步版：目录内容小、调用点低频（建观察/对账），不值得引入异步链；
 			// 无 withFileTypes 选项返回 string[]
 			for (const name of fs.readdirSync(dir)) {
-				const lower = name.toLowerCase();
-				if (lower.endsWith(".pdf") || lower.endsWith(".epub")) {
+				if (/\.(pdf|epub|mobi|azw3|azw|prc)$/.test(name.toLowerCase())) {
 					names.add(name);
 				}
 			}

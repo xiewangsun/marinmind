@@ -18,7 +18,7 @@ import { Notice } from "obsidian";
 import { MarinMindStore } from "../../src/store/marinmind-store";
 import { DocumentRepository } from "../../src/db/repositories/document-repo";
 import { CardRepository } from "../../src/db/repositories/card-repo";
-import { deleteDocumentRecord } from "../../src/documents/doc-delete";
+import { deleteDocumentRecord, deleteDocumentsRecord } from "../../src/documents/doc-delete";
 import { MemoryAdapter } from "../helpers/memory-adapter";
 import type MarinMindPlugin from "../../src/main";
 
@@ -104,5 +104,83 @@ describe("deleteDocumentRecord 删除文档记录", () => {
 		expect(ok).toBe(false);
 		const last = vi.mocked(Notice).mock.calls.at(-1)?.[0];
 		expect(String(last)).toContain("db locked");
+	});
+});
+
+describe("deleteDocumentsRecord 批量删除文档记录（㊾）", () => {
+	it("多本全删：逐卡清附件 → 全部级联删净 → 汇总 Notice", async () => {
+		const rig = await makeRig();
+		const a = rig.documents.upsertByPath("books/a.pdf", "A");
+		const b = rig.documents.upsertByPath("books/b.pdf", "B");
+		rig.cards.create({
+			documentId: a.id,
+			page: 1,
+			rects: [],
+			excerptType: "handwriting",
+			excerptRef: "assets/1.webp",
+		});
+		rig.cards.create({
+			documentId: b.id,
+			page: 1,
+			rects: [],
+			excerptType: "area",
+			excerptRef: "assets/2.png",
+		});
+		rig.cards.create({
+			documentId: b.id,
+			page: 2,
+			rects: [],
+			excerptType: "text",
+			excerptText: "无附件",
+		});
+
+		const res = await deleteDocumentsRecord(rig.plugin, [a, b]);
+
+		expect(res).toEqual({ deleted: 2, failed: 0 });
+		expect(rig.removeAttachment).toHaveBeenCalledTimes(2); // 仅有 excerptRef 的卡
+		expect(rig.documents.get(a.id)).toBeUndefined();
+		expect(rig.documents.get(b.id)).toBeUndefined();
+		expect(Notice).toHaveBeenCalledWith("已删除 2 本文档记录");
+	});
+
+	it("单本失败不阻断整批：其余照删 → {deleted:N-1, failed:1} + 含失败数 Notice", async () => {
+		const rig = await makeRig();
+		const a = rig.documents.upsertByPath("books/a.pdf", "A");
+		const b = rig.documents.upsertByPath("books/b.pdf", "B");
+		const c = rig.documents.upsertByPath("books/c.pdf", "C");
+		vi.spyOn(rig.documents, "delete").mockImplementation((id: string) => {
+			if (id === b.id) throw new Error("db locked");
+			return DocumentRepository.prototype.delete.call(rig.documents, id);
+		});
+
+		const res = await deleteDocumentsRecord(rig.plugin, [a, b, c]);
+
+		expect(res).toEqual({ deleted: 2, failed: 1 });
+		expect(rig.documents.get(a.id)).toBeUndefined();
+		expect(rig.documents.get(b.id)).toBeDefined(); // 失败本保留
+		expect(rig.documents.get(c.id)).toBeUndefined();
+		expect(Notice).toHaveBeenCalledWith("已删除 2 本文档记录，1 本失败（详见控制台）");
+	});
+
+	it("已不存在的本跳过（不计入 deleted/failed）——批选期间外部删除竞态", async () => {
+		const rig = await makeRig();
+		const a = rig.documents.upsertByPath("books/a.pdf", "A");
+		const gone = rig.documents.upsertByPath("books/gone.pdf", "G");
+		rig.documents.delete(gone.id); // 先删一本，传入的是陈旧快照
+
+		const res = await deleteDocumentsRecord(rig.plugin, [a, gone]);
+
+		expect(res).toEqual({ deleted: 1, failed: 0 });
+		expect(Notice).toHaveBeenCalledWith("已删除 1 本文档记录");
+	});
+
+	it("空数组早退：零 Notice", async () => {
+		const rig = await makeRig();
+		const callsBefore = vi.mocked(Notice).mock.calls.length;
+
+		const res = await deleteDocumentsRecord(rig.plugin, []);
+
+		expect(res).toEqual({ deleted: 0, failed: 0 });
+		expect(vi.mocked(Notice).mock.calls.length).toBe(callsBefore);
 	});
 });

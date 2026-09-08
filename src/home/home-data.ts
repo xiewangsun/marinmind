@@ -147,6 +147,15 @@ export function buildCategoryTree(
 	return buildPathTree(docs.map(categoryPathOf), explicitFolders);
 }
 
+/** 分类树扁平化为全路径清单（深度优先，右键菜单/批量移动分类弹窗用；㊾ 从 home-pages 迁入供选择器复用） */
+export function flattenCategoryTree(nodes: readonly CategoryNode[], out: string[] = []): string[] {
+	for (const n of nodes) {
+		out.push(n.fullName);
+		flattenCategoryTree(n.children, out);
+	}
+	return out;
+}
+
 /** 文档 category 的段级归一完整路径（空/全空段/超长 → null = 未分类） */
 function categoryPathOf(doc: BookDocument): string | null {
 	return doc.category ? normalizeCategory(doc.category) : null;
@@ -279,6 +288,12 @@ export interface CardsFilter {
 	 * 候选不取 settings.excerptColors——从实际卡片派生才含旧色相与未设色。
 	 */
 	color: string | null;
+	/**
+	 * 只显示闪卡（130）：null = 不限 / true = 只看已转闪卡的卡。false 不出现
+	 * （两态开关与 null=不限 惯例一致；filterActive 的 `!= null` 判定天然兼容）。
+	 * 卡上无 isFlashcard 字段——判定源在 ReviewState，由 filterCards 第三参注入 id 集。
+	 */
+	flashcard: boolean | null;
 }
 
 /** 卡片页视图状态：筛选 + 当前页码（页码从 1 起） */
@@ -313,8 +328,16 @@ function matchesDeckPath(path: string | null, filterDeck: string): boolean {
 	return target !== null && path !== null && inPathSubtree(path, target);
 }
 
-/** 按书籍/形态/卡组/标签/颜色五维 AND 筛选卡片（null 字段不限，保持传入序） */
-export function filterCards(cards: readonly Card[], filter: CardsFilter): Card[] {
+/**
+ * 按书籍/形态/卡组/标签/颜色/闪卡六维 AND 筛选卡片（null 字段不限，保持传入序）。
+ * flashcardIds = 已转闪卡的 cardId 集（renderCardsPage 由 store.reviews 构建）；
+ * flashcard=true 而调用方漏传集合时返回空集（显式失败优于误放行）。
+ */
+export function filterCards(
+	cards: readonly Card[],
+	filter: CardsFilter,
+	flashcardIds?: ReadonlySet<string>,
+): Card[] {
 	return cards.filter(
 		(c) =>
 			(filter.documentId === null || c.documentId === filter.documentId) &&
@@ -323,7 +346,8 @@ export function filterCards(cards: readonly Card[], filter: CardsFilter): Card[]
 			(filter.tag === null || c.tags.includes(filter.tag)) &&
 			(filter.color === null ||
 				c.color === filter.color ||
-				(filter.color === UNSET_COLOR && c.color == null)),
+				(filter.color === UNSET_COLOR && c.color == null)) &&
+			(filter.flashcard !== true || flashcardIds?.has(c.id) === true),
 	);
 }
 

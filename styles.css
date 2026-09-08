@@ -1986,6 +1986,14 @@ body
 	word-break: break-word;
 }
 
+/* 130 手动拉宽（>200px）的节点：摘录文字取消三行上限，高度随内容增长——
+   拉宽的动机正是"内容看全"（宽节点图注/文字全显；默认宽节点保持三行截断） */
+.marinmind-mm-node-wide .marinmind-mm-node-text {
+	display: block;
+	-webkit-line-clamp: unset;
+	overflow: visible;
+}
+
 .marinmind-mm-node-meta {
 	/* ㊺ 节点 padding 归零后由 meta 自带水平内边距 */
 	margin: 0;
@@ -2040,6 +2048,42 @@ body
 .marinmind-mm-toggle.marinmind-mm-toggle-left {
 	right: auto;
 	left: -22px;
+}
+
+/* ===== 130 手动调宽把手（节点右缘）：拖动改宽、双击恢复默认 ===== */
+
+/* 右缘通高热区，屏幕恒宽（--mm-scale 反补偿，缩放不缩小命中区；上限钳制防
+   低缩放下把手吃掉过多节点点击区——点击节点跳原文仍是主交互） */
+.marinmind-mm-resize {
+	position: absolute;
+	top: 0;
+	right: 0;
+	height: 100%;
+	width: clamp(8px, calc(10px / var(--mm-scale, 1)), 24px);
+	cursor: ew-resize;
+	touch-action: none; /* 拖宽是自定义指针交互，禁浏览器默认手势 */
+	z-index: 3;
+}
+
+/* 视觉竖条：悬停节点/拖动中显形（accent 强调） */
+.marinmind-mm-resize::after {
+	content: "";
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	width: calc(3px / var(--mm-scale, 1));
+	height: calc(24px / var(--mm-scale, 1));
+	border-radius: 2px;
+	background: var(--background-modifier-border);
+	opacity: 0;
+	transition: opacity 0.15s ease;
+}
+
+.marinmind-mm-node:hover .marinmind-mm-resize::after,
+.marinmind-mm-resizing .marinmind-mm-resize::after {
+	opacity: 1;
+	background: var(--interactive-accent);
 }
 
 /* 89-B 图级默认分支样式下拉移除（入 ⋯ 菜单 showMapStyleMenu）；本规则随之删除 */
@@ -4423,6 +4467,28 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	background: var(--background-modifier-hover);
 }
 
+/* ㊾ 文档批选：批量操作行（搜索行与列表之间，仅批选模式渲染）——按钮复用 cards-review 配方 */
+.marinmind-home-doc-batch-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+	flex-wrap: wrap;
+}
+
+/* ㊾ 文档批选：瓷片勾选框叠放封面左上角（tile 直接子元素，z-index 盖过封面呼吸蒙层） */
+.marinmind-home-doc-tile .marinmind-home-batch-check {
+	position: absolute;
+	top: 14px;
+	left: 14px;
+	z-index: 2;
+}
+
+/* ㊾ 文档批选：勾选瓷片描边高亮（瓷片有边框，描边比行底色更自然） */
+.marinmind-home-doc-tile.is-batch-selected {
+	border-color: var(--interactive-accent);
+}
+
 .marinmind-home-pager {
 	display: flex;
 	align-items: center;
@@ -4536,6 +4602,18 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	height: 14px;
 }
 
+/* 130 带计数的宽变体（只显示闪卡）：zap 图标 + 数字，宽度自适应（基类 30px 定宽会裁计数） */
+.marinmind-home-view-toggle-btn-wide {
+	width: auto;
+	gap: 4px;
+	padding: 0 8px;
+}
+
+.marinmind-home-view-toggle-count {
+	font-size: var(--font-ui-smaller);
+	line-height: 1;
+}
+
 /* ---- 文档页窗格（书架）模式（㊵，㊸ 每行 6 个）：PDF 封面缩略图网格 ---- */
 /* 书架加宽（列表模式维持默认基调不动）——㊸ 1100 → 1280：6 列瓷片 ~166px
    + 左列 224px 的合理上限（此前 4 列 1fr 拉伸到 ~210px 显得过大） */
@@ -4589,6 +4667,7 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	user-select: none;
+	position: relative; /* ㊾ 批选勾选框绝对定位的包含块 */
 	transition:
 		background 0.1s,
 		border-color 0.1s;

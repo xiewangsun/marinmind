@@ -6,10 +6,10 @@ import type { BranchStyle } from "../types";
  * 依赖链 undo-stack → mindmap-repo → store → format 全零 DOM，vitest 直测。
  *
  * 语义：每条 entry 记录一次用户命令前后**可回退字段**的差异（坐标/父子/序/折叠/分支
- * 样式 + 图默认样式）。redo = 同一执行器换 before/after 侧重放。
+ * 样式/宽度 + 图默认样式）。redo = 同一执行器换 before/after 侧重放。
  *
  * 交叉约定（见 process.md 59 条目）：
- * - 栈只由 拖拽 / 折叠（单个+批量）/ 分支样式（节点+图默认）/ 自动布局 四类入口写入；
+ * - 栈只由 拖拽 / 折叠（单个+批量）/ 分支样式（节点+图默认）/ 自动布局 / 调宽 五类入口写入；
  *   建卡/删卡/移出/固定根/子脑图坍缩解除/合并不进栈（级联风险取舍）。
  * - UndoNodePatch 不含 childMapId / fixedRoot——portal 身份与固定根在撤销重放中免疫。
  * - 捕获必须从 repo.listNodes 读（视图 this.nodes 在拖拽 pointermove 已被就地改写，
@@ -27,6 +27,8 @@ export interface UndoNodePatch {
 	order?: number;
 	collapsed: boolean;
 	branchStyle: BranchStyle | null;
+	/** 镜像 MindmapNode.w 可选语义：undefined = 默认宽（重放 setNodeWidth(id, null)） */
+	w?: number;
 }
 
 /** 一条撤销记录：mapId + 差分节点集 + 可选的图默认样式补丁 */
@@ -103,6 +105,7 @@ export function captureMapState(repo: MindmapRepository, mapId: string): MapSnap
 			order: n.order,
 			collapsed: n.collapsed,
 			branchStyle: n.branchStyle,
+			w: n.w,
 		});
 	}
 	return snap;
@@ -116,7 +119,8 @@ function samePatch(a: UndoNodePatch, b: UndoNodePatch): boolean {
 		a.parentId === b.parentId &&
 		a.order === b.order &&
 		a.collapsed === b.collapsed &&
-		a.branchStyle === b.branchStyle
+		a.branchStyle === b.branchStyle &&
+		a.w === b.w
 	);
 }
 
@@ -168,6 +172,7 @@ export function applyUndoEntry(
 		repo.setParent(id, patch.parentId, patch.order);
 		repo.setCollapsed(id, patch.collapsed);
 		repo.setBranchStyle(id, patch.branchStyle);
+		repo.setNodeWidth(id, patch.w ?? null); // undefined = 恢复默认宽（幂等重写无害）
 	}
 	if (entry.mapDefault) {
 		repo.setDefaultBranchStyle(entry.mapId, entry.mapDefault[side]);

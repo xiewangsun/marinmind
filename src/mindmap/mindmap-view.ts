@@ -13,10 +13,18 @@ import { deleteCardCascade, promptCardLinks } from "../home/card-actions";
 import { buildCardCopyText } from "../links/card-links";
 import { createViewModeBar } from "../ui/view-mode-bar";
 import { resolveIcon, setIconSafe } from "../ui/icon-resolve";
-import { isHiddenVaultDir, fsBasename, pageWordOf, docExtOf } from "../storage/paths";
+import {
+	isHiddenVaultDir,
+	fsBasename,
+	pageWordOf,
+	docExtOf,
+	isMobiExt,
+	MOBI_EXTS,
+} from "../storage/paths";
 import { readExternalBinary } from "../storage/external-file";
 import { acquirePdf, pdfCacheKey } from "../reader/pdf-cache";
 import { parseEpub, epubOutline } from "../reader/epub-document";
+import { parseMobi } from "../reader/mobi-document";
 import { measureMdOutline } from "./md-outline-measure";
 import { PdfPickerModal, pickTarget } from "../reader/pdf-picker-modal";
 import { buildOutlineMarkdown, buildOutlineOpml } from "./outline-export";
@@ -165,6 +173,9 @@ const EDGE_SCROLL_SPEED = 18;
 const NODE_EDITOR_W = 264;
 /** ㊺ 编辑器面板与节点的垂直间隙（px） */
 const NODE_EDITOR_GAP = 8;
+/** 手动调宽范围（世界 px）：下限保证标题+两行文字仍可读，上限防大图节点吞掉视口 */
+const NODE_MIN_W = 140;
+const NODE_MAX_W = 640;
 
 /** 拖拽状态机：节点拖动 / 画布平移，单 pointerdown 入口分流 */
 type DragState =
@@ -234,6 +245,18 @@ export class MarinMindMindmapView extends ItemView {
 	private ty = 0;
 	private scale = 1;
 	private drag: DragState | null = null;
+	/** 调宽拖动状态（130 手动调宽）：独立于 DragState——把手事件自身捕获，
+	 *  不进 viewport 的 pointerdown 分流（stopPropagation 已阻断） */
+	private resizeDrag: {
+		nodeId: string;
+		el: HTMLElement;
+		/** 按下时的客户端 x（宽度差值跟随用） */
+		startClientX: number;
+		/** 按下时的节点宽（世界 px，缺省默认宽） */
+		startW: number;
+		/** 是否实际移动过（未动 = 误触不写库） */
+		moved: boolean;
+	} | null = null;
 	/** ㉜ 插入线元素（拖节点到同级前后时，在 worldEl 内绝对定位的横/竖线） */
 	private insertLineEl: HTMLElement | null = null;
 	/** 58 对齐吸附参考线元素（拖节点吸附时 worldEl 内的 1px 强调色线，最多一竖一横） */
@@ -707,6 +730,11 @@ export class MarinMindMindmapView extends ItemView {
 		new Notice(`已重做：${entry.label}`);
 	}
 
+	/** 节点生效宽（世界 px）：手动调宽值 ?? 默认宽——视图内宽度消费点统一收口 */
+	private nodeW(n: { w?: number }): number {
+		return n.w ?? NODE_WIDTH;
+	}
+
 	/** 可见节点包围盒（104-B 自 fitToContent 提出）：折叠隐藏的子树不参与；
 	 *  高度用 DOM 实测回退估值；无可见节点返回 null */
 	private visibleBBox(): { minX: number; minY: number; maxX: number; maxY: number } | null {
@@ -722,7 +750,7 @@ export class MarinMindMindmapView extends ItemView {
 			const h = this.nodeEls.get(n.id)?.offsetHeight ?? NODE_HEIGHT_EST;
 			minX = Math.min(minX, n.x);
 			minY = Math.min(minY, n.y);
-			maxX = Math.max(maxX, n.x + NODE_WIDTH);
+			maxX = Math.max(maxX, n.x + this.nodeW(n));
 			maxY = Math.max(maxY, n.y + h);
 		}
 		return minX === Infinity ? null : { minX, minY, maxX, maxY };
@@ -1056,6 +1084,13 @@ export class MarinMindMindmapView extends ItemView {
 		el.dataset.nodeId = node.id;
 		el.style.left = `${node.x}px`;
 		el.style.top = `${node.y}px`;
+		// 130 手动调宽：持久化宽覆盖 CSS 默认 200px；拉宽过的节点挂 wide 类
+		// （摘录文字取消三行截断，CSS 控制）。renderNodeContent 只重建三栏子节点
+		// 不触碰 el 自身样式——applyCardUpdate 重渲染路径宽度天然保留
+		if (node.w != null) {
+			el.style.width = `${node.w}px`;
+		}
+		el.classList.toggle("marinmind-mm-node-wide", (node.w ?? NODE_WIDTH) > NODE_WIDTH);
 
 		// ---------- 稳定骨架区（renderNodeContent 不重建——监听重建即丢） ----------
 		// meta 行：renderNodeContent 以其为三栏内容的插入锚点
@@ -1102,6 +1137,25 @@ export class MarinMindMindmapView extends ItemView {
 			});
 			el.appendChild(toggle);
 		}
+
+		// 130 手动调宽把手（右缘中部）：pointerdown stopPropagation 阻断节点拖拽/
+		// 画布平移（镜像折叠钮做法）；setPointerCapture 后 move/up 均回到把手自身。
+		// 双击恢复默认宽。放稳定骨架区——监听不随 renderNodeContent 重建丢失
+		const resize = document.createElement("div");
+		resize.className = "marinmind-mm-resize";
+		resize.setAttribute("role", "separator");
+		resize.setAttribute("aria-label", "调整节点宽度");
+		resize.title = "拖动调整宽度（双击恢复默认）";
+		resize.addEventListener("pointerdown", (evt) => this.onResizeDown(evt, node, el));
+		resize.addEventListener("pointermove", (evt) => this.onResizeMove(evt));
+		resize.addEventListener("pointerup", () => this.onResizeUp());
+		// pointercancel 视作收笔：宽度已实时应用到 DOM/内存，落库保持一致
+		resize.addEventListener("pointercancel", () => this.onResizeUp());
+		resize.addEventListener("dblclick", (evt) => {
+			evt.stopPropagation();
+			this.resetNodeWidth(node.id);
+		});
+		el.appendChild(resize);
 
 		// ---------- 三栏内容（㊺ MN3 式：标题栏/摘录内容/批注栏） ----------
 		this.renderNodeContent(el, node.card);
@@ -1331,7 +1385,7 @@ export class MarinMindMindmapView extends ItemView {
 			const h = this.nodeEls.get(n.id)?.offsetHeight ?? NODE_HEIGHT_EST;
 			minX = Math.min(minX, n.x);
 			minY = Math.min(minY, n.y);
-			maxX = Math.max(maxX, n.x + NODE_WIDTH);
+			maxX = Math.max(maxX, n.x + this.nodeW(n));
 			maxY = Math.max(maxY, n.y + h);
 		}
 		if (Number.isFinite(minX)) {
@@ -1366,13 +1420,13 @@ export class MarinMindMindmapView extends ItemView {
 				{
 					x: n.x,
 					y: n.y,
-					w: NODE_WIDTH,
+					w: n.w ?? NODE_WIDTH,
 					h: this.nodeEls.get(n.id)?.offsetHeight ?? NODE_HEIGHT_EST,
 				},
 				kids.map((c) => ({
 					x: c.x,
 					y: c.y,
-					w: NODE_WIDTH,
+					w: c.w ?? NODE_WIDTH,
 					h: this.nodeEls.get(c.id)?.offsetHeight ?? NODE_HEIGHT_EST,
 				})),
 			);
@@ -1400,9 +1454,15 @@ export class MarinMindMindmapView extends ItemView {
 			const parentBox = {
 				x: parent.x,
 				y: parent.y,
+				w: parent.w,
 				h: this.nodeEls.get(parent.id)?.offsetHeight,
 			};
-			const childBox = { x: n.x, y: n.y, h: this.nodeEls.get(n.id)?.offsetHeight };
+			const childBox = {
+				x: n.x,
+				y: n.y,
+				w: n.w,
+				h: this.nodeEls.get(n.id)?.offsetHeight,
+			};
 			const style = this.styleOf(parent.id);
 			const d = edgePath(parentBox, childBox, style);
 			if (d == null) {
@@ -1437,8 +1497,18 @@ export class MarinMindMindmapView extends ItemView {
 					continue;
 				}
 				const d = linkEdgePath(
-					{ x: a.x, y: a.y, h: this.nodeEls.get(a.id)?.offsetHeight },
-					{ x: b.x, y: b.y, h: this.nodeEls.get(b.id)?.offsetHeight },
+					{
+						x: a.x,
+						y: a.y,
+						w: a.w,
+						h: this.nodeEls.get(a.id)?.offsetHeight,
+					},
+					{
+						x: b.x,
+						y: b.y,
+						w: b.w,
+						h: this.nodeEls.get(b.id)?.offsetHeight,
+					},
 				);
 				const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
 				path.setAttribute("class", "marinmind-mm-link");
@@ -1600,7 +1670,7 @@ export class MarinMindMindmapView extends ItemView {
 		const h = this.nodeEls.get(node.id)?.offsetHeight ?? NODE_HEIGHT_EST;
 		const rect = vp.getBoundingClientRect();
 		// 节点中心（世界坐标）→ 视口中心：tx = cx - worldX × scale
-		this.tx = rect.width / 2 - (node.x + NODE_WIDTH / 2) * this.scale;
+		this.tx = rect.width / 2 - (node.x + this.nodeW(node) / 2) * this.scale;
 		this.ty = rect.height / 2 - (node.y + h / 2) * this.scale;
 		this.applyTransform();
 		const el = this.nodeEls.get(node.id);
@@ -1677,7 +1747,7 @@ export class MarinMindMindmapView extends ItemView {
 			return;
 		}
 		const h = el.offsetHeight || NODE_HEIGHT_EST;
-		this.tx = vr.width / 2 - (node.x + NODE_WIDTH / 2) * this.scale;
+		this.tx = vr.width / 2 - (node.x + this.nodeW(node) / 2) * this.scale;
 		this.ty = vr.height / 2 - (node.y + h / 2) * this.scale;
 		this.applyTransform();
 	}
@@ -1805,6 +1875,8 @@ export class MarinMindMindmapView extends ItemView {
 	private applyTransform(): void {
 		if (this.worldEl) {
 			this.worldEl.style.transform = `translate(${this.tx}px, ${this.ty}px) scale(${this.scale})`;
+			// 130 调宽把手 CSS 反缩放：屏幕恒宽热区（--mm-scale 在 world 元素上，节点内可用）
+			this.worldEl.style.setProperty("--mm-scale", String(this.scale));
 		}
 		// ㊺ 编辑器面板挂 viewport（不随 world 变换）：平移/缩放/fit 后跟随节点重摆
 		this.repositionNodeEditor();
@@ -2169,7 +2241,7 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	private onPointerDown(evt: PointerEvent): void {
-		if (evt.button !== 0 || this.drag) {
+		if (evt.button !== 0 || this.drag || this.resizeDrag) {
 			return;
 		}
 		const nodeEl = (evt.target as HTMLElement).closest<HTMLElement>(".marinmind-mm-node");
@@ -2390,6 +2462,88 @@ export class MarinMindMindmapView extends ItemView {
 		this.commitUndo("调整节点顺序");
 	}
 
+	// ---------- 130 手动调宽（右缘把手拖动；不自动重排子节点——自由定位哲学，
+	// 自动布局菜单已有；图片等比放大/文字换行由现有 CSS 天然跟随宽度） ----------
+
+	private onResizeDown(evt: PointerEvent, node: MindmapNodeWithCard, el: HTMLElement): void {
+		if (evt.button !== 0 || this.drag || this.resizeDrag) {
+			return;
+		}
+		// 不触发节点拖拽预备与画布平移（镜像折叠钮 stopPropagation 先例）
+		evt.stopPropagation();
+		(evt.target as HTMLElement).setPointerCapture?.(evt.pointerId);
+		this.resizeDrag = {
+			nodeId: node.id,
+			el,
+			startClientX: evt.clientX,
+			startW: node.w ?? NODE_WIDTH,
+			moved: false,
+		};
+		el.classList.add("marinmind-mm-resizing");
+	}
+
+	private onResizeMove(evt: PointerEvent): void {
+		const r = this.resizeDrag;
+		if (!r) {
+			return;
+		}
+		// 世界位移 = 屏幕位移 / scale；每帧用当前 scale 重算（拖动中 Ctrl+滚轮缩放也正确）
+		const w = Math.min(
+			NODE_MAX_W,
+			Math.max(
+				NODE_MIN_W,
+				Math.round(r.startW + (evt.clientX - r.startClientX) / this.scale),
+			),
+		);
+		const node = this.nodes.find((n) => n.id === r.nodeId);
+		if (r.moved && w === (node?.w ?? NODE_WIDTH)) {
+			return; // 宽度无变化免重排（round 后同值的高频事件）
+		}
+		r.moved = true;
+		r.el.style.width = `${w}px`;
+		r.el.classList.toggle("marinmind-mm-node-wide", w > NODE_WIDTH);
+		if (node) {
+			node.w = w; // 内存就地改写（镜像节点拖动改 x/y 的先例），收笔落库
+		}
+		// 连线右缘锚点/包围盒实时跟随（高度也可能因文字重排变化——drawEdges 实时读 offsetHeight）
+		this.drawEdges();
+	}
+
+	private onResizeUp(): void {
+		const r = this.resizeDrag;
+		if (!r) {
+			return;
+		}
+		this.resizeDrag = null;
+		r.el.classList.remove("marinmind-mm-resizing");
+		if (!r.moved) {
+			return; // 未动 = 误触，不写库
+		}
+		this.beginUndoCapture();
+		const node = this.nodes.find((n) => n.id === r.nodeId);
+		this.plugin.mindmaps.setNodeWidth(r.nodeId, node?.w ?? null);
+		this.drawEdges(); // 高度终态重锚（宽节点文字全显后高度已变）
+		this.repositionNodeEditor(); // 编辑器面板若开着，随节点右缘/高度重摆
+		this.commitUndo("调整节点宽度");
+	}
+
+	/** 双击把手恢复默认宽（200px + 三行截断态），可撤销 */
+	private resetNodeWidth(nodeId: string): void {
+		const el = this.nodeEls.get(nodeId);
+		const node = this.nodes.find((n) => n.id === nodeId);
+		if (!el || !node || node.w == null) {
+			return; // 已是默认宽：幂等不写库
+		}
+		this.beginUndoCapture();
+		node.w = undefined;
+		el.style.width = "";
+		el.classList.remove("marinmind-mm-node-wide");
+		this.plugin.mindmaps.setNodeWidth(nodeId, null);
+		this.drawEdges();
+		this.repositionNodeEditor();
+		this.commitUndo("恢复默认宽度");
+	}
+
 	/** 右键：拖动中=取消还原；节点=操作菜单；空白=放行 Obsidian 默认菜单 */
 	private onContextMenu(evt: MouseEvent): void {
 		const drag = this.drag;
@@ -2543,7 +2697,12 @@ export class MarinMindMindmapView extends ItemView {
 		// 根节点（parent=null）恒 v 轴（根均纵向堆叠）
 		const resolvedAxis = target.parentId === null ? "v" : axis;
 		const zone = dropZoneFor(
-			{ x: target.x, y: target.y, w: NODE_WIDTH, h: hitEl.offsetHeight },
+			{
+				x: target.x,
+				y: target.y,
+				w: hitEl.offsetWidth || this.nodeW(target),
+				h: hitEl.offsetHeight,
+			},
 			pointerWorld,
 			resolvedAxis,
 		);
@@ -2569,7 +2728,7 @@ export class MarinMindMindmapView extends ItemView {
 			return;
 		}
 		const line = this.ensureInsertLineEl();
-		const tW = NODE_WIDTH;
+		const tW = targetEl.offsetWidth || this.nodeW(target);
 		const tH = targetEl.offsetHeight;
 		// 世界坐标偏移（worldEl 是 0,0 原点，css transform 已剥离）
 		if (axis === "v") {
@@ -2652,7 +2811,7 @@ export class MarinMindMindmapView extends ItemView {
 			const h = this.nodeEls.get(n.id)?.offsetHeight ?? NODE_HEIGHT_EST;
 			minX = Math.min(minX, n.x);
 			minY = Math.min(minY, n.y);
-			maxX = Math.max(maxX, n.x + NODE_WIDTH);
+			maxX = Math.max(maxX, n.x + this.nodeW(n));
 			maxY = Math.max(maxY, n.y + h);
 		}
 		if (!Number.isFinite(minX)) {
@@ -3396,8 +3555,8 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	/**
-	 * 从文档目录建框架（55 PDF；62 起三态泛化 epub/md）入口：选择库内/库外文档
-	 * （picker 收 pdf+md+epub——库外按钮只收 pdf+epub，md 天然仅库内）。
+	 * 从文档目录建框架（55 PDF；62 起三态泛化 epub/md；㊽ MOBI 家族）入口：
+	 * 选择库内/库外文档（picker 收 pdf+md+epub+MOBI——库外按钮同口径）。
 	 */
 	private pickOutlineSource(): void {
 		if (!this.mapId) {
@@ -3408,7 +3567,7 @@ export class MarinMindMindmapView extends ItemView {
 			this.app,
 			(pick) => void this.buildOutlineFramework(pickTarget(pick)),
 			[],
-			{ extensions: ["pdf", "md", "epub"], plugin: this.plugin },
+			{ extensions: ["pdf", "md", "epub", ...MOBI_EXTS], plugin: this.plugin },
 		).open();
 	}
 
@@ -3427,11 +3586,12 @@ export class MarinMindMindmapView extends ItemView {
 		const title = typeof target === "string" ? fsBasename(target) : target.basename;
 		const ext = docExtOf(filePath);
 
-		// 1) 解析目录（62 按扩展三态分流）；建档在解析后——epub 的 dc:title
-		//    优先（对齐阅读器语义），解析失败时尚未建档零残留
+		// 1) 解析目录（62 按扩展三态分流；㊽ MOBI 家族搭 epub 班车）；建档在解析后
+		//    ——epub 的 dc:title / MOBI 的 EXTH 标题优先（对齐阅读器语义），解析失败时尚未建档零残留
 		let entries: Array<OutlineEntry & { anchorY?: number | null }>;
 		let bookTitle = title;
-		if (ext === "epub") {
+		if (ext === "epub" || isMobiExt(ext)) {
+			const mobi = isMobiExt(ext); // ㊽ MOBI 家族走 parseMobi 虚拟 EPUB
 			// 读字节：库内 TFile 直读 / 库外绝对路径桌面直读（移动端弹中文错误）
 			let bytes: ArrayBuffer;
 			try {
@@ -3440,17 +3600,24 @@ export class MarinMindMindmapView extends ItemView {
 						? await readExternalBinary(target)
 						: await this.app.vault.readBinary(target);
 			} catch (err) {
-				new Notice(err instanceof Error ? err.message : "读取 EPUB 失败", 6000);
+				new Notice(
+					err instanceof Error ? err.message : `读取${mobi ? "MOBI" : "EPUB"} 失败`,
+					6000,
+				);
 				return;
 			}
 			try {
-				const book = parseEpub(new Uint8Array(bytes));
-				bookTitle = book.title || title; // dc:title 优先 basename 兜底
+				const book = mobi
+					? parseMobi(new Uint8Array(bytes))
+					: parseEpub(new Uint8Array(bytes));
+				bookTitle = book.title || title; // dc:title / EXTH 503 优先 basename 兜底
 				entries = epubOutline(book); // page = spine 序号 + 1，与摘录卡同基
 			} catch (err) {
-				console.error("[MarinMind] EPUB 目录解析失败", err);
+				console.error(`[MarinMind] ${mobi ? "MOBI" : "EPUB"} 目录解析失败`, err);
 				new Notice(
-					err instanceof Error ? err.message : "EPUB 解析失败，无法读取目录",
+					err instanceof Error
+						? err.message
+						: `${mobi ? "MOBI" : "EPUB"} 解析失败，无法读取目录`,
 					6000,
 				);
 				return;

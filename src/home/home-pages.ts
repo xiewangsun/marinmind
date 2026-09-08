@@ -4,12 +4,14 @@ import type MarinMindPlugin from "../main";
 import type { BookDocument, Card, Mindmap } from "../types";
 import { now } from "../utils";
 import { ConfirmModal } from "../mindmap/confirm-modal";
+import { confirmDeleteMindmap } from "../mindmap/map-delete";
+import { refreshActiveMindmaps } from "../mindmap/mindmap-view";
 import { DocumentManagerModal } from "../documents/document-manager-modal";
 import { ReviewStatsModal } from "../review/review-stats-modal";
 import { copyExternalIntoVault } from "../documents/copy-into-vault";
 import { isAbsoluteFsPath, pageWordOf } from "../storage/paths";
 import { resolveDocPresence, type DocPresence } from "../documents/doc-presence";
-import { confirmDeleteDocument } from "../documents/doc-delete";
+import { confirmDeleteDocument, confirmDeleteDocuments } from "../documents/doc-delete";
 import { highlightFallbackColor, HIGHLIGHT_COLORS } from "../reader/highlight-colors";
 import { MSG_EXTERNAL_DOC_MOBILE } from "../constants";
 import {
@@ -24,6 +26,7 @@ import {
 	filterCards,
 	filterDocsByCategory,
 	filterDocsByQuery,
+	flattenCategoryTree,
 	formatRelativeTime,
 	injectCategoryPath,
 	inPathSubtree,
@@ -41,6 +44,7 @@ import { getDocCover } from "./doc-covers";
 import { createLazyQueue } from "./lazy-cover-queue";
 import { CardPreviewModal } from "./card-preview-modal";
 import { DocumentAssignModal } from "./document-assign-modal";
+import { CategoryAssignModal } from "./category-assign-modal";
 import { deleteCardCascade, promptPathName } from "./card-actions";
 
 /** 主页导航页标识（与 home-view NAV_ITEMS 对应） */
@@ -410,12 +414,158 @@ export async function renderDocumentsPage(
 		attr: { "aria-label": "窗格视图（封面书架）", title: "窗格视图（封面书架）" },
 	});
 	setIcon(gridBtn, "layout-grid");
-	const rowsHost = listWrap.createDiv();
+	// ㊾ 批量管理开关（配方同卡片页批选；开 = 行/瓷片出勾选框、点击即勾选、批量操作行浮现）
+	const docBatchToggle = searchRow.createDiv({ cls: "marinmind-home-view-toggle" });
+	const docBatchBtn = docBatchToggle.createDiv({
+		cls: "marinmind-home-view-toggle-btn",
+		attr: {
+			"aria-label": "批量选择",
+			title: "批量选择（批量删除 / 移动分类）",
+			"aria-pressed": String(docBatchSelectMode),
+		},
+	});
+	setIcon(docBatchBtn, "list-checks");
+	docBatchBtn.classList.toggle("is-active", docBatchSelectMode);
+	docBatchBtn.addEventListener("click", () => {
+		if (docBatchSelectMode) {
+			clearDocBatchSelection(); // 关闭模式并清空选择
+		} else {
+			docBatchSelectMode = true;
+		}
+		ctx.refresh(); // 整页重渲染显隐勾选框与批量操作行（刚点击按钮，搜索框无 IME 组字顾虑）
+	});
+	enableKeyboardActivation(docBatchBtn);
+
+	// ㊾ 批量操作行（批选模式时渲染在搜索行与列表之间）：计数 + 全选 + 批量删除 + 批量移动分类
+	if (docBatchSelectMode) {
+		const batchRow = listWrap.createDiv({ cls: "marinmind-home-doc-batch-row" });
+		const countEl = batchRow.createDiv({ cls: "marinmind-home-cards-count", text: "" }); // docBatchUiSync 填数
+		const selectAllBtn = batchRow.createEl("button", {
+			cls: "marinmind-home-cards-review",
+			text: "全选",
+			attr: { type: "button", title: "勾选/取消当前筛选下全部文档" },
+		});
+		selectAllBtn.addEventListener("click", () => {
+			const fresh = filterDocsByQuery(
+				filterDocsByCategory(plugin.documents.list(), ctx.selectedCategory),
+				ctx.docQuery,
+			);
+			const allIn = fresh.length > 0 && fresh.every((d) => docBatchSelectedIds.has(d.id));
+			for (const d of fresh) {
+				if (allIn) docBatchSelectedIds.delete(d.id);
+				else docBatchSelectedIds.add(d.id);
+			}
+			// 就地更新可见行/瓷片勾选态（属性选择器同时命中两种形态，不整页重建）
+			for (const rowEl of rowsHost.querySelectorAll<HTMLElement>("[data-doc-id]")) {
+				const id = rowEl.getAttribute("data-doc-id");
+				if (id != null) applyBatchRowState(rowEl, docBatchSelectedIds.has(id));
+			}
+			docBatchUiSync?.();
+		});
+		const batchDeleteBtn = batchRow.createEl("button", {
+			cls: "marinmind-home-cards-review marinmind-home-batch-delete",
+			text: "删除",
+			attr: { type: "button", title: "删除全部已勾选文档的记录（书籍文件保留）" },
+		});
+		batchDeleteBtn.addEventListener("click", () => {
+			const ids = [...docBatchSelectedIds];
+			if (ids.length === 0) return;
+			const picked = ids
+				.map((id) => plugin.documents.get(id))
+				.filter((d): d is BookDocument => d != null); // 活取防批选期间外部删除
+			if (picked.length === 0) return;
+			confirmDeleteDocuments(plugin.app, plugin, picked, () => {
+				clearDocBatchSelection();
+				ctx.refresh(); // 左列树计数随整页重渲染同步
+			});
+		});
+		const batchMoveBtn = batchRow.createEl("button", {
+			cls: "marinmind-home-cards-review",
+			text: "移动分类",
+			attr: { type: "button", title: "移动全部已勾选文档到其他分类" },
+		});
+		batchMoveBtn.addEventListener("click", () => {
+			if (docBatchSelectedIds.size === 0) return;
+			new CategoryAssignModal(plugin.app, plugin, docBatchSelectedIds.size, (item) => {
+				// 移动落地：活取逐本判活，目标归一后与当前一致的本跳过（防无谓写盘，
+				// 镜像 renameCategory 的 cur===category 守卫）
+				const apply = (category: string | null): void => {
+					let moved = 0;
+					for (const id of docBatchSelectedIds) {
+						const d = plugin.documents.get(id);
+						if (!d) continue;
+						const cur = d.category ? normalizeCategory(d.category) : null;
+						if (cur === category) continue;
+						plugin.documents.update(id, { category });
+						moved++;
+					}
+					new Notice(
+						moved > 0
+							? `已移动 ${moved} 本到「${category ?? "未分类"}」`
+							: "所选文档已在该分类",
+					);
+					clearDocBatchSelection();
+					ctx.refresh(); // 左列分类树计数随整页重渲染同步
+				};
+				if (item.kind === "category") {
+					apply(item.path);
+				} else if (item.kind === "remove") {
+					apply(null);
+				} else {
+					// 新建分类：promptPathName 输入 + 显式清单持久化（不 setSelectedCategory
+					// 跳视图——批量管理上下文里用户可能继续操作，与单本右键有意不同）
+					promptPathName(
+						plugin.app,
+						{ title: "新建分类", placeholder: "分类名称（支持多层，如：学习/英语）" },
+						(normalized) => {
+							plugin.store?.addFolder(normalized);
+							apply(normalized);
+						},
+					);
+				}
+			}).open();
+		});
+		// 就地同步器（闭包实时重算 filtered——ctx getter 是活值；局部刷新 rerenderList
+		// 不重建本行，搜索/切视图后计数与按钮态靠它保持真）
+		docBatchUiSync = () => {
+			const fresh = filterDocsByQuery(
+				filterDocsByCategory(plugin.documents.list(), ctx.selectedCategory),
+				ctx.docQuery,
+			);
+			countEl.setText(
+				docBatchSelectMode
+					? `已选 ${docBatchSelectedIds.size} / ${fresh.length} 本`
+					: `${fresh.length} 本`,
+			);
+			const allIn = fresh.length > 0 && fresh.every((d) => docBatchSelectedIds.has(d.id));
+			selectAllBtn.setText(allIn ? "取消全选" : "全选");
+			selectAllBtn.classList.toggle("is-disabled", fresh.length === 0);
+			selectAllBtn.setAttribute("aria-disabled", String(fresh.length === 0));
+			const n = docBatchSelectedIds.size;
+			batchDeleteBtn.setText(`删除 ${n} 本`);
+			batchDeleteBtn.classList.toggle("is-disabled", n === 0);
+			batchDeleteBtn.setAttribute("aria-disabled", String(n === 0));
+			batchMoveBtn.setText(`移动分类 ${n} 本`);
+			batchMoveBtn.classList.toggle("is-disabled", n === 0);
+			batchMoveBtn.setAttribute("aria-disabled", String(n === 0));
+		};
+		docBatchUiSync();
+	} else {
+		docBatchUiSync = null;
+	}
+	const rowsHost = listWrap.createDiv(); // 列表宿主（批量行之后，位于搜索行与列表之间）
 
 	const rerenderList = async (): Promise<void> => {
 		gridCoverObserver?.disconnect(); // 127：上一轮视口观察器随列表重建失效
 		gridCoverObserver = null;
 		const fresh = plugin.documents.list();
+		// ㊾ 批选存活修剪：选择只经本页操作产生，外部删书后残留 id 清掉（计数不失真）
+		if (docBatchSelectedIds.size > 0) {
+			const alive = new Set(fresh.map((d) => d.id));
+			for (const id of [...docBatchSelectedIds]) {
+				if (!alive.has(id)) docBatchSelectedIds.delete(id);
+			}
+		}
 		const inCategory = filterDocsByCategory(fresh, ctx.selectedCategory);
 		const filtered = filterDocsByQuery(inCategory, ctx.docQuery);
 		rowsHost.empty();
@@ -430,6 +580,7 @@ export async function renderDocumentsPage(
 			} else {
 				emptyHint(rowsHost, `没有匹配「${ctx.docQuery.trim()}」的文档。`);
 			}
+			docBatchUiSync?.(); // ㊾ 空态提前返回也要同步计数与按钮态（"0 / 0 本"）
 			return;
 		}
 		const presences = await Promise.all(
@@ -486,6 +637,7 @@ export async function renderDocumentsPage(
 				renderDocRow(list, ctx, doc, presences[i], ts);
 			});
 		}
+		docBatchUiSync?.(); // ㊾ 局部刷新不重建批量行，末尾同步计数与按钮态
 	};
 	// ㊵ 切换条高亮同步：按当前设置挂 is-active（整页重渲染后亦然）
 	const syncToggle = (): void => {
@@ -513,6 +665,9 @@ export async function renderDocumentsPage(
 	enableKeyboardActivation(gridBtn);
 	search.addEventListener("input", () => {
 		ctx.setDocQuery(search.value);
+		// ㊾ 搜索变化只清选择集、保留批选模式（整清模式会让不重建的开关钮 is-active
+		// 与无勾选框的行并存——UI 自相矛盾；清集已足以防"滤出视图的选中项被误删"）
+		docBatchSelectedIds.clear();
 		void rerenderList();
 	});
 	await rerenderList();
@@ -754,15 +909,6 @@ function renameCategory(ctx: HomeRenderCtx, oldName: string, newName: string): v
 	new Notice(`已重命名分类「${oldName}」→「${newName}」（${docs.length} 个文档）`);
 }
 
-/** 分类树扁平化为全路径清单（深度优先，右键菜单/下拉用） */
-function flattenCategoryTree(nodes: readonly CategoryNode[], out: string[] = []): string[] {
-	for (const n of nodes) {
-		out.push(n.fullName);
-		flattenCategoryTree(n.children, out);
-	}
-	return out;
-}
-
 // ---- 拖拽归档（㊲ HTML5 DnD：文档行 → 左列文件夹；与右键菜单并存） ----
 
 /** 当前拖拽中的文档 id（dragstart 写入 / dragend 清空；drop 优先取此值，dataTransfer 兜底） */
@@ -809,7 +955,8 @@ function enableFolderDrop(entry: HTMLElement, ctx: HomeRenderCtx, category: stri
 	});
 }
 
-/** 文档行：标题/路径/徽标/卡数/时间 + 点击打开 + 右键归档菜单 + 拖拽归档源 */
+/** 文档行：标题/路径/徽标/卡数/时间 + 点击打开 + 右键归档菜单 + 拖拽归档源；
+ *  ㊾ 批选模式 = 行首纯视觉 checkbox + 点击勾选（镜像卡片行批分支） */
 function renderDocRow(
 	list: HTMLElement,
 	ctx: HomeRenderCtx,
@@ -818,7 +965,22 @@ function renderDocRow(
 	ts: number,
 ): void {
 	const { plugin } = ctx;
-	const row = list.createDiv({ cls: "marinmind-home-row is-clickable marinmind-home-doc-row" });
+	const batch = docBatchSelectMode;
+	const selected = batch && docBatchSelectedIds.has(doc.id);
+	const row = list.createDiv({
+		cls: `marinmind-home-row is-clickable marinmind-home-doc-row${selected ? " is-batch-selected" : ""}`,
+		attr: batch ? { "data-doc-id": doc.id } : {},
+	});
+	if (batch) {
+		// checkbox 纯视觉（pointer-events:none）且为行直接子元素——applyBatchRowState
+		// 的 `:scope >` 选择器依赖（行 click 单一交互源，防冒泡双 toggle）
+		const box = row.createEl("input", {
+			cls: "marinmind-home-batch-check",
+			type: "checkbox",
+		}) as HTMLInputElement;
+		box.checked = selected;
+		box.setAttribute("aria-hidden", "true"); // 行本身已是 checkbox 角色，内嵌框不重复报读
+	}
 	const main = row.createDiv({ cls: "marinmind-home-row-main" });
 	main.createDiv({ cls: "marinmind-home-row-title", text: doc.title });
 	main.createDiv({ cls: "marinmind-home-row-sub", text: doc.filePath });
@@ -830,7 +992,11 @@ function renderDocRow(
 		cls: "marinmind-home-row-meta",
 		text: `${plugin.cards.count(doc.id)} 卡 · ${formatRelativeTime(doc.updatedAt, ts)}`,
 	});
-	bindDocActions(row, ctx, doc);
+	if (batch) {
+		wireDocBatchInteractions(row, doc, selected);
+	} else {
+		bindDocActions(row, ctx, doc);
+	}
 }
 
 /** 行/瓷片共用交互绑定：点击打开 + 右键归档菜单 + 拖拽归档源（㊵ 抽出共用） */
@@ -843,6 +1009,15 @@ function bindDocActions(el: HTMLElement, ctx: HomeRenderCtx, doc: BookDocument):
 	});
 	enableDocDrag(el, doc);
 	enableKeyboardActivation(el); // P0-1：行/瓷片键盘可达（单点接线两形态共用）
+}
+
+/** ㊾ 批选模式交互绑定（行/瓷片共用）：点击勾选、不开/不右键/不拖拽，键盘可达 + checkbox 语义 */
+function wireDocBatchInteractions(el: HTMLElement, doc: BookDocument, selected: boolean): void {
+	el.addEventListener("click", () => toggleDocBatchSelected(doc.id, el));
+	enableKeyboardActivation(el);
+	// 键盘可达基类挂的是 role=button，批选覆写为 checkbox 语义（Enter/Space 走同一 click）
+	el.setAttribute("role", "checkbox");
+	el.setAttribute("aria-checked", String(selected));
 }
 
 /**
@@ -858,7 +1033,22 @@ function renderDocTile(
 	ts: number,
 ): { doc: BookDocument; cover: HTMLElement; img: HTMLImageElement } | null {
 	const { plugin } = ctx;
-	const tile = grid.createDiv({ cls: "marinmind-home-doc-tile is-clickable" });
+	const batch = docBatchSelectMode;
+	const selected = batch && docBatchSelectedIds.has(doc.id);
+	const tile = grid.createDiv({
+		cls: `marinmind-home-doc-tile is-clickable${selected ? " is-batch-selected" : ""}`,
+		attr: batch ? { "data-doc-id": doc.id } : {},
+	});
+	if (batch) {
+		// checkbox 叠放封面左上角（绝对定位见 CSS）：必须是 tile 直接子元素——
+		// applyBatchRowState 的 `:scope >` 选择器依赖（嵌进 cover 会被裁剪且选择器落空）
+		const box = tile.createEl("input", {
+			cls: "marinmind-home-batch-check",
+			type: "checkbox",
+		}) as HTMLInputElement;
+		box.checked = selected;
+		box.setAttribute("aria-hidden", "true");
+	}
 	const cover = tile.createDiv({ cls: "marinmind-home-tile-cover is-loading" });
 	// draggable=false：防 img 默认拖拽行为劫持瓷片归档拖拽；is-loaded 前不显示
 	const img = cover.createEl("img", {
@@ -876,7 +1066,11 @@ function renderDocTile(
 		cls: "marinmind-home-tile-meta",
 		text: `${plugin.cards.count(doc.id)} 卡 · ${formatRelativeTime(doc.updatedAt, ts)}`,
 	});
-	bindDocActions(tile, ctx, doc);
+	if (batch) {
+		wireDocBatchInteractions(tile, doc, selected); // ㊾ 批选：勾选交互替代打开/右键/拖拽
+	} else {
+		bindDocActions(tile, ctx, doc);
+	}
 	if (presence !== "ok" && presence !== "external-ok") {
 		// 失联 / 移动端库外（external-unknown 读不了文件）：不排队，直接占位
 		cover.removeClass("is-loading");
@@ -1334,6 +1528,30 @@ function toggleBatchSelected(cardId: string, row: HTMLElement): void {
 	batchUiSync?.();
 }
 
+// ---- 文档批量管理（㊾：模块态镜像卡片批选；行/瓷片双形态，applyBatchRowState 共用） ----
+
+/** 文档批选模式开关（仅文档页右列生效） */
+let docBatchSelectMode = false;
+/** 已勾选文档 id（唯一权威：整页/局部重渲染由 set 恢复勾选态） */
+const docBatchSelectedIds = new Set<string>();
+/** 文档批选 UI 就地同步器（renderDocumentsPage 渲染时重建；rerenderList 各出口调用） */
+let docBatchUiSync: (() => void) | null = null;
+
+/** 退出文档批选并清空选择（home-view 切页/切分类/关视图钩子调用） */
+export function clearDocBatchSelection(): void {
+	docBatchSelectMode = false;
+	docBatchSelectedIds.clear();
+}
+
+/** 文档批选行/瓷片点击：翻转 set + 就地 DOM 更新 + 批量行同步（applyBatchRowState 形状无关共用） */
+function toggleDocBatchSelected(docId: string, row: HTMLElement): void {
+	const on = !docBatchSelectedIds.has(docId);
+	if (on) docBatchSelectedIds.add(docId);
+	else docBatchSelectedIds.delete(docId);
+	applyBatchRowState(row, on);
+	docBatchUiSync?.();
+}
+
 /** 卡片行交互绑定（73）：右键归组菜单 + 拖拽归组源（点击/键盘由 renderCardRows 统一接线） */
 function bindCardActions(el: HTMLElement, ctx: HomeRenderCtx, card: Card): void {
 	el.addEventListener("contextmenu", (evt) => {
@@ -1361,6 +1579,12 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 
 	// ---- 两列主体：左列卡组树 + 右列筛选与列表（结构镜像文档页） ----
 	const allCards = plugin.cards.listAll();
+	// 130 闪卡 id 集：卡上无 isFlashcard 字段，判定源在 ReviewState
+	// （plugin.reviews.get(id)?.isFlashcard 是全库既有惯用法；全量遍历一次建集）
+	const flashIds = new Set<string>();
+	for (const r of plugin.store?.reviews.values() ?? []) {
+		if (r.isFlashcard) flashIds.add(r.cardId);
+	}
 	const body = wrap.createDiv({ cls: "marinmind-home-cards-body" });
 	if (plugin.settings.homeCardsFoldersHidden) {
 		body.addClass("is-folders-hidden"); // 左列收起态（页内切换就地 toggle 不重建）
@@ -1426,6 +1650,24 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 	colorSel.setValue(ctx.cardsFilter.color ?? "");
 	colorSel.onChange((v) => ctx.setCardsFilter({ color: v || null }));
 
+	// 130 只显示闪卡开关（第六维筛选，配方同批量选择 toggle）：zap 图标 + 全库闪卡计数
+	const fcToggle = filterRow.createDiv({ cls: "marinmind-home-view-toggle" });
+	const fcBtn = fcToggle.createDiv({
+		cls: "marinmind-home-view-toggle-btn marinmind-home-view-toggle-btn-wide",
+		attr: {
+			"aria-label": "只显示闪卡",
+			title: `只显示已转为闪卡的卡片（共 ${flashIds.size} 张）`,
+			"aria-pressed": String(ctx.cardsFilter.flashcard === true),
+		},
+	});
+	setIcon(fcBtn, "zap");
+	fcBtn.createSpan({ cls: "marinmind-home-view-toggle-count", text: String(flashIds.size) });
+	fcBtn.classList.toggle("is-active", ctx.cardsFilter.flashcard === true);
+	fcBtn.addEventListener("click", () => {
+		ctx.setCardsFilter({ flashcard: ctx.cardsFilter.flashcard === true ? null : true });
+	});
+	enableKeyboardActivation(fcBtn);
+
 	// 74 批量删除：批选模式开关（配方同收起钮；开 = 行首出勾选框、点击即勾选）
 	const batchToggle = filterRow.createDiv({ cls: "marinmind-home-view-toggle" });
 	const batchBtn = batchToggle.createDiv({
@@ -1447,7 +1689,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 	enableKeyboardActivation(batchBtn);
 
 	// ---- 结果列表（筛选 → 分页切片；空态与分页条渲染进右列——左列树常驻不被吞） ----
-	const filtered = filterCards(allCards, ctx.cardsFilter);
+	const filtered = filterCards(allCards, ctx.cardsFilter, flashIds);
 	const pageCards = paginate(filtered, ctx.cardsFilter.page, CARDS_PAGE_SIZE);
 	// 74 批选存活修剪：选择只经本页操作产生，外部删卡后残留 id 清掉（计数不失真）
 	if (batchSelectedIds.size > 0) {
@@ -1590,7 +1832,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 		});
 		link.addEventListener("click", () => void plugin.openReviewDeck(deckPath));
 	}
-	// 70 任一筛选激活时给「复习筛选结果」入口：当前五维筛选取 id 集 → cards 范围开练
+	// 70 任一筛选激活时给「复习筛选结果」入口：当前六维筛选取 id 集 → cards 范围开练
 	const filterActive = (Object.keys(ctx.cardsFilter) as (keyof typeof ctx.cardsFilter)[]).some(
 		(k) => k !== "page" && ctx.cardsFilter[k] != null,
 	);
@@ -1601,7 +1843,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 			attr: { type: "button", title: "按当前筛选条件复习到期卡片" },
 		});
 		link.addEventListener("click", () => {
-			const ids = filterCards(allCards, ctx.cardsFilter).map((c) => c.id);
+			const ids = filterCards(allCards, ctx.cardsFilter, flashIds).map((c) => c.id);
 			void plugin.openReviewCards(ids, "筛选结果");
 		});
 	}
@@ -1668,11 +1910,12 @@ export function renderMapsPage(container: HTMLElement, ctx: HomeRenderCtx): void
 	const list = wrap.createDiv({ cls: "marinmind-home-rows" });
 	const ts = now();
 	for (const m of maps) {
-		renderMapRow(list, plugin, m, ts);
+		renderMapRow(list, ctx, m, ts);
 	}
 }
 
-function renderMapRow(list: HTMLElement, plugin: MarinMindPlugin, m: Mindmap, ts: number): void {
+function renderMapRow(list: HTMLElement, ctx: HomeRenderCtx, m: Mindmap, ts: number): void {
+	const { plugin } = ctx;
 	const row = list.createDiv({ cls: "marinmind-home-row is-clickable" });
 	const main = row.createDiv({ cls: "marinmind-home-row-main" });
 	main.createDiv({ cls: "marinmind-home-row-title", text: m.name });
@@ -1689,4 +1932,36 @@ function renderMapRow(list: HTMLElement, plugin: MarinMindPlugin, m: Mindmap, ts
 	}
 	row.addEventListener("click", () => void plugin.openMindmap(m.id));
 	enableKeyboardActivation(row);
+	// 主页脑图删除（镜像文档行右键先例）：右键菜单承载，删除置菜单最末（项目惯例）
+	row.addEventListener("contextmenu", (evt) => {
+		evt.preventDefault();
+		showMapMenu(ctx, m, evt);
+	});
+}
+
+/** 脑图行右键菜单：打开 + 删除脑图（危险操作置最末，镜像 showDocMenu 惯例） */
+function showMapMenu(ctx: HomeRenderCtx, m: Mindmap, evt: MouseEvent): void {
+	const { plugin } = ctx;
+	const menu = new Menu();
+	menu.addItem((item) =>
+		item
+			.setTitle("打开")
+			.setIcon("brain")
+			.onClick(() => void plugin.openMindmap(m.id)),
+	);
+	menu.addSeparator();
+	// 删除脑图：卡片保留仅删组织结构（map-delete.ts 单源）；打开中的视图经
+	// refreshActiveMindmaps → loadMap 自愈回选图器（本文件接线，map-delete 保持轻依赖）
+	menu.addItem((item) =>
+		item
+			.setTitle("删除脑图…")
+			.setIcon("trash-2")
+			.onClick(() =>
+				confirmDeleteMindmap(plugin.app, plugin, m, () => {
+					refreshActiveMindmaps(m.id);
+					ctx.refresh();
+				}),
+			),
+	);
+	menu.showAtMouseEvent(evt);
 }

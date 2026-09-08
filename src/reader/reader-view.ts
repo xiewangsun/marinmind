@@ -11,7 +11,7 @@ import { collectTargetOf, fixedRootDocOf } from "../mindmap/auto-collect";
 import { suggestRootPosition } from "../mindmap/mindmap-graph";
 import { isOcrEngineReady, ocrCanvasPageLines, ocrCanvasRegions } from "../ocr/ocr-service";
 import { ocrFailNotice, ocrStartNotice } from "../ocr/ocr-text";
-import { docExtOf, fsBasename, isAbsoluteFsPath } from "../storage/paths";
+import { docExtOf, fsBasename, isAbsoluteFsPath, isMobiExt } from "../storage/paths";
 import { readExternalBinary } from "../storage/external-file";
 import { localizeClipImageRefs } from "../webclip/clip-md";
 import type { Card, DocRect, LineStyle, NormPoint } from "../types";
@@ -26,6 +26,7 @@ import {
 	type EpubBook,
 } from "./epub-document";
 import { EpubSession, type EpubLinkTarget } from "./epub-session";
+import { parseMobi } from "./mobi-document";
 import { RecordingBar } from "./recording-bar";
 import { ExcerptLayer, flashEl, type ExcerptTool, type ReaderTool } from "./excerpt-layer";
 import { HandwriteLayer } from "./handwrite-layer";
@@ -93,7 +94,8 @@ const MD_PLACEHOLDER_HEIGHT = 1000;
  * 文档形态（㊼ 三态化：取代 ㊻-B 的 isMdDoc 布尔）：
  * - pdf：pdf.js 位图渲染（懒渲染/尺寸巡检/缩放/手写/AI 摘录/OCR 全量能力）
  * - md：库内 Markdown 单页长文（㊻-B，MarkdownRenderer）
- * - epub：EPUB 章节流（㊼，章=页，EpubSession 懒渲染）
+ * - epub：EPUB 章节流（㊼，章=页，EpubSession 懒渲染）；㊽ MOBI 家族
+ *   （mobi/azw3/azw/prc）经 parseMobi 转「虚拟 EPUB」后搭同一班车
  * - clip：数据根 clips/ 下的剪藏 md（124）——读取走数据根 adapter、图片
  *   assets/ 引用渲染前换 blob（clip-md.ts），排版/摘录全链路与 md 同构
  * md/epub/clip 合称「可重排文档」（isReflowDoc）：共享无位图/固定栏宽/页语义务复用分支
@@ -106,8 +108,8 @@ function docKindOf(filePath: string): DocKind {
 	if (ext === "md" && !isAbsoluteFsPath(filePath)) {
 		return "md"; // 库外 md 不支持（无 TFile 供 MarkdownRenderer 渲染上下文）
 	}
-	if (ext === "epub") {
-		return "epub";
+	if (ext === "epub" || isMobiExt(ext)) {
+		return "epub"; // ㊽ MOBI 家族按 epub 别名搭车（章=页模型同构）
 	}
 	return "pdf";
 }
@@ -683,13 +685,17 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			if (token !== this.loadToken) {
 				return;
 			}
+			const mobi = isMobiExt(docExtOf(filePath)); // ㊽ MOBI 家族走 parseMobi 虚拟 EPUB
 			let book: EpubBook;
 			try {
-				book = parseEpub(new Uint8Array(buf));
+				book = mobi ? parseMobi(new Uint8Array(buf)) : parseEpub(new Uint8Array(buf));
 			} catch (e) {
-				throw new Error(`EPUB 解析失败：${e instanceof Error ? e.message : String(e)}`, {
-					cause: e,
-				});
+				throw new Error(
+					`${mobi ? "MOBI" : "EPUB"} 解析失败：${e instanceof Error ? e.message : String(e)}`,
+					{
+						cause: e,
+					},
+				);
 			}
 			this.epub = book;
 			this.epubSession = new EpubSession(book, (target, evt) =>

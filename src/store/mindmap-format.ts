@@ -183,6 +183,11 @@ export function parseMindmapMd(text: string, opts: ParseMindmapOptions = {}): Pa
 				typeof json.style === "string" && isBranchStyle(json.style) ? json.style : null,
 			// 61 子脑图：sub = 子图 id（悬空引用原样保留，读取侧 get 守卫自愈）
 			childMapId: typeof json.sub === "string" ? json.sub : null,
+			// 手动调宽：w 需为正有限数（旧文件无键 → undefined = 默认宽；脏值静默回退）
+			w:
+				typeof json.w === "number" && Number.isFinite(json.w) && json.w > 0
+					? Math.round(json.w)
+					: undefined,
 			createdAt: typeof json.created === "number" ? json.created : 0,
 		};
 		nodes.push(node);
@@ -249,6 +254,7 @@ export function serializeMindmapMd(
 			if (node.collapsed) machine.col = 1;
 			if (node.branchStyle) machine.style = node.branchStyle;
 			if (node.childMapId) machine.sub = node.childMapId; // 61 子脑图（null 省键零写入契约）
+			if (node.w != null) machine.w = Math.round(node.w); // 手动调宽（缺省省键，零写入契约）
 			machine.created = node.createdAt;
 			const link = `[[${resolved.fileBase}#^card-${node.cardId}|${escapeWikiTitle(resolved.title)}]]`;
 			out.push(`${indent}- ${link} ${MM_COMMENT_PREFIX}${JSON.stringify(machine)} -->`);

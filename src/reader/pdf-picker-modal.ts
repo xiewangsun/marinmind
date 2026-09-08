@@ -1,5 +1,6 @@
 import { FuzzySuggestModal, Platform } from "obsidian";
 import type { App, FuzzyMatch, TFile } from "obsidian";
+import { MOBI_EXTS } from "../storage/paths";
 import { pickExternalPath } from "../storage/external-file";
 import type MarinMindPlugin from "../main";
 
@@ -9,9 +10,9 @@ import type MarinMindPlugin from "../main";
  */
 export type PdfPickResult = { kind: "vault"; file: TFile } | { kind: "external"; absPath: string };
 
-/** 选择器列表选项（㊻-B）：默认 PDF + Markdown + EPUB；纯 PDF 场景（重关联）传 ["pdf"] */
+/** 选择器列表选项（㊻-B）：默认 PDF + Markdown + EPUB + MOBI 家族；纯 PDF 场景（重关联）传 ["pdf"] */
 export interface PdfPickerOptions {
-	/** 列出的库内文件扩展名（默认 pdf + md + epub） */
+	/** 列出的库内文件扩展名（默认 pdf + md + epub + MOBI 家族） */
 	extensions?: string[];
 	/**
 	 * 插件实例：提供数据根判定——数据根内的 md 是插件自身数据（书文件/脑图），
@@ -36,20 +37,21 @@ export interface ExternalDocEntry {
 }
 
 /**
- * 文档快速选择弹窗（命令面板入口；㊻-B 起兼收库内 Markdown，㊼ 起 EPUB）。
- * 列表 = 库内全部 PDF/Markdown/EPUB（排除数据根）+ 最近打开的库外文档（桌面端置顶，
- * 模糊搜索可直接重开）；桌面端弹窗底部另有「打开库外文档」按钮经系统对话框选新文件。
+ * 文档快速选择弹窗（命令面板入口；㊻-B 起兼收库内 Markdown，㊼ 起 EPUB，㊽ 起
+ * MOBI 家族）。列表 = 库内全部 PDF/Markdown/EPUB/MOBI（排除数据根）+ 最近打开
+ * 的库外文档（桌面端置顶，模糊搜索可直接重开）；桌面端弹窗底部另有「打开库外
+ * 文档」按钮经系统对话框选新文件。
  */
 export class PdfPickerModal extends FuzzySuggestModal<PdfPickResult> {
-	/** 默认扩展名：PDF + 库内 md（㊻-B）+ EPUB（㊼） */
-	private static readonly DEFAULT_EXTENSIONS = ["pdf", "md", "epub"];
+	/** 默认扩展名：PDF + 库内 md（㊻-B）+ EPUB（㊼）+ MOBI 家族（㊽） */
+	private static readonly DEFAULT_EXTENSIONS = ["pdf", "md", "epub", ...MOBI_EXTS];
 
 	constructor(
 		app: App,
 		private readonly onChoose: (pick: PdfPickResult) => void,
 		/** 最近打开的库外文档（调用方从 documents 记录取，按 updatedAt 倒序） */
 		private readonly recentExternal: ExternalDocEntry[] = [],
-		/** ㊻-B 列表选项（扩展名 + 数据根排除）；缺省 PDF+md+epub 全列 */
+		/** ㊻-B 列表选项（扩展名 + 数据根排除）；缺省 PDF+md+epub+MOBI 全列 */
 		private readonly options?: PdfPickerOptions,
 	) {
 		super(app);
@@ -63,6 +65,9 @@ export class PdfPickerModal extends FuzzySuggestModal<PdfPickResult> {
 		}
 		if (this.extensions.includes("epub")) {
 			kinds.push("EPUB");
+		}
+		if (this.extensions.some((e) => (MOBI_EXTS as readonly string[]).includes(e))) {
+			kinds.push("MOBI");
 		}
 		this.setPlaceholder(
 			kinds.length > 1

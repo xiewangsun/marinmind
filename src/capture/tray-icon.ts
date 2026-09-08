@@ -10,6 +10,13 @@
  * 文件可复用，且避免打包资源路径问题）。守卫链任何一环缺失返回 null
  * （托盘只是入口聚合，命令/热键入口不受影响，调用方静默降级）。
  * 加载铁律同 external-file.ts：window / require 只能在函数体内。
+ *
+ * 131 随 Obsidian 退场：托盘活在 Electron 主进程，渲染进程一死就成了
+ * 孤儿——图标残留任务栏、右键菜单回调（remote 转发回渲染进程）全部失效
+ * （含「退出」项）。Obsidian 退出不保证走到插件 onunload（走时渲染进程
+ * 也常已在拆除、remote 通道发不出 destroy）——故在 window beforeunload
+ * （渲染进程关闭前一刻、remote 通道仍活）挂销毁钩子，托盘随 Obsidian
+ * 自动退出；重载插件同样路过该清理（新会话按设置重建，无残留双图标）。
  */
 import type MarinMindPlugin from "../main";
 
@@ -125,6 +132,36 @@ function runTrayAction(plugin: MarinMindPlugin, action: TrayAction): void {
 }
 
 /**
+ * 页面卸载销毁钩子（131，模块级单例——插件设计同一时刻至多一个托盘，
+ * createCaptureTray 重建前先卸旧钩子）。钩子体即 destroyCaptureTray
+ * （自卸载幂等，dispatch 中移除监听合法）。
+ */
+let trayUnloadHook: (() => void) | null = null;
+
+/** 卸下页面卸载钩子（幂等；window 缺失环境为空操作） */
+function detachTrayUnloadHook(): void {
+	if (trayUnloadHook && typeof window !== "undefined") {
+		window.removeEventListener("beforeunload", trayUnloadHook);
+	}
+	trayUnloadHook = null;
+}
+
+/**
+ * 挂页面卸载钩子（131）：window beforeunload 在渲染进程关闭前一刻触发，
+ * 此时 remote 通道仍活、destroy 能送达主进程——托盘随 Obsidian 退出/
+ * 窗口关闭/插件重载自动销毁（见文件头 131 段）。先卸旧钩子再挂新。
+ */
+export function attachTrayUnloadHook(tray: CaptureTrayLike): void {
+	if (typeof window === "undefined") {
+		return;
+	}
+	detachTrayUnloadHook();
+	const unload = (): void => destroyCaptureTray(tray);
+	window.addEventListener("beforeunload", unload);
+	trayUnloadHook = unload;
+}
+
+/**
  * 创建截图托盘：图标（nativeImage）→ Tray 构造 → 右键菜单（buildFromTemplate
  * + 动作分发）+ Tooltip + 左键单击 = 截图框选复制。任一环不可用返回 null
  * （调用方静默——命令/热键入口不受影响）。
@@ -184,6 +221,8 @@ export function createCaptureTray(plugin: MarinMindPlugin): CaptureTrayLike | nu
 		tray.setToolTip?.(TRAY_TOOLTIP);
 		// 左键单击 = 截图（框选）复制（最常用动作一键直达）
 		tray.on?.("click", () => runTrayAction(plugin, "copy"));
+		// 131：随 Obsidian 退场（beforeunload 销毁，见 attachTrayUnloadHook）
+		attachTrayUnloadHook(tray);
 		return tray;
 	} catch (err) {
 		console.warn("[MarinMind] 托盘创建失败", err);
@@ -191,8 +230,13 @@ export function createCaptureTray(plugin: MarinMindPlugin): CaptureTrayLike | nu
 	}
 }
 
-/** 销毁托盘（尽力而为：已销毁/环境不可用静默） */
+/**
+ * 销毁托盘（尽力而为：已销毁/环境不可用静默）。同时卸下页面卸载钩子
+ * （131）——设置切换 / 托盘「退出」/ 插件卸载等一切显式销毁路径都经此，
+ * 钩子随之清理，不残留死监听。
+ */
 export function destroyCaptureTray(tray: CaptureTrayLike | null): void {
+	detachTrayUnloadHook();
 	if (!tray) {
 		return;
 	}

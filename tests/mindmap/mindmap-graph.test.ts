@@ -899,6 +899,106 @@ describe("mindmap-graph 图纯逻辑", () => {
 		expect(moves.get("r1")).toEqual({ x: 0, y: NODE_HEIGHT_EST + ROOT_GAP_Y });
 		expect(moves.get("c1")).toEqual({ x: 400, y: 50 + NODE_HEIGHT_EST + ROOT_GAP_Y });
 	});
+	// ---------- 130 每节点宽度（手动调宽） ----------
+
+	it("layoutTree tree：宽父的子列随父宽右移；孙列按子自身（默认）宽推进", () => {
+		const nodes = [
+			{ ...makeNode("r", null), w: 400 },
+			makeNode("b1", "r"),
+			makeNode("b2", "r"),
+			makeNode("c1", "b1"),
+		];
+		const pos = layoutTree(nodes);
+		// 子列 = 父右缘（400）+ GAP_X——默认宽时是 200 + GAP_X
+		expect(pos.get("b1")!.x).toBe(400 + GAP_X);
+		expect(pos.get("b2")!.x).toBe(400 + GAP_X);
+		// 孙列按 b1 自身宽（缺省默认宽）推进
+		expect(pos.get("c1")!.x).toBe(400 + GAP_X + NODE_WIDTH + GAP_X);
+		expect(pos.get("r")!.x).toBe(0); // 根列不动
+	});
+
+	it("layoutTree tree-left：左子落位用子自身宽（子右缘贴父左缘减间距）", () => {
+		const nodes = [
+			makeNode("a", null, 0, 0, false, "tree-left"),
+			{ ...makeNode("b", "a"), w: 300 },
+			{ ...makeNode("c", "b"), w: 280 },
+		];
+		const pos = layoutTree(nodes);
+		// 不是按父宽 200：宽子更靠左，右缘恰好贴 父左缘(0) - GAP_X
+		expect(pos.get("b")!.x).toBe(-300 - GAP_X);
+		// 孙用自身宽 280 继续左推
+		expect(pos.get("c")!.x).toBe(-300 - GAP_X - 280 - GAP_X);
+	});
+
+	it("layoutTree bidir：右子列随父宽、左子列用左子自身宽", () => {
+		const nodes = [
+			{ ...makeNode("r", null, 0, 0, false, "bidir"), w: 360 },
+			makeNode("b1", "r"), // 前半（1/2 向上取整）→ 右列
+			{ ...makeNode("b2", "r"), w: 300 }, // 后半 → 左列
+		];
+		const pos = layoutTree(nodes);
+		expect(pos.get("b1")!.x).toBe(360 + GAP_X); // 右列按父宽
+		expect(pos.get("b2")!.x).toBe(-300 - GAP_X); // 左列按子自身宽
+	});
+
+	it("layoutTree tree-down：子行按各子实际宽推进、父居中按行实际右缘", () => {
+		const nodes = [
+			makeNode("r", null, 0, 0, false, "tree-down"),
+			{ ...makeNode("b1", "r"), w: 400 },
+			makeNode("b2", "r"), // 默认宽，排在 b1 实际右缘 + GAP_X
+		];
+		const pos = layoutTree(nodes);
+		expect(pos.get("b1")).toEqual({ x: 0, y: NODE_HEIGHT_EST + GAP_Y });
+		expect(pos.get("b2")!.x).toBe(400 + GAP_X); // 不是 NODE_WIDTH + GAP_X
+		// 行右缘 = 400+GAP_X+200；父居中：(0 + 行右缘 - 自身宽 200) / 2
+		expect(pos.get("r")!.x).toBe((400 + GAP_X) / 2);
+	});
+
+	it("edgePath：宽节点锚点按各自宽（tree 右接从父右缘起、line 端点同步）", () => {
+		const parent = { x: 0, y: 0, w: 400, h: 80 };
+		const child = { x: 600, y: 100, w: 300, h: 60 };
+		// tree：起点 = 父右缘 400（默认宽会是 200）；dx = clamp(|600-400|/2=100)
+		expect(edgePath(parent, child, "tree")).toBe("M 400 40 C 500 40, 500 130, 600 130");
+		// line：父右缘 400 → 子左缘 600，中点 500
+		expect(edgePath(parent, child, "line")).toBe("M 400 40 H 500 V 130 H 600");
+		// line 族端点圆点同源（lineEnds）
+		expect(edgeDots(parent, child, "line")).toEqual([
+			{ x: 400, y: 40 },
+			{ x: 600, y: 130 },
+		]);
+	});
+
+	it("suggestChildPosition：tree 按父宽推进 / tree-left 用新节点默认宽 / tree-down 按兄弟实际宽求和", () => {
+		const wide = { x: 100, y: 200, w: 400 };
+		// tree：首子 x = 父实际右缘 500 + GAP_X
+		expect(suggestChildPosition(wide, [])).toEqual({ x: 100 + 400 + GAP_X, y: 200 });
+		// tree-left：x 按新节点自身默认宽（父宽不参与——新节点恒默认宽）
+		expect(suggestChildPosition(wide, [], "tree-left")).toEqual({
+			x: 100 - NODE_WIDTH - GAP_X,
+			y: 200,
+		});
+		// tree-down：兄弟行按各自实际宽顺延（300 + 默认宽，各加间距）
+		const down = suggestChildPosition(
+			{ x: 100, y: 200 },
+			[
+				{ x: 0, y: 0, w: 300 },
+				{ x: 0, y: 0 },
+			],
+			"tree-down",
+		);
+		expect(down.x).toBe(100 + 300 + GAP_X + NODE_WIDTH + GAP_X);
+	});
+
+	it("linkEdgePath：宽节点取相邻缘中点（a 右缘按 aw / 垂直镜像 b 底顶按 hb 中心用 bw）", () => {
+		// 水平主导：a 右缘 400（aw=400）→ b 左缘 700
+		expect(linkEdgePath({ x: 0, y: 0, w: 400, h: 80 }, { x: 700, y: 0, h: 60 })).toBe(
+			"M 400 40 L 700 30",
+		);
+		// 垂直主导：a 底缘中点按 aw/2=100 → b 顶缘中点按 bw/2=200
+		expect(linkEdgePath({ x: 0, y: 0, h: 80 }, { x: 0, y: 300, w: 400 })).toBe(
+			"M 100 80 L 200 300",
+		);
+	});
 });
 
 describe("autoCollectPlacement 摘录自动入图落点（⑲）", () => {

@@ -1,14 +1,40 @@
 import { describe, expect, it } from "vitest";
 import {
 	dirSegments,
+	docExtOf,
 	fsBasename,
 	isAbsoluteFsPath,
 	isHiddenVaultDir,
+	isMobiExt,
 	joinRel,
 	normalizeAssetRef,
 	normalizeFsDir,
 	normalizeVaultDir,
+	pageWordOf,
 } from "../../src/storage/paths";
+
+describe("MOBI 家族扩展名（㊽）", () => {
+	it("isMobiExt 四扩展命中；其余格式不误伤", () => {
+		for (const ext of ["mobi", "azw3", "azw", "prc"]) {
+			expect(isMobiExt(ext)).toBe(true);
+		}
+		expect(isMobiExt("epub")).toBe(false);
+		expect(isMobiExt("pdf")).toBe(false);
+		expect(isMobiExt("")).toBe(false);
+	});
+	it("docExtOf 大小写归一后接入", () => {
+		expect(docExtOf("D:\\Books\\x.AZW3")).toBe("azw3");
+		expect(docExtOf("books/a.Prc")).toBe("prc");
+	});
+	it("pageWordOf：epub 与 MOBI 家族「章」，其余「页」", () => {
+		expect(pageWordOf("a/b.epub")).toBe("章");
+		expect(pageWordOf("a/b.mobi")).toBe("章");
+		expect(pageWordOf("a/b.AZW3")).toBe("章");
+		expect(pageWordOf("a/b.prc")).toBe("章");
+		expect(pageWordOf("a/b.pdf")).toBe("页");
+		expect(pageWordOf("a/b.md")).toBe("页");
+	});
+});
 
 describe("isAbsoluteFsPath", () => {
 	it("识别 Windows 盘符（大小写、正反斜杠）", () => {

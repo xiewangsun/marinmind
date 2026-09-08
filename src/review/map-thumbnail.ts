@@ -68,11 +68,12 @@ export function buildMapThumbnailSvg(
 	const byId = new Map(nodes.map((n) => [n.id, n]));
 	// listNodes 产物无实测高（GraphNode.h 只在视图 measuredNodes 里）——恒用估值，
 	// 缩略图定位性质可接受（跳转后真实视图为权威）。参数用结构最小类型
-	// （buildChildrenMap 的 Map 值按 GraphNode 收敛，不复述完整节点类型）
-	const nodeRect = (n: { x: number; y: number }) => ({
+	// （buildChildrenMap 的 Map 值按 GraphNode 收敛，不复述完整节点类型）。
+	// 宽用持久化 w（130 手动调宽——同 h 不同，w 不依赖 DOM 实测）
+	const nodeRect = (n: { x: number; y: number; w?: number }) => ({
 		x: n.x,
 		y: n.y,
-		w: NODE_WIDTH,
+		w: n.w ?? NODE_WIDTH,
 		h: NODE_HEIGHT_EST,
 	});
 
@@ -110,7 +111,7 @@ export function buildMapThumbnailSvg(
 	for (const n of vis) {
 		minX = Math.min(minX, n.x);
 		minY = Math.min(minY, n.y);
-		maxX = Math.max(maxX, n.x + NODE_WIDTH);
+		maxX = Math.max(maxX, n.x + (n.w ?? NODE_WIDTH));
 		maxY = Math.max(maxY, n.y + NODE_HEIGHT_EST);
 	}
 	for (const f of frameRects) {
@@ -133,8 +134,9 @@ export function buildMapThumbnailSvg(
 	}
 	for (const n of vis) {
 		const isHit = n.cardId === highlightCardId;
-		svg += `<rect x="${n.x}" y="${n.y}" width="${NODE_WIDTH}" height="${NODE_HEIGHT_EST}" rx="6" style="fill: ${isHit ? "var(--background-modifier-hover)" : "var(--background-secondary)"}; stroke: ${isHit ? "var(--interactive-accent)" : "var(--background-modifier-border)"}; stroke-width: ${isHit ? 2.5 : 1}"${isHit ? ' data-hit="1"' : ""} />`;
-		svg += `<text x="${n.x + NODE_WIDTH / 2}" y="${n.y + NODE_HEIGHT_EST / 2}" text-anchor="middle" dominant-baseline="central" style="fill: ${isHit ? "var(--text-normal)" : "var(--text-muted)"}; font-size: 13px"${isHit ? ' data-hit-text="1"' : ""}>${esc(thumbTitle(n.card))}</text>`;
+		const nw = n.w ?? NODE_WIDTH;
+		svg += `<rect x="${n.x}" y="${n.y}" width="${nw}" height="${NODE_HEIGHT_EST}" rx="6" style="fill: ${isHit ? "var(--background-modifier-hover)" : "var(--background-secondary)"}; stroke: ${isHit ? "var(--interactive-accent)" : "var(--background-modifier-border)"}; stroke-width: ${isHit ? 2.5 : 1}"${isHit ? ' data-hit="1"' : ""} />`;
+		svg += `<text x="${n.x + nw / 2}" y="${n.y + NODE_HEIGHT_EST / 2}" text-anchor="middle" dominant-baseline="central" style="fill: ${isHit ? "var(--text-normal)" : "var(--text-muted)"}; font-size: 13px"${isHit ? ' data-hit-text="1"' : ""}>${esc(thumbTitle(n.card))}</text>`;
 	}
 	svg += "</svg>";
 	return svg;

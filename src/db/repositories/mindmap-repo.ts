@@ -228,6 +228,17 @@ export class MindmapRepository {
 		}
 	}
 
+	/** 设置/清除节点自定义宽（null = 恢复默认宽；调宽把手唯一写入口） */
+	setNodeWidth(nodeId: string, w: number | null): void {
+		for (const ms of this.store.maps.values()) {
+			const node = ms.nodes.get(nodeId);
+			if (!node) continue;
+			node.w = w == null ? undefined : Math.round(w);
+			this.store.markDirty(ms.map.id);
+			return;
+		}
+	}
+
 	/**
 	 * 改父子（拖到另一节点上/插为同级前后）。校验：两节点存在、同图、非自身；
 	 * 环检测由视图层内存快照保证（契约见 addNode 注释）。

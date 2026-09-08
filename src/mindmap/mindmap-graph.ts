@@ -21,6 +21,10 @@ export interface GraphNode {
 	/** 节点实测高（㉜，视图传 offsetHeight）：媒体图节点远高于估值，布局按实测高排防重叠；
 	 * 缺省回退 NODE_HEIGHT_EST（纯函数调用方与旧测试无感） */
 	h?: number;
+	/** 节点自定义宽（手动调宽）：缺省回退 NODE_WIDTH。与 h 不同——w 持久化在
+	 *  MindmapNode 上（视图传 MindmapNodeWithCard 时自然流入），折叠隐藏无 DOM
+	 *  的节点也按持久化宽参与布局 */
+	w?: number;
 	/** 兄弟序（㉜，手动重排）：同父兄弟的显示/堆叠顺序；
 	 * 缺省回退创建序（createdAt, id）——md 存储层解析时按下标赋值，旧数据天然有序 */
 	order?: number;
@@ -133,10 +137,11 @@ export function isDescendantOrSelf(
  * tree-down → 父下方一行顺延（按兄弟数粗略推进，仅求方向对）。
  */
 export function suggestChildPosition(
-	parent: { x: number; y: number },
-	siblings: { x: number; y: number }[],
+	parent: { x: number; y: number; w?: number },
+	siblings: Array<{ x: number; y: number; w?: number }>,
 	style: BranchStyle = "tree",
 ): { x: number; y: number } {
+	const pw = parent.w ?? NODE_WIDTH;
 	const nextY =
 		siblings.length === 0
 			? parent.y
@@ -146,11 +151,12 @@ export function suggestChildPosition(
 			return { x: parent.x - NODE_WIDTH - GAP_X, y: nextY };
 		case "tree-down":
 			return {
-				x: parent.x + siblings.length * (NODE_WIDTH + GAP_X),
+				// 宽节点兄弟行按各自实际宽顺延（缺省回退默认宽，旧行为不变）
+				x: parent.x + siblings.reduce((acc, s) => acc + (s.w ?? NODE_WIDTH) + GAP_X, 0),
 				y: parent.y + NODE_HEIGHT_EST + 2 * GAP_Y,
 			};
 		default:
-			return { x: parent.x + NODE_WIDTH + GAP_X, y: nextY };
+			return { x: parent.x + pw + GAP_X, y: nextY };
 	}
 }
 
@@ -311,16 +317,18 @@ const ELBOW_SEG = 40;
 /** line 族连线端点（57）：按子相对方位取父/子相邻缘中点——line 与 line-elbow 共用，
  *  也是端点圆点（edgeDots）的坐标源 */
 function lineEnds(
-	parent: { x: number; y: number; h?: number },
-	child: { x: number; y: number; h?: number },
+	parent: { x: number; y: number; w?: number; h?: number },
+	child: { x: number; y: number; w?: number; h?: number },
 ): { x1: number; y1: number; x2: number; y2: number } {
+	const pw = parent.w ?? NODE_WIDTH;
+	const cw = child.w ?? NODE_WIDTH;
 	const ph = parent.h ?? NODE_HEIGHT_EST;
 	const ch = child.h ?? NODE_HEIGHT_EST;
 	const right = child.x >= parent.x;
 	return {
-		x1: right ? parent.x + NODE_WIDTH : parent.x,
+		x1: right ? parent.x + pw : parent.x,
 		y1: parent.y + ph / 2,
-		x2: right ? child.x : child.x + NODE_WIDTH,
+		x2: right ? child.x : child.x + cw,
 		y2: child.y + ch / 2,
 	};
 }
@@ -344,10 +352,12 @@ function lineEnds(
  * h 由视图传实测 offsetHeight（无 DOM 时缺省估算值）。
  */
 export function edgePath(
-	parent: { x: number; y: number; h?: number },
-	child: { x: number; y: number; h?: number },
+	parent: { x: number; y: number; w?: number; h?: number },
+	child: { x: number; y: number; w?: number; h?: number },
 	style: BranchStyle = "tree",
 ): string | null {
+	const pw = parent.w ?? NODE_WIDTH;
+	const cw = child.w ?? NODE_WIDTH;
 	const ph = parent.h ?? NODE_HEIGHT_EST;
 	const ch = child.h ?? NODE_HEIGHT_EST;
 	const py = parent.y + ph / 2;
@@ -355,22 +365,22 @@ export function edgePath(
 	switch (style) {
 		case "tree-left": {
 			// 镜像树：默认父左 → 子右；子中心在父右侧时镜像（㉜ 锚点自适应）
-			const left = child.x + NODE_WIDTH / 2 <= parent.x + NODE_WIDTH / 2;
+			const left = child.x + cw / 2 <= parent.x + pw / 2;
 			return left
-				? hElbow(parent.x, py, child.x + NODE_WIDTH, cy)
-				: hElbow(parent.x + NODE_WIDTH, py, child.x, cy);
+				? hElbow(parent.x, py, child.x + cw, cy)
+				: hElbow(parent.x + pw, py, child.x, cy);
 		}
 		case "bidir": {
 			// 双向：子中心在父中心右侧走右接，左侧走左接
-			const right = child.x + NODE_WIDTH / 2 >= parent.x + NODE_WIDTH / 2;
+			const right = child.x + cw / 2 >= parent.x + pw / 2;
 			return right
-				? hElbow(parent.x + NODE_WIDTH, py, child.x, cy)
-				: hElbow(parent.x, py, child.x + NODE_WIDTH, cy);
+				? hElbow(parent.x + pw, py, child.x, cy)
+				: hElbow(parent.x, py, child.x + cw, cy);
 		}
 		case "tree-down": {
 			// 组织架构图正交折线；子在父上方时上下镜像
-			const x1 = parent.x + NODE_WIDTH / 2;
-			const x2 = child.x + NODE_WIDTH / 2;
+			const x1 = parent.x + pw / 2;
+			const x2 = child.x + cw / 2;
 			const below = cy >= py;
 			const y1 = below ? parent.y + ph : parent.y;
 			const y2 = below ? child.y : child.y + ch;
@@ -395,10 +405,10 @@ export function edgePath(
 			return null; // 框架：不画连线（视图画收纳框）
 		default: {
 			// tree：经典右接贝塞尔；子中心在父左侧时镜像（㉜，与 bidir 同款技术）
-			const right = child.x + NODE_WIDTH / 2 >= parent.x + NODE_WIDTH / 2;
+			const right = child.x + cw / 2 >= parent.x + pw / 2;
 			return right
-				? hElbow(parent.x + NODE_WIDTH, py, child.x, cy)
-				: hElbow(parent.x, py, child.x + NODE_WIDTH, cy);
+				? hElbow(parent.x + pw, py, child.x, cy)
+				: hElbow(parent.x, py, child.x + cw, cy);
 		}
 	}
 }
@@ -408,8 +418,8 @@ export function edgePath(
  * 非 line/line-elbow 样式返回 null（调用方跳过绘制）。端点在节点盒缘上不扩包围盒。
  */
 export function edgeDots(
-	parent: { x: number; y: number; h?: number },
-	child: { x: number; y: number; h?: number },
+	parent: { x: number; y: number; w?: number; h?: number },
+	child: { x: number; y: number; w?: number; h?: number },
 	style: BranchStyle,
 ): Array<{ x: number; y: number }> | null {
 	if (style !== "line" && style !== "line-elbow") {
@@ -655,30 +665,32 @@ export function navigateTree(nodes: GraphNode[], fromId: string, dir: NavigateDi
  * 端点都在节点盒内——调用方无需为互链边扩包围盒（viewBox 计算零改动）。
  */
 export function linkEdgePath(
-	a: { x: number; y: number; h?: number },
-	b: { x: number; y: number; h?: number },
+	a: { x: number; y: number; w?: number; h?: number },
+	b: { x: number; y: number; w?: number; h?: number },
 ): string {
+	const aw = a.w ?? NODE_WIDTH;
+	const bw = b.w ?? NODE_WIDTH;
 	const ha = a.h ?? NODE_HEIGHT_EST;
 	const hb = b.h ?? NODE_HEIGHT_EST;
-	const dx = b.x + NODE_WIDTH / 2 - (a.x + NODE_WIDTH / 2);
+	const dx = b.x + bw / 2 - (a.x + aw / 2);
 	const dy = b.y + hb / 2 - (a.y + ha / 2);
 	// 距离按"一跳步长"归一后比较，取主导轴决定相邻侧
-	const horiz = Math.abs(dx) / (NODE_WIDTH + GAP_X) >= Math.abs(dy) / (ha + hb);
+	const horiz = Math.abs(dx) / ((aw + bw) / 2 + GAP_X) >= Math.abs(dy) / (ha + hb);
 	let x1: number;
 	let y1: number;
 	let x2: number;
 	let y2: number;
 	if (horiz) {
 		const right = dx >= 0;
-		x1 = right ? a.x + NODE_WIDTH : a.x;
+		x1 = right ? a.x + aw : a.x;
 		y1 = a.y + ha / 2;
-		x2 = right ? b.x : b.x + NODE_WIDTH;
+		x2 = right ? b.x : b.x + bw;
 		y2 = b.y + hb / 2;
 	} else {
 		const below = dy >= 0;
-		x1 = a.x + NODE_WIDTH / 2;
+		x1 = a.x + aw / 2;
 		y1 = below ? a.y + ha : a.y;
-		x2 = b.x + NODE_WIDTH / 2;
+		x2 = b.x + bw / 2;
 		y2 = below ? b.y : b.y + hb;
 	}
 	return `M ${x1} ${y1} L ${x2} ${y2}`;
@@ -716,7 +728,6 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 	const childrenMap = buildChildrenMap(nodes);
 	const result = new Map<string, { x: number; y: number }>();
 	const visited = new Set<string>();
-	const W = NODE_WIDTH;
 	const H = NODE_HEIGHT_EST;
 
 	const layoutNode = (
@@ -728,6 +739,7 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 	): BBox => {
 		visit.add(node.id);
 		const nh = node.h ?? H;
+		const nw = node.w ?? NODE_WIDTH; // 每节点宽（手动调宽；缺省回退默认宽）
 		const kids = (childrenMap.get(node.id) ?? []).filter((c) => !visit.has(c.id));
 		const own =
 			node.branchStyle != null && isBranchStyle(node.branchStyle)
@@ -736,16 +748,16 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 		const style: BranchStyle = own ?? inherit ?? mapDefault;
 		if (kids.length === 0) {
 			result.set(node.id, { x, y: top });
-			return { minX: x, minY: top, maxX: x + W, maxY: top + nh };
+			return { minX: x, minY: top, maxX: x + nw, maxY: top + nh };
 		}
 		switch (style) {
 			case "tree-left": {
-				// 镜像树：子节点左侧一列纵向堆叠
+				// 镜像树：子节点左侧一列纵向堆叠（左侧落位用子自身宽——子右缘贴父左缘减间距）
 				let cursor = top;
 				let minX = x;
-				let maxX = x + W;
+				let maxX = x + nw;
 				for (const c of kids) {
-					const b = layoutNode(c, x - W - GAP_X, cursor, style, visit);
+					const b = layoutNode(c, x - (c.w ?? NODE_WIDTH) - GAP_X, cursor, style, visit);
 					cursor = b.maxY + GAP_Y;
 					minX = Math.min(minX, b.minX);
 					maxX = Math.max(maxX, b.maxX);
@@ -766,14 +778,14 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 					maxY = Math.max(maxY, b.maxY);
 				}
 				const rowRight = cx - GAP_X;
-				result.set(node.id, { x: (x + rowRight - W) / 2, y: top });
+				result.set(node.id, { x: (x + rowRight - nw) / 2, y: top });
 				return { minX: x, minY: top, maxX: rowRight, maxY };
 			}
 			case "line":
 			case "line-elbow": {
 				// 直线链（57 起含直角连线变体，布局同形）：子节点与父同高横向排链，
 				// 各子子树按包围盒占位
-				let cx = x + W + GAP_X;
+				let cx = x + nw + GAP_X;
 				let maxY = top + nh;
 				for (const c of kids) {
 					const b = layoutNode(c, cx, top, style, visit);
@@ -789,15 +801,21 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 				const leftKids = kids.slice(Math.ceil(kids.length / 2));
 				let rCursor = top;
 				let minX = x;
-				let maxX = x + W;
+				let maxX = x + nw;
 				for (const c of rightKids) {
-					const b = layoutNode(c, x + W + GAP_X, rCursor, "tree", visit);
+					const b = layoutNode(c, x + nw + GAP_X, rCursor, "tree", visit);
 					rCursor = b.maxY + GAP_Y;
 					maxX = Math.max(maxX, b.maxX);
 				}
 				let lCursor = top;
 				for (const c of leftKids) {
-					const b = layoutNode(c, x - W - GAP_X, lCursor, "tree-left", visit);
+					const b = layoutNode(
+						c,
+						x - (c.w ?? NODE_WIDTH) - GAP_X,
+						lCursor,
+						"tree-left",
+						visit,
+					);
 					lCursor = b.maxY + GAP_Y;
 					minX = Math.min(minX, b.minX);
 				}
@@ -813,9 +831,9 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 				// 57 斜右下树（MN4 树形3）：子级与 tree 同款右侧一列纵向堆叠，
 				// 但父**顶对齐首子**（不做垂直居中）——子级瀑布向下形成斜向瀑布
 				let cursor = top;
-				let maxX = x + W;
+				let maxX = x + nw;
 				for (const c of kids) {
-					const b = layoutNode(c, x + W + GAP_X, cursor, style, visit);
+					const b = layoutNode(c, x + nw + GAP_X, cursor, style, visit);
 					cursor = b.maxY + GAP_Y;
 					maxX = Math.max(maxX, b.maxX);
 				}
@@ -827,9 +845,9 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 				// 57 斜右上树（MN4 树形4）：子级右侧一列纵向堆叠（序不变），
 				// 父**底对齐子块底**——父在左下、子级向右上展开
 				let cursor = top;
-				let maxX = x + W;
+				let maxX = x + nw;
 				for (const c of kids) {
-					const b = layoutNode(c, x + W + GAP_X, cursor, style, visit);
+					const b = layoutNode(c, x + nw + GAP_X, cursor, style, visit);
 					cursor = b.maxY + GAP_Y;
 					maxX = Math.max(maxX, b.maxX);
 				}
@@ -868,9 +886,9 @@ function createLayoutEngine(nodes: GraphNode[], mapDefault: BranchStyle): Layout
 			default: {
 				// tree：经典左根右叶（子块下方不留尾距，父垂直居中于子块）
 				let cursor = top;
-				let maxX = x + W;
+				let maxX = x + nw;
 				for (const c of kids) {
-					const b = layoutNode(c, x + W + GAP_X, cursor, style, visit);
+					const b = layoutNode(c, x + nw + GAP_X, cursor, style, visit);
 					cursor = b.maxY + GAP_Y;
 					maxX = Math.max(maxX, b.maxX);
 				}

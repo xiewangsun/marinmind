@@ -24,9 +24,9 @@ export function fsBasename(p: string): string {
 }
 
 /**
- * 文档扩展名（㊼ EPUB）：小写、不带点（"pdf" | "md" | "epub" | …），无扩展名
- * 返回空串。vault 相对路径与库外绝对路径共用（分隔符通吃）——阅读器分流/
- * 视觉消费方短路/文案「页/章」判定的统一判定点。
+ * 文档扩展名（㊼ EPUB；㊽ MOBI 家族）：小写、不带点（"pdf" | "md" | "epub" |
+ * "mobi" | …），无扩展名返回空串。vault 相对路径与库外绝对路径共用（分隔符
+ * 通吃）——阅读器分流/视觉消费方短路/文案「页/章」判定的统一判定点。
  */
 export function docExtOf(p: string): string {
 	const name = p.slice(Math.max(p.lastIndexOf("\\"), p.lastIndexOf("/")) + 1);
@@ -34,9 +34,18 @@ export function docExtOf(p: string): string {
 	return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
-/** 页码量词（㊼）：epub 章=页模型显示「章」，其余（pdf/md）「页」——各视图文案共用 */
+/** MOBI 家族扩展名（㊽）：四者结构相同（PDB 容器），同一套解析器收编 */
+export const MOBI_EXTS = ["mobi", "azw3", "azw", "prc"] as const;
+
+/** 是否 MOBI 家族扩展名（㊽）：docKind 按 epub 别名搭车（章=页模型同构） */
+export function isMobiExt(ext: string): boolean {
+	return (MOBI_EXTS as readonly string[]).includes(ext);
+}
+
+/** 页码量词（㊼；㊽ MOBI 家族同章=页）：epub/mobi 家族显示「章」，其余「页」——各视图文案共用 */
 export function pageWordOf(filePath: string): string {
-	return docExtOf(filePath) === "epub" ? "章" : "页";
+	const ext = docExtOf(filePath);
+	return ext === "epub" || isMobiExt(ext) ? "章" : "页";
 }
 
 /** 规范化 vault 相对目录：trim、折叠多余斜杠、去 "." 段与首尾斜杠；非法输入抛错（调用方转 UI 错误） */

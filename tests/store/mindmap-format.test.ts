@@ -301,6 +301,57 @@ describe("mindmap-format 序列化与解析", () => {
 		// 指向不存在的图：解析层不清洗（delete 清扫负责正常路径），再次序列化保持
 		expect(serializeMindmapMd(parsed.map, parsed.nodes, ctx)).toBe(text);
 	});
+
+	// ---------- 130 手动调宽 w 键 ----------
+
+	it("w 键往返：自定义宽序列化落键（取整）、解析还原；二次序列化字节相同", () => {
+		const nodes = [
+			node({ id: "n1", cardId: "c1", w: 360.6 }),
+			node({ id: "n2", cardId: "c2", parentId: "n1" }),
+		];
+		const ctx = resolver({ c1: "宽节点", c2: "子" });
+		const text = serializeMindmapMd(map(), nodes, ctx);
+		expect(text).toContain('"w":361'); // 四舍五入取整
+
+		const parsed = parseMindmapMd(text);
+		const byId = new Map(parsed.nodes.map((n) => [n.id, n]));
+		expect(byId.get("n1")?.w).toBe(361);
+		expect(byId.get("n2")?.w).toBeUndefined(); // 缺省 = 默认宽
+
+		expect(serializeMindmapMd(parsed.map, parsed.nodes, ctx)).toBe(text);
+	});
+
+	it("零写入契约：w 全缺省的图不含 w 键（存量文件字节不变）", () => {
+		const plain = [node({ id: "n1", cardId: "c1" })];
+		const ctx = resolver({ c1: "根" });
+		const text = serializeMindmapMd(map(), plain, ctx);
+		expect(text).not.toContain('"w"');
+	});
+
+	it("旧文件无 w 解析得 undefined；非法 w（负数/零/字符串）静默回退默认宽", () => {
+		const mkText = (json: string): string =>
+			[
+				"---",
+				"marinmind: mindmap",
+				`id: ${map().id}`,
+				"name: 学习图",
+				"default_branch_style: tree",
+				"created_at: 1",
+				"updated_at: 1",
+				"---",
+				"",
+				`- [[书籍A#^card-c1|一]] <!--mm ${json} -->`,
+				"",
+			].join("\n");
+		// 旧文件（无 w 键）
+		expect(parseMindmapMd(mkText('{"id":"n1","x":0,"y":0}')).nodes[0].w).toBeUndefined();
+		// 非法值：负数 / 零 / 字符串 均回退 undefined，不警告不抛错（静默防御）
+		expect(parseMindmapMd(mkText('{"id":"n1","x":0,"y":0,"w":-5}')).nodes[0].w).toBeUndefined();
+		expect(parseMindmapMd(mkText('{"id":"n1","x":0,"y":0,"w":0}')).nodes[0].w).toBeUndefined();
+		expect(
+			parseMindmapMd(mkText('{"id":"n1","x":0,"y":0,"w":"360"}')).nodes[0].w,
+		).toBeUndefined();
+	});
 });
 
 describe("mindmapFileName", () => {

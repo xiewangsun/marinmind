@@ -1,37 +1,83 @@
 # MarinMind
 
-Obsidian 学习插件：**电子书阅读器 + 思维导图 + 学习卡**"一站式学习工具"。
+An all-in-one study tool for [Obsidian](https://obsidian.md) that combines an **e-book reader**, a **mind map**, and **flashcards with spaced repetition**.
 
-> 口号：革新性整合阅读标注工具、思维导图和学习卡。
+> Read and annotate → every excerpt becomes a knowledge card → drag cards onto mind maps → review them until they stick.
 
-## 核心功能
+<!-- TODO: add screenshots under ./images/ (home page, reader with excerpts, mind map, review) -->
 
-| 模块 | 说明 | 状态 |
-| ---- | ---- | ---- |
-| 阅读与标注 | PDF 阅读；文字/语音/照片/手写等多形式批注；高亮、矩形/折线摘录 | 🚧 PDF 阅读 + 区域/文字/照片/手写/语音摘录已实现 |
-| 摘录→卡片 | 文档中的任何摘录（文字、区域、手写、语音）自动变成一张「知识卡片」 | ✅ 五种摘录形态闭环 |
-| 思维导图 | 拖拽卡片构建思维导图，卡片与原文位置双向关联；支持卡片合并、链接 | 🚧 画布已实现（拖拽组树/折叠子树/自动布局/跳原文） |
-| 学习卡（闪卡） | 摘录卡片直接转为闪卡，内置间隔重复复习 | ✅ 复习界面闭环（含媒体卡正面） |
-| 多窗格工作区 | 阅读/脑图/卡片同屏多窗格切换（学习模式 / 研究模式） | ✅ 学习/研究双窗格预设 + 阅读器拖卡入图 |
-| OCR | 支持扫描版 PDF 文字识别 | ✅ 区域摘录 OCR（中英混排，首次联网下载引擎） |
-| 混合文档 | 多本书籍放进同一笔记本，跨书做一张脑图 | ✅ 多张命名脑图，任意卡片可入任意图 |
+## Features
 
-## 开发
+| Module | Description |
+| ------ | ----------- |
+| Reading & annotating | Read PDF / EPUB / MOBI books; highlight, and excerpt text, rectangular areas, free-form lasso regions, handwriting, photos, and voice notes |
+| Excerpt → card | Every excerpt automatically becomes a **knowledge card** — one piece of data, three uses (mind map node, flashcard, back-link to the source) |
+| Mind maps | Drag cards onto an infinite canvas to build mind maps; cards link back to the exact position in the book (page + coordinates); merge and bi-link cards |
+| Flashcards | Turn any card into a flashcard and review with a built-in FSRS-style spaced repetition scheduler, covering the full study loop from preview to long-term retention |
+| Multi-pane workspace | Reader, mind map, and cards side by side with study / research layouts and adjustable linkage |
+| OCR | Recognize text in scanned PDFs (Chinese & English mixed) |
+| Mixed documents | Put multiple books in one notebook and build cross-book mind maps |
+| Extras | Web clipping, screen capture with a tray shortcut, translation, and an AI assistant that works on your excerpts |
+
+## Installation
+
+### From the community directory *(once reviewed and published)*
+
+Settings → Community plugins → Browse → search "MarinMind" → Install → Enable.
+
+### Beta testing with BRAT
+
+1. Install the [BRAT](https://github.com/TfTHacker/obsidian42-brat) plugin.
+2. BRAT settings → **Add Beta plugin** → `xiewangsun/marinmind`.
+3. Enable "MarinMind" in Community plugins.
+
+### Manual
+
+Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](../../releases/latest) into `<vault>/.obsidian/plugins/marinmind/`, then enable the plugin in settings.
+
+## Usage
+
+A complete Chinese tutorial (18 chapters, covering import, excerpts, mind maps, review, backup, settings, AI, and more) is available at [docs/使用教程.md](docs/使用教程.md).
+
+The basic flow:
+
+1. Open the MarinMind home view and import a PDF / EPUB / MOBI book.
+2. Excerpt while reading — text, area, lasso, handwriting, photo, or voice.
+3. Drag cards onto a mind map and organize them.
+4. Send cards to review and let spaced repetition do the rest.
+
+## Data & privacy
+
+- All data (books, cards, mind maps, settings) is stored **locally** in your vault under the `MarinMind/` folder (configurable in settings; desktop installations may also use a folder outside the vault).
+- The plugin collects **no telemetry, analytics, or usage statistics**. Nothing leaves your machine except the explicitly user-triggered network requests listed below.
+- Backup: export everything to a `.marginpkg` archive (a zip of your data, books, and attachments) from settings.
+
+## Network usage
+
+All network requests are user-initiated and use API keys you configure yourself:
+
+| Feature | Endpoints |
+| ------- | --------- |
+| AI assistant | Any OpenAI-compatible endpoint you configure (default preset: `api.deepseek.com`); web-search-augmented answers can also use OpenRouter's `:online` suffix |
+| Web search (for AI) | Tavily (`api.tavily.com`), Bocha (`api.bochaai.com`), or a self-hosted SearXNG instance — whichever you configure |
+| Translation | Google Translate, Baidu, Youdao, or DeepL — whichever you configure |
+| OCR | On first use, downloads the OCR engine and language data from public CDNs (jsDelivr / tessdata.projectnaptha.com) |
+
+## Development
 
 ```bash
-npm install    # 安装依赖
-npm run dev    # 开发模式：监听 src/ 变化并增量构建 main.js
-npm run build  # 生产构建：先 tsc 类型检查，再 esbuild 打包
-npm test       # 运行全部测试（vitest）
+npm install    # install dependencies
+npm run dev    # dev mode: esbuild watch, rebuilds main.js on change
+npm run build  # production build: tsc type-check, then esbuild bundle
+npm test       # run all tests (vitest)
 ```
 
-数据存储：SQLite（sql.js / WASM），库文件位于 Obsidian 库根目录的
-`.marinmind/marinmind.db`，写入防抖落盘；备份走 `.marginpkg`
-（SQLite + 全部 PDF + 附件的 zip 包，见 docs/使用教程.md）。
+For debugging, symlink or copy this folder into your vault's `.obsidian/plugins/marinmind/` (it must contain `main.js`, `manifest.json`, and `styles.css`), then enable the plugin.
 
-开发调试：将本目录软链或复制到 Obsidian 库的 `.obsidian/plugins/marinmind/`
-（需包含 `main.js`、`manifest.json`、`styles.css`），在设置中启用本插件。
+## 中文说明
 
-## 许可证
+本插件为中文优先开发，完整中文使用教程见 [docs/使用教程.md](docs/使用教程.md)。
 
-MIT
+## License
+
+[MIT](LICENSE)

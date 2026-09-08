@@ -10,6 +10,7 @@ import {
 	renderMapsPage,
 	renderOverviewPage,
 	clearBatchSelection,
+	clearDocBatchSelection,
 	type HomePage,
 } from "./home-pages";
 
@@ -49,6 +50,7 @@ export class MarinMindHomeView extends ItemView {
 		deck: null,
 		tag: null,
 		color: null,
+		flashcard: null, // 130 只显示闪卡开关（null=不限）
 		page: 1,
 	};
 	private cardBusOffs: Array<() => void> = [];
@@ -127,6 +129,8 @@ export class MarinMindHomeView extends ItemView {
 		this.refreshTimer = null;
 		// 74 批选：模块态随视图关闭清空（防下次打开主页时残留勾选模式）
 		clearBatchSelection();
+		// ㊾ 文档批选：同语义清空
+		clearDocBatchSelection();
 	}
 
 	/** 建立侧栏 + 内容区骨架（onOpen 一次；refresh 只重填内容） */
@@ -205,6 +209,8 @@ export class MarinMindHomeView extends ItemView {
 		}
 		// 74 批选：离开卡片页清模式与选择（防回页时行 click 突然变勾选的陈旧态惊喜）
 		if (page !== "cards") clearBatchSelection();
+		// ㊾ 文档批选：同语义（离开文档页清模式与选择）
+		if (page !== "documents") clearDocBatchSelection();
 		this.currentPage = page;
 		for (const [p, el] of this.navCountEls) {
 			// navCountEls 的 key 是导航项，找其父节点切 is-active
@@ -234,6 +240,9 @@ export class MarinMindHomeView extends ItemView {
 				return view.selectedCategory;
 			},
 			setSelectedCategory: (c: CategorySelection) => {
+				// ㊾ 文档批选：切分类清模式与选择（选择只对当前筛选集有意义；此处整页
+				// 重渲染，整清无 chrome 残留——搜索变化只清集不清模式是有意差异）
+				clearDocBatchSelection();
 				this.selectedCategory = c;
 				this.renderCurrentPage();
 			},
