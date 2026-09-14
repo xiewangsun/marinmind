@@ -454,11 +454,11 @@ function parseCardComment(
 		excerptText: joined === "" ? null : joined,
 		excerptRef: ref,
 		note: noteLines !== null ? noteLines.join("\n") : null,
-		// ㊹ 读取归一：blue 是四色化前文字摘录/AI 正文的历史值（视觉一直是黄），
-		// ㊹ 起 blue = 浅蓝真义——存量 blue 卡归一为 yellow（存量文件字节不动，
-		// 随该书下次实质变更顺带重写），参照 normalizeAssetRef 旧前缀归一先例
-		color:
-			typeof json.color === "string" ? (json.color === "blue" ? "yellow" : json.color) : null,
+		// color 原样透传（138 修复：㊹ 曾误判"blue 视觉一直是黄"而读取归一
+		// blue→yellow，实际 blue 自文字摘录闭环（4ec3958）起就是蓝色视觉——归一导致
+		// 存量蓝卡与㊹ 后新建蓝卡重开即变黄，已移除；㊹~138 间被实质变更顺带
+		// 重写为 yellow 的存量卡不自动恢复，需手动改色）
+		color: typeof json.color === "string" ? json.color : null,
 		// 文字摘录线型（77）：损坏/缺失/手写 underline 均归一 null（与序列化省键首尾一致）
 		lineStyle:
 			typeof json.line === "string" && isLineStyle(json.line) && json.line !== "underline"

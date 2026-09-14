@@ -1,4 +1,4 @@
-import { ItemView, Notice, setIcon } from "obsidian";
+import { ItemView, MarkdownRenderer, Notice, setIcon } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import { MarinMindReaderView, READER_VIEW_TYPE } from "../reader/reader-view";
@@ -35,8 +35,11 @@ export const AI_CHAT_VIEW_TYPE = "marinmind-ai-chat";
  * OpenAI search-preview 的 web_search_options / Perplexity sonar 系零参数），
  * 来源提取为可点外链 chip。128 联网三态：厂商搜索（模型自带）→ 插件侧
  * RAG 后备（设置搜索服务后，普通模型先搜后拼【联网搜索资料】围栏；搜索
- * 失败 Notice 降级继续不联网）→ 都无才拦截（文案给双出路）。obsidian
- * 耦合不单测（镜像 reader/review 视图分层先例）；上下文纯逻辑在
+ * 失败 Notice 降级继续不联网）→ 都无才拦截（文案给双出路）。133 回复
+ * 正文 markdown 化：MarkdownRenderer 流式节流重渲 + 完成终渲，游离暂存
+ * 原子换装（135——渲染期间新旧正文不同屏）；136 弃 markdown-preview-view
+ * 类改自绘排版（主题对该类的布局干扰致文字重叠），正文与 chips 分容器。
+ * obsidian 耦合不单测（镜像 reader/review 视图分层先例）；上下文纯逻辑在
  * ai-context、联网识别/来源提取在 ai-provider、引擎层在 web-search-engine
  * （vitest 覆盖）。
  */
@@ -264,10 +267,66 @@ export class AiChatView extends ItemView {
 		userBubble.setText(question);
 		const bubble = this.appendBubble("assistant");
 		bubble.addClass("is-loading");
-		bubble.setText("思考中…");
+		// 正文容器（133）：markdown 渲染进 body，页/来源 chip 挂 bubble 尾——
+		// 重渲正文（原子换装清旧）不吞 chips，chips 后插也永远在正文之下
+		const body = bubble.createDiv();
+		body.setText("思考中…");
 
 		this.abort = new AbortController();
 		let reply = "";
+		// 流式 markdown 渲染（133；135 重叠加固）：节流整段重渲（≥300ms 一轮；
+		// 流中未成对 ** / 半截围栏由下一轮自然修复）。135 前新 host 渲染开始
+		// 即入 DOM、完成才删旧——渲染期间新旧两份正文同屏堆叠（慢渲染/侧栏
+		// 收起渲染挂起时持续可见），表现为文字重叠；改为**游离暂存 + 原子
+		// 换装**：先在移出视口的隐藏容器渲染（镜像 md-outline-measure 量测
+		// 先例），完成后 body.empty() 一步换入——任一时刻 body 只有一份内容。
+		// 并发串行化：在途时新请求只标记补渲，完成后补一轮，防多轮渲染堆积
+		let paintSeq = 0;
+		let painting = false;
+		let repaintDue = false;
+		let lastPaintAt = 0;
+		const paintMd = (): void => {
+			if (painting) {
+				repaintDue = true; // 在途：让路，完成后补渲最新内容
+				return;
+			}
+			painting = true;
+			const seq = ++paintSeq;
+			// 136：不再挂 markdown-preview-view 类——部分主题对该类注入绝对
+			// 定位等布局干扰，窄气泡内高度塌陷导致正文与 chips 同坐标互叠；
+			// 排版全部由 .marinmind-ai-chat-md 自绘（styles.css）
+			const staging = document.createElement("div");
+			staging.className = "marinmind-ai-chat-md";
+			staging.style.cssText =
+				"position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none;";
+			document.body.appendChild(staging);
+			MarkdownRenderer.render(this.app, reply, staging, "", this)
+				.then(() => {
+					if (seq !== paintSeq || !body.isConnected) {
+						staging.remove(); // 过期（有更新一轮）/气泡已弃：丢弃
+						return;
+					}
+					staging.style.cssText = "";
+					body.empty();
+					body.appendChild(staging); // 原子换装：清旧换新一步完成
+					this.listEl.scrollTop = this.listEl.scrollHeight;
+				})
+				.catch(() => {
+					staging.remove();
+					// 渲染失败兜底：最新轮退回纯文本（内容不丢，仅无排版）
+					if (seq === paintSeq && body.isConnected) {
+						body.setText(reply);
+					}
+				})
+				.finally(() => {
+					painting = false;
+					if (repaintDue) {
+						repaintDue = false;
+						paintMd();
+					}
+				});
+			lastPaintAt = Date.now();
+		};
 		// RAG 后备（128）：普通模型先经插件侧搜索取资料（提问词即查询词）——
 		// 失败 Notice 降级继续不联网作答（联网是增强不是依赖，同封面语义）
 		let webContextText: string | undefined;
@@ -301,8 +360,10 @@ export class AiChatView extends ItemView {
 							return;
 						}
 						reply += delta;
-						bubble.setText(reply);
-						this.listEl.scrollTop = this.listEl.scrollHeight;
+						// 节流 markdown 重渲：间隔内只累计不渲染，下一轮补上
+						if (Date.now() - lastPaintAt >= 300) {
+							paintMd();
+						}
 					},
 					onDegraded: () => new Notice("当前网络不支持流式输出，已切换整包返回"),
 					onUsage: (usage) => this.plugin.addAiUsage(usage),
@@ -322,6 +383,7 @@ export class AiChatView extends ItemView {
 					{ role: "user", content: question },
 					{ role: "assistant", content: reply },
 				);
+				paintMd(); // 终渲：节流窗口尾量 + 半截标记一轮成型
 				if (ragSources) {
 					this.renderWebChips(bubble, ragSources);
 				}
@@ -332,7 +394,9 @@ export class AiChatView extends ItemView {
 		} catch (err) {
 			if (err instanceof DOMException && err.name === "AbortError") {
 				// 重置对话中断流：气泡已由 renderEmpty 清除
-				if (bubble.isConnected && !reply.trim()) {
+				if (bubble.isConnected && reply.trim()) {
+					paintMd(); // 中止保部分：已到内容照样格式化成型
+				} else if (bubble.isConnected) {
 					bubble.setText("（已停止）");
 				}
 			} else {
@@ -373,8 +437,8 @@ export class AiChatView extends ItemView {
 		this.listEl.scrollTop = this.listEl.scrollHeight;
 	}
 
-	/** 联网来源 chip 行（105）：镜像 renderPageChips——标题（无标题兜底 host）
-	 *  可点开外部浏览器；前置 globe 小图标与页 chip 区分 */
+	/** 联网来源列表（105；134 下划线文字链；137 纵排一条一行）：标题（无标题
+	 *  兜底 host）可点开外部浏览器；globe + 「来源」标头与正文分隔成引用区 */
 	private renderWebChips(bubble: HTMLElement, sources: WebSource[]): void {
 		if (!bubble.isConnected || sources.length === 0) {
 			return;
@@ -389,6 +453,7 @@ export class AiChatView extends ItemView {
 			attr: { "aria-label": "联网来源" },
 		});
 		setIconSafe(mark, "globe", "search");
+		mark.createSpan({ text: "来源" });
 		for (const s of sources.slice(0, 8)) {
 			let label = s.title.trim();
 			if (!label) {

@@ -13,9 +13,9 @@ import type { Card, LineStyle } from "../types";
  *   名单源 types.ts 的 LINE_STYLES，回退函数 highlightLineStyle）——
  *   建卡线型 = settings.excerptLineStyle 全局单值（只属 text 形态，无 per-tool）
  * - 旧 7 色中 teal/orange/purple/pink 为存量卡色相（CSS 保留旧变量定义继续渲染，
- *   新建卡不再产生）；blue 是四色化前文字摘录/AI 正文的历史值（视觉一直是黄），
- *   读取层归一为 yellow（book-format；旧 legacy-import 同语义，129 批随 sql.js 移除），
- *   ㊹ 起 blue = 浅蓝真义
+ *   新建卡不再产生）；blue 自文字摘录闭环（4ec3958）起即蓝色视觉（㊹ 曾误判
+ *   "视觉一直是黄"做读取归一 blue→yellow，138 已移除——存量与新建蓝卡
+ *   重开不再变黄），㊹ 起 blue 同时是四色体系中的浅蓝真义
  */
 export type HighlightColorValue = "red" | "green" | "blue" | "yellow";
 

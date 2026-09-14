@@ -3513,6 +3513,189 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	color: var(--text-error);
 }
 
+/* —— AI 回复 markdown 正文（133；135/136 重叠加固）—— */
+
+/* 正文自绘排版（136）：不再挂 markdown-preview-view 类——部分主题对该类
+   注入绝对定位等布局干扰，窄气泡内正文脱流、高度塌陷，chips 上浮与正文
+   同坐标互叠（文字重叠缺陷根源）；排版（段距/标题/列表/代码/表格/链接）
+   全部由以下规则自给。气泡版紧凑化：预览默认段距面向整页笔记，收一档；
+   bubble 的 pre-wrap 会把渲染 HTML 里的文本节点再折行，显式归位 normal */
+.marinmind-ai-chat-md {
+	font-size: var(--font-ui-small);
+	white-space: normal;
+	user-select: text;
+	padding: 0;
+	/* 联网回答常含裸长 URL——不断行会横向撑破气泡 */
+	overflow-wrap: anywhere;
+}
+
+/* 布局防线（136）：正文容器与 chips 行显式钉回常规流——即便主题/全局
+   样式注入绝对定位也压不住（脱流即高度塌陷互叠） */
+.marinmind-ai-chat-md,
+.marinmind-ai-chat-chips,
+.marinmind-ai-chat-chip {
+	position: static;
+}
+
+.marinmind-ai-chat-md p,
+.marinmind-ai-chat-md ul,
+.marinmind-ai-chat-md ol,
+.marinmind-ai-chat-md blockquote,
+.marinmind-ai-chat-md pre,
+.marinmind-ai-chat-md table {
+	margin: 0 0 0.5em;
+}
+
+.marinmind-ai-chat-md > :first-child {
+	margin-top: 0;
+}
+
+.marinmind-ai-chat-md > :last-child {
+	margin-bottom: 0;
+}
+
+/* 侧栏窄气泡：标题不做多级放大（一档轻量级差），层级靠粗细与间距 */
+.marinmind-ai-chat-md h1,
+.marinmind-ai-chat-md h2,
+.marinmind-ai-chat-md h3,
+.marinmind-ai-chat-md h4,
+.marinmind-ai-chat-md h5,
+.marinmind-ai-chat-md h6 {
+	margin: 0.8em 0 0.35em;
+	font-weight: 600;
+}
+
+.marinmind-ai-chat-md h1,
+.marinmind-ai-chat-md h2 {
+	font-size: 1.05em;
+}
+
+.marinmind-ai-chat-md h3,
+.marinmind-ai-chat-md h4,
+.marinmind-ai-chat-md h5,
+.marinmind-ai-chat-md h6 {
+	font-size: 1em;
+}
+
+.marinmind-ai-chat-md h1:first-child,
+.marinmind-ai-chat-md h2:first-child,
+.marinmind-ai-chat-md h3:first-child,
+.marinmind-ai-chat-md h4:first-child,
+.marinmind-ai-chat-md h5:first-child,
+.marinmind-ai-chat-md h6:first-child {
+	margin-top: 0;
+}
+
+.marinmind-ai-chat-md ul,
+.marinmind-ai-chat-md ol {
+	padding-inline-start: 1.4em;
+}
+
+.marinmind-ai-chat-md ul {
+	list-style: disc;
+}
+
+.marinmind-ai-chat-md ol {
+	list-style: decimal;
+}
+
+.marinmind-ai-chat-md li {
+	margin: 0.15em 0;
+}
+
+.marinmind-ai-chat-md li > p {
+	margin: 0;
+}
+
+.marinmind-ai-chat-md li > ul,
+.marinmind-ai-chat-md li > ol {
+	margin: 0.15em 0;
+}
+
+/* 链接（自绘，原由 preview-view 主题样式提供）：AI 回答几乎全是外链 */
+.marinmind-ai-chat-md a {
+	color: var(--link-external-color, var(--link-color, var(--interactive-accent)));
+	text-decoration-line: underline;
+	text-underline-offset: 2px;
+	overflow-wrap: anywhere;
+}
+
+.marinmind-ai-chat-md a:hover,
+.marinmind-ai-chat-md a:active {
+	color: var(--link-external-color-hover, var(--link-color-hover, var(--interactive-accent-hover)));
+}
+
+/* 行内代码：浅底圆角小片 */
+.marinmind-ai-chat-md code {
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+	background: var(--background-modifier-border);
+	border-radius: 3px;
+	padding: 0.1em 0.35em;
+}
+
+/* 代码块：窄气泡内横向滚动，不撑破气泡 */
+.marinmind-ai-chat-md pre {
+	overflow-x: auto;
+	max-width: 100%;
+	margin: 0 0 0.5em;
+	padding: 8px 10px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 4px);
+	font-family: var(--font-monospace);
+	font-size: 0.9em;
+	white-space: pre;
+}
+
+.marinmind-ai-chat-md pre code {
+	background: none;
+	padding: 0;
+	font-size: inherit;
+}
+
+/* 表格：窄气泡内横向滚动；单元格最小可读内衬 */
+.marinmind-ai-chat-md table {
+	display: block;
+	overflow-x: auto;
+	max-width: 100%;
+	margin: 0 0 0.5em;
+	border-collapse: collapse;
+}
+
+.marinmind-ai-chat-md th,
+.marinmind-ai-chat-md td {
+	padding: 4px 8px;
+	border: 1px solid var(--background-modifier-border);
+	text-align: left;
+}
+
+.marinmind-ai-chat-md th {
+	font-weight: 600;
+}
+
+.marinmind-ai-chat-md blockquote {
+	margin: 0 0 0.5em;
+	margin-inline: 0;
+	padding: 0 0 0 0.8em;
+	border-left: 2px solid var(--background-modifier-border);
+}
+
+.marinmind-ai-chat-md blockquote > :last-child {
+	margin-bottom: 0;
+}
+
+.marinmind-ai-chat-md hr {
+	margin: 0.8em 0;
+	border: none;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.marinmind-ai-chat-md img {
+	max-width: 100%;
+	height: auto;
+}
+
 .marinmind-ai-chat-chips {
 	display: flex;
 	flex-wrap: wrap;
@@ -3535,19 +3718,49 @@ body.theme-light .marinmind-autoex-badge.is-body {
 	color: var(--text-on-accent);
 }
 
-/* 联网来源 chip（105）：URL 可能很长，截断省略；悬停 title 看全 */
+/* 联网来源链接（105；134 改版）：弃椭圆胶囊与 160px 截断——完整标题可
+   换行显示（悬停 title 看全 URL），下划线文字链样式；页码 chip 仍走胶囊 */
 .marinmind-ai-chat-chip.is-link {
-	max-width: 160px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+	max-width: 100%;
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	white-space: normal;
+	word-break: break-word;
+	text-align: left;
+	text-decoration: underline;
+	text-underline-offset: 2px;
 }
 
-/* 来源行前置的 globe 小图标（105，与页 chip 区分） */
+/* 覆写胶囊 hover 反底（base hover 规则同时作用于两类 chip）：保留下划线，
+   加粗线示反馈 */
+.marinmind-ai-chat-chip.is-link:hover {
+	background: transparent;
+	color: var(--interactive-accent);
+	text-decoration-thickness: 2px;
+}
+
+/* 来源引用区（105；134 下划线文字链；137 纵排）：一条一行纵向列表（横向
+   换行排时短链接挤同行参差），与正文以分隔线划界成独立引用区（参照用户
+   截图展示方式）；页码 chip 行不受影响仍横向胶囊 */
+.marinmind-ai-chat-webchips {
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 3px;
+	margin-top: 8px;
+	padding-top: 6px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+/* 引用区标头：globe 小图标 + 「来源」弱化文字 */
 .marinmind-ai-chat-webmark {
-	display: flex;
+	align-self: flex-start;
+	display: inline-flex;
 	align-items: center;
+	gap: 4px;
+	margin-bottom: 1px;
 	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
 }
 
 .marinmind-ai-chat-webmark .svg-icon {

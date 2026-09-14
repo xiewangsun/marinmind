@@ -398,22 +398,22 @@ describe("book-format 序列化与解析", () => {
 		expect(again).toBe(text);
 	});
 
-	it("㊹ 旧值 blue 读取归一为 yellow（文字摘录历史值让位给浅蓝真义，存量文件字节不动）", () => {
+	it("138 blue 原样透传（㊹ 误归一 blue→yellow 已移除：蓝卡重开不再变黄，往返字节不变）", () => {
 		const c = card({
 			id: "aaaaaaaa-0000-4000-8000-000000000001",
 			excerptType: "text",
-			excerptText: "旧文字卡",
+			excerptText: "蓝文字卡",
 			color: "blue",
 			rects: [{ x: 0.1, y: 0.2, w: 0.5, h: 0.03 }],
 		});
 		const text = serializeBookMd(bookInput({ cards: [c] }));
-		// 序列化不拦：存量文件里就是 blue（打开不落盘契约——未变更不重写）
 		expect(text).toContain(`"color":"blue"`);
 		const parsed = parseBookMd(text, { fileName: "书籍A.md" });
-		expect(parsed.cards[0].color).toBe("yellow");
-		// 再序列化落 yellow：该书下次实质变更时顺带把历史值改写
+		// 读取不归一：存量蓝卡（文字摘录历史值）与新建蓝卡一视同仁保持 blue
+		expect(parsed.cards[0].color).toBe("blue");
+		// 再序列化仍落 blue（打开不落盘契约——未变更不重写，字节稳定）
 		const again = serializeBookMd(bookInput({ cards: parsed.cards }));
-		expect(again).toContain(`"color":"yellow"`);
+		expect(again).toContain(`"color":"blue"`);
 		// 其他颜色值透传不受影响
 		const keep = card({
 			id: "aaaaaaaa-0000-4000-8000-000000000002",
