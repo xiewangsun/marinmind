@@ -216,7 +216,9 @@ async function captureDomRegion(
 	// （页已有 contain-intrinsic-size 实测高度，展开不改总高、不跳滚动条）
 	const prevVisibility = el.style.getPropertyValue("content-visibility");
 	if (prevVisibility !== "visible") {
-		el.setCssProps({ "content-visibility": "visible" }); // 151 审查：静态值走 setCssProps
+		// 151 审查：键用驼峰标识符（setCssProps 内部 camel→kebab 转换；规则对
+		// 带引号连字符键的字面量同样报错—— Cases 3/4，仅 -- 自定义属性豁免）
+		el.setCssProps({ contentVisibility: "visible" });
 	}
 	try {
 		const w = el.clientWidth;
