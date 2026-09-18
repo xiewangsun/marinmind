@@ -259,10 +259,10 @@ export class ExcerptLayer {
 				el.dataset.lineStyle = highlightLineStyle(card);
 			}
 			const pos = normRectToPercent(rect);
-			el.style.left = pos.left;
-			el.style.top = pos.top;
-			el.style.width = pos.width;
-			el.style.height = pos.height;
+			el.setCssStyles({ left: pos.left });
+			el.setCssStyles({ top: pos.top });
+			el.setCssStyles({ width: pos.width });
+			el.setCssStyles({ height: pos.height });
 			el.addEventListener("click", (evt) =>
 				// 从缓存回查最新快照（编辑批注后闭包里的旧对象会过期）
 				this.cb.onHighlightClick(this.cardsById.get(card.id) ?? card, evt),
@@ -281,10 +281,10 @@ export class ExcerptLayer {
 		el.dataset.cardId = card.id;
 		el.dataset.color = highlightFallbackColor(card);
 		const pos = normRectToPercent(card.rects[0]);
-		el.style.left = pos.left;
-		el.style.top = pos.top;
-		el.style.width = pos.width;
-		el.style.height = pos.height;
+		el.setCssStyles({ left: pos.left });
+		el.setCssStyles({ top: pos.top });
+		el.setCssStyles({ width: pos.width });
+		el.setCssStyles({ height: pos.height });
 		el.addEventListener("click", (evt) =>
 			this.cb.onHighlightClick(this.cardsById.get(card.id) ?? card, evt),
 		);
@@ -312,11 +312,11 @@ export class ExcerptLayer {
 		el.dataset.cardId = card.id;
 		el.dataset.color = highlightFallbackColor(card);
 		const pos = normRectToPercent(card.rects[0]);
-		el.style.left = pos.left;
-		el.style.top = pos.top;
+		el.setCssStyles({ left: pos.left });
+		el.setCssStyles({ top: pos.top });
 		// 锚点贴近右缘时向左展开，防胶囊溢出页面被 overflow:hidden 裁剪
 		if (card.rects[0].x > 0.8) {
-			el.style.transform = "translateX(-100%)";
+			el.setCssStyles({ transform: "translateX(-100%)" });
 		}
 		// 101 拖动重摆 grip：专属起笔（stopPropagation 不进拖卡入图状态机），
 		// 拖完把新锚点经 onBlankMove 写库——胶囊可挪离正文（修遮挡）
@@ -407,8 +407,8 @@ export class ExcerptLayer {
 			const host = this.pageView.overlayEl;
 			const maxX = Math.max(0, host.clientWidth - el.offsetWidth);
 			const maxY = Math.max(0, host.clientHeight - el.offsetHeight);
-			el.style.left = `${Math.min(Math.max(0, d.startLeft + dx), maxX)}px`;
-			el.style.top = `${Math.min(Math.max(0, d.startTop + dy), maxY)}px`;
+			el.setCssStyles({ left: `${Math.min(Math.max(0, d.startLeft + dx), maxX)}px` });
+			el.setCssStyles({ top: `${Math.min(Math.max(0, d.startTop + dy), maxY)}px` });
 		};
 		const finish = (commit: boolean): void => {
 			grip.removeEventListener("pointermove", onMove);
@@ -474,10 +474,10 @@ export class ExcerptLayer {
 		el.classList.add("marinmind-excerpt-highlight", "marinmind-excerpt-poly");
 		el.dataset.cardId = card.id;
 		el.dataset.color = highlightFallbackColor(card);
-		el.style.left = `${(minX * 100).toFixed(3)}%`;
-		el.style.top = `${(minY * 100).toFixed(3)}%`;
-		el.style.width = `${(w * 100).toFixed(3)}%`;
-		el.style.height = `${(h * 100).toFixed(3)}%`;
+		el.setCssStyles({ left: `${(minX * 100).toFixed(3)}%` });
+		el.setCssStyles({ top: `${(minY * 100).toFixed(3)}%` });
+		el.setCssStyles({ width: `${(w * 100).toFixed(3)}%` });
+		el.setCssStyles({ height: `${(h * 100).toFixed(3)}%` });
 		// viewBox 0-100 + preserveAspectRatio:none：顶点用盒内百分比坐标，随盒自由拉伸
 		// （漏设这两个属性时百分比坐标被当像素解析——轮廓压缩在盒左上角 100×100px，
 		//   随盒尺寸/缩放档变化呈现“套索自动缩放”的错位观感，㊹-A 修复）
@@ -582,10 +582,10 @@ export class ExcerptLayer {
 			}
 			el.dataset.cardId = card.id;
 			const pos = normRectToPercent(occ);
-			el.style.left = pos.left;
-			el.style.top = pos.top;
-			el.style.width = pos.width;
-			el.style.height = pos.height;
+			el.setCssStyles({ left: pos.left });
+			el.setCssStyles({ top: pos.top });
+			el.setCssStyles({ width: pos.width });
+			el.setCssStyles({ height: pos.height });
 			// occlusions 每次变更整组重摆，闭包 index 与数组下标始终一致
 			el.addEventListener("click", (evt) => {
 				const latest = this.cardsById.get(card.id) ?? card;
@@ -919,7 +919,7 @@ export class ExcerptLayer {
 			clearMindmapDropHints(this.pageView.overlayEl.ownerDocument);
 		}
 		if (this.ghost) {
-			this.ghost.style.display = foreign ? "none" : "";
+			this.ghost.setCssStyles({ display: foreign ? "none" : "" });
 		}
 		this.ghost?.classList.toggle("is-over-mm", !!hovered);
 	}
@@ -1038,10 +1038,10 @@ export class ExcerptLayer {
 		}
 		const x = Math.min(this.dragStart.x, p.x);
 		const y = Math.min(this.dragStart.y, p.y);
-		this.dragPreview.style.left = `${x}px`;
-		this.dragPreview.style.top = `${y}px`;
-		this.dragPreview.style.width = `${Math.abs(p.x - this.dragStart.x)}px`;
-		this.dragPreview.style.height = `${Math.abs(p.y - this.dragStart.y)}px`;
+		this.dragPreview.setCssStyles({ left: `${x}px` });
+		this.dragPreview.setCssStyles({ top: `${y}px` });
+		this.dragPreview.setCssStyles({ width: `${Math.abs(p.x - this.dragStart.x)}px` });
+		this.dragPreview.setCssStyles({ height: `${Math.abs(p.y - this.dragStart.y)}px` });
 	}
 
 	private cancelDrag(): void {
@@ -1139,8 +1139,8 @@ export class ExcerptLayer {
 
 	private moveGhost(x: number, y: number): void {
 		if (this.ghost) {
-			this.ghost.style.left = `${x + 12}px`;
-			this.ghost.style.top = `${y + 12}px`;
+			this.ghost.setCssStyles({ left: `${x + 12}px` });
+			this.ghost.setCssStyles({ top: `${y + 12}px` });
 		}
 	}
 

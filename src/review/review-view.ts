@@ -1029,7 +1029,16 @@ export class MarinMindReviewView extends ItemView {
 						cls: "marinmind-review-ctx-thumb",
 						attr: { title: "点击在脑图中定位此卡片" },
 					});
-					thumb.innerHTML = svg;
+					// 151 审查：innerHTML 赋值禁用——SVG 串经 DOMParser 惰性解析
+					// 后挂载（解析文档不执行脚本；map-thumbnail 产物本就五实体
+					// 转义，双保险）；解析异常（parsererror）弃缩略图不阻断
+					const parsed = new DOMParser().parseFromString(svg, "image/svg+xml");
+					if (
+						parsed.documentElement &&
+						parsed.documentElement.nodeName !== "parsererror"
+					) {
+						thumb.appendChild(parsed.documentElement);
+					}
 					thumb.addEventListener("click", () => {
 						void this.plugin.openMindmapAtCard(mapId, card.id);
 					});

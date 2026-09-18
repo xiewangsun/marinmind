@@ -313,8 +313,8 @@ export class SelectionToolbar {
 			toolbarWidth: this.el.offsetWidth,
 			toolbarHeight: this.el.offsetHeight,
 		});
-		this.el.style.left = `${pos.left}px`;
-		this.el.style.top = `${pos.top}px`;
+		this.el.setCssStyles({ left: `${pos.left}px` });
+		this.el.setCssStyles({ top: `${pos.top}px` });
 		return true;
 	}
 }

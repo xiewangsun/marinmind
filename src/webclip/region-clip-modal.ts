@@ -180,10 +180,10 @@ export class RegionClipModal extends Modal {
 			return;
 		}
 		sel.addClass("is-active");
-		sel.style.left = `${Math.min(start.x, x)}px`;
-		sel.style.top = `${Math.min(start.y, y)}px`;
-		sel.style.width = `${Math.abs(x - start.x)}px`;
-		sel.style.height = `${Math.abs(y - start.y)}px`;
+		sel.setCssStyles({ left: `${Math.min(start.x, x)}px` });
+		sel.setCssStyles({ top: `${Math.min(start.y, y)}px` });
+		sel.setCssStyles({ width: `${Math.abs(x - start.x)}px` });
+		sel.setCssStyles({ height: `${Math.abs(y - start.y)}px` });
 	}
 
 	/** 拖框/单击矩形 → iframe 文档解析命中 → 高亮 + 标签 + 启用确认 */
@@ -219,17 +219,17 @@ export class RegionClipModal extends Modal {
 		const sel = this.selBox;
 		if (sel) {
 			sel.addClass("is-active");
-			sel.style.left = `${r.left}px`;
-			sel.style.top = `${r.top}px`;
-			sel.style.width = `${r.width}px`;
-			sel.style.height = `${r.height}px`;
+			sel.setCssStyles({ left: `${r.left}px` });
+			sel.setCssStyles({ top: `${r.top}px` });
+			sel.setCssStyles({ width: `${r.width}px` });
+			sel.setCssStyles({ height: `${r.height}px` });
 		}
 		const label = this.labelEl;
 		if (label) {
 			label.addClass("is-active");
 			label.setText(describeElement(target));
-			label.style.left = `${Math.max(0, r.left)}px`;
-			label.style.top = `${Math.max(0, r.top - 26)}px`;
+			label.setCssStyles({ left: `${Math.max(0, r.left)}px` });
+			label.setCssStyles({ top: `${Math.max(0, r.top - 26)}px` });
 		}
 		this.confirmBtn?.setDisabled(false);
 		this.setHint(`已选中 ${describeElement(target)}——可拖框重选，或点「确认剪藏」`);

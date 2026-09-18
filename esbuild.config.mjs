@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
-import builtins from "builtin-modules";
+// 151 审查：builtin-modules 包已弃用（es-tooling/module-replacements），node:module 内置同名 API 即官方替代
+import { builtinModules } from "node:module";
 
 // 构建产物顶部的来源说明注释
 const banner = `/*
@@ -33,7 +34,7 @@ const context = await esbuild.context({
 		"@lezer/common",
 		"@lezer/highlight",
 		"@lezer/lr",
-		...builtins,
+		...builtinModules,
 	],
 	format: "cjs",
 	target: "es2018",

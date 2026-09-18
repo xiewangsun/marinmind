@@ -29,7 +29,7 @@ export class HighlightColorModal extends Modal {
 					"aria-label": def.label,
 				},
 			});
-			swatch.style.background = def.swatch;
+			swatch.setCssStyles({ background: def.swatch });
 			if (def.value === this.current) {
 				swatch.classList.add("is-active");
 			}

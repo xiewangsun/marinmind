@@ -83,8 +83,9 @@ export class ReviewStatsModal extends Modal {
 		buckets.forEach((n, i) => {
 			const col = chart.createDiv({ cls: "marinmind-stats-bar-col" });
 			const track = col.createDiv({ cls: "marinmind-stats-bar-track" });
-			track.createDiv({ cls: "marinmind-stats-bar" }).style.height =
-				`${Math.round((n / max) * 100)}%`;
+			track.createDiv({ cls: "marinmind-stats-bar" }).setCssStyles({
+				height: `${Math.round((n / max) * 100)}%`,
+			});
 			col.createDiv({ cls: "marinmind-stats-bar-count", text: n > 0 ? String(n) : "" });
 			col.createDiv({ cls: "marinmind-stats-bar-label", text: i === 0 ? "今天" : `+${i}` });
 		});

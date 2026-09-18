@@ -137,7 +137,7 @@ export class AiOutlineModal extends Modal {
 		const walk = (nodes: OutlineGenNode[], depth: number): void => {
 			for (const node of nodes) {
 				const line = listEl.createDiv({ cls: "marinmind-ai-outline-row" });
-				line.style.marginLeft = `${depth * 18}px`;
+				line.setCssStyles({ marginLeft: `${depth * 18}px` });
 				line.createDiv({ cls: "marinmind-ai-outline-title", text: node.title });
 				line.createDiv({
 					cls: `marinmind-ai-outline-page${node.page == null ? " is-invalid" : ""}`,

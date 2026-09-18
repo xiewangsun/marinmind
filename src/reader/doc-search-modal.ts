@@ -1,7 +1,7 @@
 import { Modal, setIcon } from "obsidian";
 import type { App } from "obsidian";
 import type { DocSearchHit, PdfSearchLine } from "./doc-search";
-import { highlightSnippet, searchTexts, TOTAL_HIT_CAP } from "./doc-search";
+import { searchTexts, snippetSegments, TOTAL_HIT_CAP } from "./doc-search";
 
 /** 输入防抖（毫秒）：扫描比节点搜索重（PDF 逐页 worker 往返），停顿再起 */
 const DEBOUNCE_MS = 250;
@@ -231,7 +231,15 @@ export class DocSearchModal extends Modal {
 				cls: `marinmind-search-modal-item${index === 0 ? " is-selected" : ""}`,
 			});
 			const snip = item.createDiv({ cls: "marinmind-search-modal-snippet" });
-			snip.innerHTML = highlightSnippet(this.query, hit.snippet); // 安全 HTML 单源（已转义+mark）
+			// 151 审查：innerHTML 赋值禁用——分段渲染（命中段 mark 元素，结构性
+			// 免疫注入，替代原「转义 HTML 串」单源）
+			for (const seg of snippetSegments(this.query, hit.snippet)) {
+				if (seg.hit) {
+					snip.createEl("mark", { text: seg.text });
+				} else if (seg.text) {
+					snip.createSpan({ text: seg.text });
+				}
+			}
 			item.createDiv({
 				cls: "marinmind-search-modal-badge",
 				text: this.host.docSearchHitLabel(hit),

@@ -189,12 +189,12 @@ export class LassoTracker {
 		const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 		svg.classList.add("marinmind-lasso-preview");
 		svg.setAttribute("data-color", this.previewColor);
-		svg.style.position = "absolute";
-		svg.style.top = "0";
-		svg.style.left = "0";
-		svg.style.width = "100%";
-		svg.style.height = "100%";
-		svg.style.pointerEvents = "none";
+		svg.setCssStyles({ position: "absolute" });
+		svg.setCssStyles({ top: "0" });
+		svg.setCssStyles({ left: "0" });
+		svg.setCssStyles({ width: "100%" });
+		svg.setCssStyles({ height: "100%" });
+		svg.setCssStyles({ pointerEvents: "none" });
 		const pathEl = document.createElementNS("http://www.w3.org/2000/svg", "path");
 		pathEl.classList.add("marinmind-lasso-path");
 		svg.appendChild(pathEl);

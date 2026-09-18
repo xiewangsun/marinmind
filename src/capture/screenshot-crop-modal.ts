@@ -29,10 +29,10 @@ import {
 
 /** 绝对定位矩形单点赋值 */
 function place(el: HTMLElement, x: number, y: number, w: number, h: number): void {
-	el.style.left = `${x}px`;
-	el.style.top = `${y}px`;
-	el.style.width = `${w}px`;
-	el.style.height = `${h}px`;
+	el.setCssStyles({ left: `${x}px` });
+	el.setCssStyles({ top: `${y}px` });
+	el.setCssStyles({ width: `${w}px` });
+	el.setCssStyles({ height: `${h}px` });
 }
 
 export class ScreenshotCropModal extends Modal {
@@ -142,8 +142,8 @@ export class ScreenshotCropModal extends Modal {
 		const fit = fitSize(naturalW, naturalH, stage?.clientWidth ?? 0, stage?.clientHeight ?? 0);
 		this.dispW = fit.width;
 		this.dispH = fit.height;
-		this.frameEl.style.width = `${this.dispW}px`;
-		this.frameEl.style.height = `${this.dispH}px`;
+		this.frameEl.setCssStyles({ width: `${this.dispW}px` });
+		this.frameEl.setCssStyles({ height: `${this.dispH}px` });
 		this.renderSelection();
 	}
 
@@ -242,7 +242,7 @@ export class ScreenshotCropModal extends Modal {
 			place(bottom, 0, 0, 0, 0);
 			place(left, 0, 0, 0, 0);
 			place(right, 0, 0, 0, 0);
-			this.boxEl.style.display = "none";
+			this.boxEl.setCssStyles({ display: "none" });
 			this.confirmBtn?.setDisabled(true);
 			return;
 		}
@@ -250,7 +250,7 @@ export class ScreenshotCropModal extends Modal {
 		place(bottom, 0, sel.y + sel.h, this.dispW, this.dispH - sel.y - sel.h);
 		place(left, 0, sel.y, sel.x, sel.h);
 		place(right, sel.x + sel.w, sel.y, this.dispW - sel.x - sel.w, sel.h);
-		this.boxEl.style.display = "block";
+		this.boxEl.setCssStyles({ display: "block" });
 		place(this.boxEl, sel.x, sel.y, sel.w, sel.h);
 		// 尺寸标签取物理像素口径（与最终剪贴板内容一致）
 		const phys = physicalCropRect(

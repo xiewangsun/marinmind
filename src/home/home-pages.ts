@@ -778,7 +778,7 @@ function renderFolderNode(
 		kids.classList.toggle("is-collapsed", !open);
 		kids.classList.toggle("is-max", depth >= 6); // 超深截断缩进（R2 挂账顺带消化）
 	}
-	entry.style.paddingLeft = "8px";
+	entry.setCssStyles({ paddingLeft: "8px" });
 	entry.addEventListener("click", () => ctx.setSelectedCategory(node.fullName));
 	entry.addEventListener("contextmenu", (evt) => {
 		evt.preventDefault();
@@ -1260,7 +1260,7 @@ function renderDeckNode(
 		kids.classList.toggle("is-collapsed", !open);
 		kids.classList.toggle("is-max", depth >= 6);
 	}
-	entry.style.paddingLeft = "8px";
+	entry.setCssStyles({ paddingLeft: "8px" });
 	entry.addEventListener("click", () => ctx.setCardsFilter({ deck: node.fullName }));
 	entry.addEventListener("contextmenu", (evt) => {
 		evt.preventDefault();

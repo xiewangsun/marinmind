@@ -35,8 +35,15 @@ export async function measureMdOutline(
 	// 归章/跳原文都按此 y 语义自洽，无需与阅读器逐像素对齐）
 	const host = document.createElement("div");
 	host.className = "markdown-preview-view";
-	host.style.cssText =
-		"position:fixed;left:-10000px;top:0;width:820px;visibility:hidden;pointer-events:none;";
+	// 151 审查：静态样式改 setCssStyles（隐藏量测容器，width 与 md 列宽一致）
+	host.setCssStyles({
+		position: "fixed",
+		left: "-10000px",
+		top: "0",
+		width: "820px",
+		visibility: "hidden",
+		pointerEvents: "none",
+	});
 	document.body.appendChild(host);
 	try {
 		await MarkdownRenderer.render(app, text, host, "", component);

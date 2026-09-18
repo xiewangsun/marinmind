@@ -241,7 +241,7 @@ export class MarinMindMindmapView extends ItemView {
 	private nodes: MindmapNodeWithCard[] = [];
 	private readonly nodeEls = new Map<string, HTMLElement>();
 
-	/** 世界变换：world.style.transform = translate(tx,ty) scale(s) */
+	/** 世界变换：worldEl 的 css transform 承载 translate(tx,ty) 与 scale(s) */
 	/** 世界变换（纯内存不持久）：平移 + 缩放 */
 	private tx = 0;
 	private ty = 0;
@@ -1084,13 +1084,13 @@ export class MarinMindMindmapView extends ItemView {
 		const el = document.createElement("div");
 		el.className = "marinmind-mm-node";
 		el.dataset.nodeId = node.id;
-		el.style.left = `${node.x}px`;
-		el.style.top = `${node.y}px`;
+		el.setCssStyles({ left: `${node.x}px` });
+		el.setCssStyles({ top: `${node.y}px` });
 		// 130 手动调宽：持久化宽覆盖 CSS 默认 200px；拉宽过的节点挂 wide 类
 		// （摘录文字取消三行截断，CSS 控制）。renderNodeContent 只重建三栏子节点
 		// 不触碰 el 自身样式——applyCardUpdate 重渲染路径宽度天然保留
 		if (node.w != null) {
-			el.style.width = `${node.w}px`;
+			el.setCssStyles({ width: `${node.w}px` });
 		}
 		el.classList.toggle("marinmind-mm-node-wide", (node.w ?? NODE_WIDTH) > NODE_WIDTH);
 
@@ -1398,17 +1398,17 @@ export class MarinMindMindmapView extends ItemView {
 			// 路径坐标与 viewBox 位移相消——整图拖动（如拖根节点）连线在屏幕上冻结不动、
 			// 静止时也带 (PAD - minX) 常量偏移（㉜-3 修复：元素位置跟随包围盒）
 			svg.setAttribute("viewBox", `${minX - PAD} ${minY - PAD} ${w} ${h}`);
-			svg.style.left = `${minX - PAD}px`;
-			svg.style.top = `${minY - PAD}px`;
-			svg.style.width = `${w}px`;
-			svg.style.height = `${h}px`;
+			svg.setCssStyles({ left: `${minX - PAD}px` });
+			svg.setCssStyles({ top: `${minY - PAD}px` });
+			svg.setCssStyles({ width: `${w}px` });
+			svg.setCssStyles({ height: `${h}px` });
 		} else {
 			// 无可见节点：视口归零避免残留旧内容
 			svg.removeAttribute("viewBox");
-			svg.style.left = "0px";
-			svg.style.top = "0px";
-			svg.style.width = "0px";
-			svg.style.height = "0px";
+			svg.setCssStyles({ left: "0px" });
+			svg.setCssStyles({ top: "0px" });
+			svg.setCssStyles({ width: "0px" });
+			svg.setCssStyles({ height: "0px" });
 		}
 		const childrenMap = buildChildrenMap(this.nodes);
 		// 框架收纳框先画（垫在连线与节点之下）
@@ -1530,7 +1530,7 @@ export class MarinMindMindmapView extends ItemView {
 		}
 		// 89-B 分支样式无行内 select：当前 mapDefault 由 ⋯ 菜单打开时现读勾选
 		if (this.emptyEl) {
-			this.emptyEl.style.display = this.nodes.length ? "none" : "";
+			this.emptyEl.setCssStyles({ display: this.nodes.length ? "none" : "" });
 			this.syncEmptyHint();
 		}
 		this.syncHeaderButtons();
@@ -1876,7 +1876,9 @@ export class MarinMindMindmapView extends ItemView {
 
 	private applyTransform(): void {
 		if (this.worldEl) {
-			this.worldEl.style.transform = `translate(${this.tx}px, ${this.ty}px) scale(${this.scale})`;
+			this.worldEl.setCssStyles({
+				transform: `translate(${this.tx}px, ${this.ty}px) scale(${this.scale})`,
+			});
 			// 130 调宽把手 CSS 反缩放：屏幕恒宽热区（--mm-scale 在 world 元素上，节点内可用）
 			this.worldEl.style.setProperty("--mm-scale", String(this.scale));
 		}
@@ -2051,8 +2053,8 @@ export class MarinMindMindmapView extends ItemView {
 			y = Math.max(4, p.y - h - NODE_EDITOR_GAP);
 		}
 		x = Math.min(Math.max(4, x), Math.max(4, rect.width - NODE_EDITOR_W - 4));
-		ed.el.style.left = `${x}px`;
-		ed.el.style.top = `${y}px`;
+		ed.el.setCssStyles({ left: `${x}px` });
+		ed.el.setCssStyles({ top: `${y}px` });
 	}
 
 	// ---------- 画布事件 ----------
@@ -2300,7 +2302,7 @@ export class MarinMindMindmapView extends ItemView {
 			}
 			drag.moved = true;
 			// 给 elementFromPoint 让路：命中检测需要穿透被拖节点自身
-			drag.el.style.pointerEvents = "none";
+			drag.el.setCssStyles({ pointerEvents: "none" });
 			drag.el.classList.add("marinmind-mm-dragging");
 			// ㉜ 拖动整棵子树（含折叠隐藏后代）：一次性收集 el 与世界坐标快照，
 			// 后续 pointermove 对整棵子树施加位移——子树不散架。
@@ -2336,8 +2338,8 @@ export class MarinMindMindmapView extends ItemView {
 			node.y = rawY;
 			this.showSnapGuides([]);
 		}
-		drag.el.style.left = `${node.x}px`;
-		drag.el.style.top = `${node.y}px`;
+		drag.el.setCssStyles({ left: `${node.x}px` });
+		drag.el.setCssStyles({ top: `${node.y}px` });
 		// 子树其余节点跟随同一世界位移
 		if (this.subtreeSnapshot) {
 			for (const [nid, snap] of this.subtreeSnapshot) {
@@ -2349,8 +2351,8 @@ export class MarinMindMindmapView extends ItemView {
 					n.x = snap.worldX + (node.x - drag.startPos.x);
 					n.y = snap.worldY + (node.y - drag.startPos.y);
 				}
-				snap.el.style.left = `${n?.x ?? snap.worldX}px`;
-				snap.el.style.top = `${n?.y ?? snap.worldY}px`;
+				snap.el.setCssStyles({ left: `${n?.x ?? snap.worldX}px` });
+				snap.el.setCssStyles({ top: `${n?.y ?? snap.worldY}px` });
 			}
 		}
 		this.drawEdges();
@@ -2397,7 +2399,7 @@ export class MarinMindMindmapView extends ItemView {
 			}
 			return; // 平移结束 / 未升级的点击：无写库
 		}
-		drag.el.style.pointerEvents = "";
+		drag.el.setCssStyles({ pointerEvents: "" });
 		drag.el.classList.remove("marinmind-mm-dragging");
 
 		const node = this.nodes.find((n) => n.id === drag.nodeId);
@@ -2502,7 +2504,7 @@ export class MarinMindMindmapView extends ItemView {
 			return; // 宽度无变化免重排（round 后同值的高频事件）
 		}
 		r.moved = true;
-		r.el.style.width = `${w}px`;
+		r.el.setCssStyles({ width: `${w}px` });
 		r.el.classList.toggle("marinmind-mm-node-wide", w > NODE_WIDTH);
 		if (node) {
 			node.w = w; // 内存就地改写（镜像节点拖动改 x/y 的先例），收笔落库
@@ -2538,7 +2540,7 @@ export class MarinMindMindmapView extends ItemView {
 		}
 		this.beginUndoCapture();
 		node.w = undefined;
-		el.style.width = "";
+		el.setCssStyles({ width: "" });
 		el.classList.remove("marinmind-mm-node-wide");
 		this.plugin.mindmaps.setNodeWidth(nodeId, null);
 		this.drawEdges();
@@ -2573,7 +2575,7 @@ export class MarinMindMindmapView extends ItemView {
 		if (drag?.kind !== "node") {
 			return;
 		}
-		drag.el.style.pointerEvents = "";
+		drag.el.setCssStyles({ pointerEvents: "" });
 		drag.el.classList.remove("marinmind-mm-dragging");
 		if (drag.moved) {
 			// ㉜ 子树恢复：整棵子树回 snap，避免只还原拖动节点留下的错位后代
@@ -2581,8 +2583,8 @@ export class MarinMindMindmapView extends ItemView {
 			if (snapshot) {
 				for (const snap of snapshot.values()) {
 					snap.el.classList.remove("marinmind-mm-subtree-dim");
-					snap.el.style.left = `${snap.startLeft}px`;
-					snap.el.style.top = `${snap.startTop}px`;
+					snap.el.setCssStyles({ left: `${snap.startLeft}px` });
+					snap.el.setCssStyles({ top: `${snap.startTop}px` });
 				}
 				this.subtreeSnapshot = null;
 			}
@@ -2590,8 +2592,8 @@ export class MarinMindMindmapView extends ItemView {
 			if (node) {
 				node.x = drag.startPos.x;
 				node.y = drag.startPos.y;
-				drag.el.style.left = `${node.x}px`;
-				drag.el.style.top = `${node.y}px`;
+				drag.el.setCssStyles({ left: `${node.x}px` });
+				drag.el.setCssStyles({ top: `${node.y}px` });
 				this.drawEdges();
 			}
 		}
@@ -2735,24 +2737,28 @@ export class MarinMindMindmapView extends ItemView {
 		// 世界坐标偏移（worldEl 是 0,0 原点，css transform 已剥离）
 		if (axis === "v") {
 			// 纵向堆叠：插入线横贯目标上下缘，横穿目标水平中心
-			line.style.width = `${tW}px`;
-			line.style.height = `${INSERT_LINE_W}px`;
-			line.style.left = `${target.x}px`;
-			line.style.top =
-				side === "before"
-					? `${target.y - INSERT_LINE_W / 2}px`
-					: `${target.y + tH - INSERT_LINE_W / 2}px`;
+			line.setCssStyles({ width: `${tW}px` });
+			line.setCssStyles({ height: `${INSERT_LINE_W}px` });
+			line.setCssStyles({ left: `${target.x}px` });
+			line.setCssStyles({
+				top:
+					side === "before"
+						? `${target.y - INSERT_LINE_W / 2}px`
+						: `${target.y + tH - INSERT_LINE_W / 2}px`,
+			});
 		} else {
 			// 横向行（tree-down）：插入线竖穿目标左右缘，纵穿目标垂直中心
-			line.style.width = `${INSERT_LINE_W}px`;
-			line.style.height = `${tH}px`;
-			line.style.left =
-				side === "before"
-					? `${target.x - INSERT_LINE_W / 2}px`
-					: `${target.x + tW - INSERT_LINE_W / 2}px`;
-			line.style.top = `${target.y + tH / 2 - INSERT_LINE_W / 2}px`;
+			line.setCssStyles({ width: `${INSERT_LINE_W}px` });
+			line.setCssStyles({ height: `${tH}px` });
+			line.setCssStyles({
+				left:
+					side === "before"
+						? `${target.x - INSERT_LINE_W / 2}px`
+						: `${target.x + tW - INSERT_LINE_W / 2}px`,
+			});
+			line.setCssStyles({ top: `${target.y + tH / 2 - INSERT_LINE_W / 2}px` });
 		}
-		line.style.display = "";
+		line.setCssStyles({ display: "" });
 	}
 
 	private ensureInsertLineEl(): HTMLElement {
@@ -2768,7 +2774,7 @@ export class MarinMindMindmapView extends ItemView {
 		const vp = this.viewportEl;
 		vp?.classList.remove("marinmind-mm-droptarget");
 		if (this.insertLineEl) {
-			this.insertLineEl.style.display = "none";
+			this.insertLineEl.setCssStyles({ display: "none" });
 		}
 		for (const el of this.nodeEls.values()) {
 			el.classList.remove("marinmind-mm-node-droptarget");
@@ -2824,15 +2830,15 @@ export class MarinMindMindmapView extends ItemView {
 			const el = document.createElement("div");
 			el.className = "marinmind-mm-guide";
 			if (g.axis === "v") {
-				el.style.left = `${g.at}px`;
-				el.style.top = `${minY - EXT}px`;
-				el.style.width = "1px";
-				el.style.height = `${maxY - minY + EXT * 2}px`;
+				el.setCssStyles({ left: `${g.at}px` });
+				el.setCssStyles({ top: `${minY - EXT}px` });
+				el.setCssStyles({ width: "1px" });
+				el.setCssStyles({ height: `${maxY - minY + EXT * 2}px` });
 			} else {
-				el.style.left = `${minX - EXT}px`;
-				el.style.top = `${g.at}px`;
-				el.style.width = `${maxX - minX + EXT * 2}px`;
-				el.style.height = "1px";
+				el.setCssStyles({ left: `${minX - EXT}px` });
+				el.setCssStyles({ top: `${g.at}px` });
+				el.setCssStyles({ width: `${maxX - minX + EXT * 2}px` });
+				el.setCssStyles({ height: "1px" });
 			}
 			world.appendChild(el);
 			this.snapGuideEls.push(el);
@@ -2857,8 +2863,8 @@ export class MarinMindMindmapView extends ItemView {
 			const n = this.nodes.find((m) => m.id === id);
 			if (n) {
 				positions.set(id, { x: n.x, y: n.y });
-				snap.el.style.left = `${n.x}px`;
-				snap.el.style.top = `${n.y}px`;
+				snap.el.setCssStyles({ left: `${n.x}px` });
+				snap.el.setCssStyles({ top: `${n.y}px` });
 			}
 		}
 		this.plugin.mindmaps.applyLayout(this.mapId, positions);

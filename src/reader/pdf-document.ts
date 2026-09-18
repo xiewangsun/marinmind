@@ -173,8 +173,8 @@ export class PdfDocument {
 				// 物理像素给 canvas，CSS 尺寸只由 cssScale 决定（与渲染精度解耦）
 				canvas.width = Math.floor(viewport.width);
 				canvas.height = Math.floor(viewport.height);
-				canvas.style.width = `${Math.floor(base.width * cssScale)}px`;
-				canvas.style.height = `${Math.floor(base.height * cssScale)}px`;
+				canvas.setCssStyles({ width: `${Math.floor(base.width * cssScale)}px` });
+				canvas.setCssStyles({ height: `${Math.floor(base.height * cssScale)}px` });
 
 				// willReadFrequently 强制 CPU 后端：部分环境（新版 Electron + Windows 缩放/GPU）
 				// GPU 加速 canvas 位图无法上屏（元素可见、位图全空、无报错），CPU 后端不受影响

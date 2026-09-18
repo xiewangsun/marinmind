@@ -309,11 +309,11 @@ function buildStyleClone(el: HTMLElement, w: number, h: number, opts?: CloneOpti
 		// 无 padding，clientWidth==offsetWidth）；脑图路径传窗口盒（world 是 0×0
 		// transform 容器无自有布局尺寸，见 snapshotElementRegion）。背景显式烘焙保文字可读
 		const bg = opts?.rootBackground ?? getComputedStyle(el).backgroundColor;
-		clone.style.width = `${w}px`;
-		clone.style.height = `${h}px`;
-		clone.style.margin = "0";
-		clone.style.boxSizing = "border-box";
-		clone.style.backgroundColor = isTransparentColor(bg) ? "#ffffff" : bg;
+		clone.setCssStyles({ width: `${w}px` });
+		clone.setCssStyles({ height: `${h}px` });
+		clone.setCssStyles({ margin: "0" });
+		clone.setCssStyles({ boxSizing: "border-box" });
+		clone.setCssStyles({ backgroundColor: isTransparentColor(bg) ? "#ffffff" : bg });
 		if (opts?.stripRootTransform) {
 			// transform 及 CSS Transforms L2 独立属性一并归零（setProperty 防 lib 差异）
 			clone.style.setProperty("transform", "none");

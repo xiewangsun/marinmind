@@ -397,10 +397,10 @@ export class CardPreviewModal extends Modal {
 				cls: "marinmind-photo-occ-block",
 				attr: { title: "点击删除此遮挡" },
 			});
-			block.style.left = `${occ.x * 100}%`;
-			block.style.top = `${occ.y * 100}%`;
-			block.style.width = `${occ.w * 100}%`;
-			block.style.height = `${occ.h * 100}%`;
+			block.setCssStyles({ left: `${occ.x * 100}%` });
+			block.setCssStyles({ top: `${occ.y * 100}%` });
+			block.setCssStyles({ width: `${occ.w * 100}%` });
+			block.setCssStyles({ height: `${occ.h * 100}%` });
 			block.addEventListener("pointerdown", (e) => e.stopPropagation()); // 块上起笔不进拖框
 			block.addEventListener("click", (e) => {
 				e.stopPropagation();

@@ -115,13 +115,13 @@ export class PageView {
 		if (this.reflowContentEl) {
 			// reflow 态（㊻-B md / ㊼ epub）：只定列宽、高度内容驱动（定比公式
 			// 不适用长文）；content-visibility 由修饰类分流（md 关闭，epub 保留 auto）
-			this.el.style.width = `${w}px`;
-			this.el.style.height = "";
+			this.el.setCssStyles({ width: `${w}px` });
+			this.el.setCssStyles({ height: "" });
 			return;
 		}
 		const { width, height } = this.size;
-		this.el.style.width = `${w}px`;
-		this.el.style.height = `${Math.floor((w * height) / width)}px`;
+		this.el.setCssStyles({ width: `${w}px` });
+		this.el.setCssStyles({ height: `${Math.floor((w * height) / width)}px` });
 	}
 
 	/** 当前页显示宽度（供坐标换算用） */
@@ -193,9 +193,9 @@ export class PageView {
 					...specs.map((spec) => {
 						const span = document.createElement("span");
 						span.textContent = spec.text;
-						span.style.left = `${spec.left}px`;
-						span.style.top = `${spec.top}px`;
-						span.style.fontSize = `${spec.fontSize}px`;
+						span.setCssStyles({ left: `${spec.left}px` });
+						span.setCssStyles({ top: `${spec.top}px` });
+						span.setCssStyles({ fontSize: `${spec.fontSize}px` });
 						return span;
 					}),
 				);

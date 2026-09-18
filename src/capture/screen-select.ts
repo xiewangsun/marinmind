@@ -251,8 +251,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#
 	function H() { return img.clientHeight || img.naturalHeight || 1; }
 	function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
 	function place(el, x, y, w, h) {
-		el.style.left = Math.round(x) + "px"; el.style.top = Math.round(y) + "px";
-		el.style.width = Math.round(w) + "px"; el.style.height = Math.round(h) + "px";
+		el.setCssStyles({ left: Math.round(x) + "px" }); el.setCssStyles({ top: Math.round(y) + "px" });
+		el.setCssStyles({ width: Math.round(w) + "px" }); el.setCssStyles({ height: Math.round(h) + "px" });
 	}
 	// 锚点式缩放（与插件侧 resizeFromAnchor 同规则：最小尺寸撑开 + 贴边让位）
 	function fromAnchor(ax, ay, cx, cy) {
@@ -268,24 +268,24 @@ html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#
 		if (!sel) {
 			place(masks[0], 0, 0, W(), H());
 			for (var k = 1; k < 4; k++) { place(masks[k], 0, 0, 0, 0); }
-			box.style.display = "none";
-			bar.style.display = "none";
+			box.setCssStyles({ display: "none" });
+			bar.setCssStyles({ display: "none" });
 			return;
 		}
 		place(masks[0], 0, 0, W(), sel.y);
 		place(masks[1], 0, sel.y + sel.h, W(), H() - sel.y - sel.h);
 		place(masks[2], 0, sel.y, sel.x, sel.h);
 		place(masks[3], sel.x + sel.w, sel.y, W() - sel.x - sel.w, sel.h);
-		box.style.display = "block";
+		box.setCssStyles({ display: "block" });
 		place(box, sel.x, sel.y, sel.w, sel.h);
 		sz.textContent = Math.round(sel.w * img.naturalWidth / W()) + " × " + Math.round(sel.h * img.naturalHeight / H());
-		bar.style.display = drag ? "none" : "block";
+		bar.setCssStyles({ display: drag ? "none" : "block" });
 		if (!drag) {
 			var barH = bar.offsetHeight || 36;
 			var top = sel.y + sel.h + 8;
 			if (top + barH > H()) { top = sel.y - barH - 8; }
-			bar.style.left = Math.max(4, Math.min(sel.x, W() - 180)) + "px";
-			bar.style.top = Math.max(4, top) + "px";
+			bar.setCssStyles({ left: Math.max(4, Math.min(sel.x, W() - 180)) + "px" });
+			bar.setCssStyles({ top: Math.max(4, top) + "px" });
 		}
 	}
 	function confirmAction(key) {
@@ -597,9 +597,10 @@ export async function selectScreenRegion(
 	activeSession = session;
 	// 122：Windows 任务栏为 topmost 层，普通置顶窗盖不住它（冻结画面底部被挡，
 	// 截图恒缺任务栏区域）——Windows 上改用无边框全屏（Snipaste 同款）压过
-	// 任务栏；macOS/Linux 保持普通置顶（全屏有空格切换动画副作用）
-	const fullscreenOverlay =
-		typeof navigator !== "undefined" && /win/i.test(navigator.platform ?? "");
+	// 任务栏；macOS/Linux 保持普通置顶（全屏有空格切换动画副作用）。
+	// OS 判定取 Electron process.platform（审查 151：禁 navigator 探测；
+	// 本模块 obsidian 零依赖不动，process 与 BrowserWindow 同源可用）
+	const fullscreenOverlay = typeof process !== "undefined" && process.platform === "win32";
 	try {
 		fsMod.mkdirSync(paths.dir, { recursive: true });
 		for (const { screen, index } of positioned) {

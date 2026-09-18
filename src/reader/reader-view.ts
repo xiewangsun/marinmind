@@ -2060,10 +2060,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		const pvTop = pv.el.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
 		scroll.scrollTop += pvTop + Math.max(0, line.top * eff - scroll.clientHeight * 0.25);
 		const box = pv.el.createEl("div", { cls: "marinmind-search-flash" });
-		box.style.left = `${Math.max(0, line.left * eff - 4)}px`;
-		box.style.top = `${Math.max(0, line.top * eff - 2)}px`;
-		box.style.height = `${Math.max(12, line.fontSize * eff * 1.3)}px`;
-		box.style.width = `${Math.max(120, pv.el.clientWidth - line.left * eff)}px`;
+		box.setCssStyles({ left: `${Math.max(0, line.left * eff - 4)}px` });
+		box.setCssStyles({ top: `${Math.max(0, line.top * eff - 2)}px` });
+		box.setCssStyles({ height: `${Math.max(12, line.fontSize * eff * 1.3)}px` });
+		box.setCssStyles({ width: `${Math.max(120, pv.el.clientWidth - line.left * eff)}px` });
 		window.setTimeout(() => box.remove(), 1600);
 	}
 

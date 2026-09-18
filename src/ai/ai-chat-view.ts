@@ -298,8 +298,14 @@ export class AiChatView extends ItemView {
 			// 排版全部由 .marinmind-ai-chat-md 自绘（styles.css）
 			const staging = document.createElement("div");
 			staging.className = "marinmind-ai-chat-md";
-			staging.style.cssText =
-				"position:fixed;left:-10000px;top:0;visibility:hidden;pointer-events:none;";
+			// 151 审查：静态样式改 setCssStyles（游离暂存量测容器，见 135/136 批）
+			staging.setCssStyles({
+				position: "fixed",
+				left: "-10000px",
+				top: "0",
+				visibility: "hidden",
+				pointerEvents: "none",
+			});
 			document.body.appendChild(staging);
 			MarkdownRenderer.render(this.app, reply, staging, "", this)
 				.then(() => {
@@ -307,7 +313,13 @@ export class AiChatView extends ItemView {
 						staging.remove(); // 过期（有更新一轮）/气泡已弃：丢弃
 						return;
 					}
-					staging.style.cssText = "";
+					staging.setCssStyles({
+						position: "",
+						left: "",
+						top: "",
+						visibility: "",
+						pointerEvents: "",
+					});
 					body.empty();
 					body.appendChild(staging); // 原子换装：清旧换新一步完成
 					this.listEl.scrollTop = this.listEl.scrollHeight;

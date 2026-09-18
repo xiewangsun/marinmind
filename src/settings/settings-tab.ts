@@ -80,7 +80,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 	/** 工作区（79-1）：联动方向四档——门控自动跟随/点击定位/互关，显式编排不受限 */
 	/** 常规（148 i18n）：界面语言——中文（默认）/ English（缺词条回退中文） */
 	private renderGeneralSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("常规") });
+		new Setting(containerEl).setName(t("常规")).setHeading();
 
 		new Setting(containerEl)
 			.setName("界面语言 / Language")
@@ -108,7 +108,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 	}
 
 	private renderWorkspaceSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("工作区") });
+		new Setting(containerEl).setName(t("工作区")).setHeading();
 
 		new Setting(containerEl)
 			.setName("联动方向")
@@ -131,7 +131,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 外观（㊲ 起，㊸ 三态）：主页主题——Linear 深色（默认）/ Linear 浅色 / 跟随 Obsidian 主题 */
 	private renderAppearanceSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("外观") });
+		new Setting(containerEl).setName(t("外观")).setHeading();
 
 		new Setting(containerEl)
 			.setName("主页主题")
@@ -160,7 +160,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 数据存储：数据目录输入（暂存校验）+ 迁移入口 */
 	private renderDataSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("数据存储") });
+		new Setting(containerEl).setName(t("数据存储")).setHeading();
 
 		const setting = new Setting(containerEl).setName("数据目录").setDesc(this.dataDirDesc());
 		let migrateButton: ButtonComponent | undefined;
@@ -172,11 +172,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 					this.pendingDataDir = result.normalized;
 					this.dataDirError = null;
 					setting.descEl.textContent = this.dataDirDesc();
-					setting.descEl.style.color = "";
+					setting.descEl.setCssStyles({ color: "" });
 				} else {
 					this.dataDirError = result.reason;
 					setting.descEl.textContent = result.reason;
-					setting.descEl.style.color = "var(--text-error)";
+					setting.descEl.setCssStyles({ color: "var(--text-error)" });
 				}
 				migrateButton?.setDisabled(
 					!result.ok || result.normalized === this.plugin.settings.dataDir,
@@ -211,7 +211,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 阅读（75 划选工具栏 / 77 线型）：text 工具划选的交互与文字摘录形态 */
 	private renderReaderSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("阅读") });
+		new Setting(containerEl).setName(t("阅读")).setHeading();
 
 		new Setting(containerEl)
 			.setName("划选工具栏")
@@ -246,7 +246,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 文字识别 (OCR)（83）：识别语言组合 / 拖框即识 / 识别后自动翻译 */
 	private renderOcrSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("文字识别 (OCR)") });
+		new Setting(containerEl).setName(t("文字识别 (OCR)")).setHeading();
 
 		new Setting(containerEl)
 			.setName("识别语言")
@@ -309,7 +309,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 翻译（㉔ + 83 多引擎）：目标语言 / 引擎选择 / 分引擎凭据 */
 	private renderTranslateSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("翻译") });
+		new Setting(containerEl).setName(t("翻译")).setHeading();
 
 		new Setting(containerEl)
 			.setName("目标语言")
@@ -433,7 +433,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** AI（96）：模型预设（OpenAI 兼容端点）/ 测试连接 / 采样与流式 / 上下文预算 / 用量 */
 	private renderAiSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("AI") });
+		new Setting(containerEl).setName(t("AI")).setHeading();
 
 		const presets = sanitizeAiPresets(this.plugin.settings.aiPresets);
 		const activePreset = presets.find((p) => p.id === this.plugin.settings.aiActivePresetId);
@@ -500,7 +500,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				tempSetting.descEl.textContent = ok
 					? tempDesc
 					: "采样温度需为 0-2 之间的数值（默认 0.3）";
-				tempSetting.descEl.style.color = ok ? "" : "var(--text-error)";
+				tempSetting.descEl.setCssStyles({ color: ok ? "" : "var(--text-error)" });
 				if (!ok) {
 					return;
 				}
@@ -540,7 +540,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				budgetSetting.descEl.textContent = ok
 					? budgetDesc
 					: "上下文 token 预算需为 2000-200000 的整数（默认 24000）";
-				budgetSetting.descEl.style.color = ok ? "" : "var(--text-error)";
+				budgetSetting.descEl.setCssStyles({ color: ok ? "" : "var(--text-error)" });
 				if (!ok) {
 					return;
 				}
@@ -709,7 +709,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 复习（65）：批次张数与每日新卡上限（68 起消费——due 分批与新卡混排） */
 	private renderReviewSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("复习") });
+		new Setting(containerEl).setName(t("复习")).setHeading();
 
 		// R3（W-08/W-16）：数字字段 type=number（移动端弹数字键盘）+ 越界行内红字
 		// （镜像数据目录校验先例——Notice 转瞬即逝且与字段分离）
@@ -723,7 +723,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				const n = Math.round(Number(value));
 				const ok = Number.isFinite(n) && n >= 5 && n <= 200;
 				batchSetting.descEl.textContent = ok ? batchDesc : "每批复习张数需为 5-200 的整数";
-				batchSetting.descEl.style.color = ok ? "" : "var(--text-error)";
+				batchSetting.descEl.setCssStyles({ color: ok ? "" : "var(--text-error)" });
 				if (!ok) {
 					return;
 				}
@@ -746,7 +746,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				newPerDaySetting.descEl.textContent = ok
 					? newPerDayDesc
 					: "每日新卡上限需为 0-999 的整数（0 表示不限）";
-				newPerDaySetting.descEl.style.color = ok ? "" : "var(--text-error)";
+				newPerDaySetting.descEl.setCssStyles({ color: ok ? "" : "var(--text-error)" });
 				if (!ok) {
 					return;
 				}
@@ -780,7 +780,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 网页剪藏（113 起 / 124 落点固定）：图片本地化开关（存量剪藏已由启动迁移搬入数据根 clips/） */
 	private renderWebclipSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("网页剪藏") });
+		new Setting(containerEl).setName(t("网页剪藏")).setHeading();
 
 		new Setting(containerEl)
 			.setName("剪藏落点")
@@ -805,7 +805,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 屏幕截图（117/119）：全局热键 + 屏幕剪藏 OCR 开关（仅桌面） */
 	private renderCaptureSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("屏幕截图") });
+		new Setting(containerEl).setName(t("屏幕截图")).setHeading();
 
 		const hotkeyDesc =
 			"在任何应用内按下即冻结全屏直接框选（仅桌面）。格式：修饰键+单键，如 Ctrl+Shift+S；修饰键 Ctrl/Cmd/Alt/Shift/Super（macOS Cmd），至少一个。留空关闭。热键被其他应用占用时注册会失败并提示。";
@@ -817,11 +817,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				if (trimmed && !validateAccelerator(trimmed)) {
 					hotkeySetting.descEl.textContent =
 						"热键格式无效：需「修饰键+单键」（如 Ctrl+Shift+S），且至少一个修饰键。";
-					hotkeySetting.descEl.style.color = "var(--text-error)";
+					hotkeySetting.descEl.setCssStyles({ color: "var(--text-error)" });
 					return;
 				}
 				hotkeySetting.descEl.textContent = hotkeyDesc;
-				hotkeySetting.descEl.style.color = "";
+				hotkeySetting.descEl.setCssStyles({ color: "" });
 				if (trimmed === this.plugin.settings.captureGlobalHotkey) {
 					return; // 值未变化不写盘
 				}
@@ -861,7 +861,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 备份：目录即时保存（只影响后续导出落点，无数据迁移） */
 	private renderBackupSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: t("备份") });
+		new Setting(containerEl).setName(t("备份")).setHeading();
 
 		new Setting(containerEl)
 			.setName("备份目录")

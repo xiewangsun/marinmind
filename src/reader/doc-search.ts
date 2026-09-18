@@ -102,43 +102,41 @@ export function buildSnippet(text: string, start: number, hitLength: number, rad
 	return (from > 0 ? "…" : "") + text.slice(from, to) + (to < text.length ? "…" : "");
 }
 
-/** HTML 转义（91 批高亮拼装用）：匹配在原文上做，分段转义防查询词含 &/引号被转义后错位 */
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#39;");
+/**
+ * 命中摘要分段（91 批语义，151 审查改版）：命中段与非命中段交替返回，
+ * 调用方把 hit 段渲染为 <mark> 元素——不再拼 HTML 串，**结构性免疫注入**
+ * （原「分段转义」纪律随之退役）；匹配语义不变：原文 indexOf 定位（查询词
+ * 含正则元字符/实体字符不错位）+ 非重叠推进。
+ */
+export interface SnippetSegment {
+	text: string;
+	/** true = 命中段（渲染为 mark 元素） */
+	hit: boolean;
 }
 
-/**
- * 命中摘要高亮（91 批）：摘要中全部命中词（大小写不敏感、非重叠）包 <mark>。
- * 安全 HTML 单源：先在**原文**上 indexOf 定位（查询词含正则元字符/实体字符
- * 不错位——若先整体转义再匹配，查询词含 & 会错配 &amp; 里的 amp），再按段
- * 转义拼装。返回值只能直接赋 innerHTML，不得再转义。
- */
-export function highlightSnippet(query: string, snippet: string): string {
+export function snippetSegments(query: string, snippet: string): SnippetSegment[] {
 	const q = query.trim().toLowerCase();
 	if (!q) {
-		return escapeHtml(snippet);
+		return snippet ? [{ text: snippet, hit: false }] : [];
 	}
 	const hay = snippet.toLowerCase();
-	let out = "";
+	const segs: SnippetSegment[] = [];
 	let from = 0;
 	for (;;) {
 		const at = hay.indexOf(q, from);
 		if (at < 0) {
 			break;
 		}
-		out +=
-			escapeHtml(snippet.slice(from, at)) +
-			"<mark>" +
-			escapeHtml(snippet.slice(at, at + q.length)) +
-			"</mark>";
+		if (at > from) {
+			segs.push({ text: snippet.slice(from, at), hit: false });
+		}
+		segs.push({ text: snippet.slice(at, at + q.length), hit: true });
 		from = at + q.length; // 非重叠推进（"aaa" 搜 "aa" 只标首个，防嵌套 mark）
 	}
-	return out + escapeHtml(snippet.slice(from));
+	if (from < snippet.length) {
+		segs.push({ text: snippet.slice(from), hit: false });
+	}
+	return segs;
 }
 
 /**

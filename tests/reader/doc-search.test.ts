@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
 	buildSnippet,
-	highlightSnippet,
 	PAGE_HIT_CAP,
 	pdfLinesFromSpecs,
 	searchTexts,
+	snippetSegments,
 	TOTAL_HIT_CAP,
 	type PdfSearchLine,
 } from "../../src/reader/doc-search";
@@ -151,41 +151,63 @@ describe("searchTexts（三形态统一匹配，89-D）", () => {
 	});
 });
 
-describe("highlightSnippet（命中摘要高亮，91 批）", () => {
+describe("snippetSegments（命中摘要分段，91 批语义；151 审查改版：段落化免拼 HTML）", () => {
 	it("大小写不敏感：查询词与原文大小写不一致也标原文形态", () => {
-		expect(highlightSnippet("consol", "Memory Consolidation")).toBe(
-			"Memory <mark>Consol</mark>idation",
-		);
-		expect(highlightSnippet("memory", "Memory 管理")).toBe("<mark>Memory</mark> 管理");
+		expect(snippetSegments("consol", "Memory Consolidation")).toEqual([
+			{ text: "Memory ", hit: false },
+			{ text: "Consol", hit: true },
+			{ text: "idation", hit: false },
+		]);
+		expect(snippetSegments("memory", "Memory 管理")).toEqual([
+			{ text: "Memory", hit: true },
+			{ text: " 管理", hit: false },
+		]);
 	});
 
-	it("snippet 含 HTML 特殊字符全转义，且 mark 标签不被二次转义", () => {
-		const out = highlightSnippet("命中", `<b>命中</b> & "引号"`);
-		expect(out).toBe("&lt;b&gt;<mark>命中</mark>&lt;/b&gt; &amp; &quot;引号&quot;");
+	it("段落化不再需要转义（HTML 特殊字符原样入段，渲染侧 textContent 天然安全）", () => {
+		expect(snippetSegments("命中", `<b>命中</b>`)).toEqual([
+			{ text: "<b>", hit: false },
+			{ text: "命中", hit: true },
+			{ text: "</b>", hit: false },
+		]);
 	});
 
 	it("多处命中全标", () => {
-		expect(highlightSnippet("ab", "ab_ab_ab")).toBe(
-			"<mark>ab</mark>_<mark>ab</mark>_<mark>ab</mark>",
-		);
+		expect(snippetSegments("ab", "ab_ab_ab")).toEqual([
+			{ text: "ab", hit: true },
+			{ text: "_", hit: false },
+			{ text: "ab", hit: true },
+			{ text: "_", hit: false },
+			{ text: "ab", hit: true },
+		]);
 	});
 
-	it("空/空白 query 返回纯转义（无 mark）", () => {
-		expect(highlightSnippet("", "a<b>c")).toBe("a&lt;b&gt;c");
-		expect(highlightSnippet("   ", "a<b>c")).toBe("a&lt;b&gt;c");
+	it("空/空白 query 返回单段非命中", () => {
+		expect(snippetSegments("", "a<b>c")).toEqual([{ text: "a<b>c", hit: false }]);
+		expect(snippetSegments("   ", "a<b>c")).toEqual([{ text: "a<b>c", hit: false }]);
 	});
 
-	it("query 含 & / < / .* 按字面匹配（先原文定位后分段转义，不错位）", () => {
-		expect(highlightSnippet("a&b", "x a&b y")).toBe("x <mark>a&amp;b</mark> y");
-		expect(highlightSnippet("a<b", "x a<b y")).toBe("x <mark>a&lt;b</mark> y");
-		expect(highlightSnippet(".*", "a .* b")).toBe("a <mark>.*</mark> b");
+	it("query 含 & / < / .* 按字面匹配（原文定位不错位）", () => {
+		expect(snippetSegments("a&b", "x a&b y")).toEqual([
+			{ text: "x ", hit: false },
+			{ text: "a&b", hit: true },
+			{ text: " y", hit: false },
+		]);
+		expect(snippetSegments(".*", "a .* b")).toEqual([
+			{ text: "a ", hit: false },
+			{ text: ".*", hit: true },
+			{ text: " b", hit: false },
+		]);
 	});
 
 	it("重叠不嵌套（aaa 搜 aa 只标首个）", () => {
-		expect(highlightSnippet("aa", "aaa")).toBe("<mark>aa</mark>a");
+		expect(snippetSegments("aa", "aaa")).toEqual([
+			{ text: "aa", hit: true },
+			{ text: "a", hit: false },
+		]);
 	});
 
-	it("无命中返回纯转义", () => {
-		expect(highlightSnippet("丙", "甲乙")).toBe("甲乙");
+	it("无命中返回单段原文", () => {
+		expect(snippetSegments("丙", "甲乙")).toEqual([{ text: "甲乙", hit: false }]);
 	});
 });
