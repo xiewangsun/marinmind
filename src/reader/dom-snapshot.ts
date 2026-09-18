@@ -216,7 +216,7 @@ async function captureDomRegion(
 	// （页已有 contain-intrinsic-size 实测高度，展开不改总高、不跳滚动条）
 	const prevVisibility = el.style.getPropertyValue("content-visibility");
 	if (prevVisibility !== "visible") {
-		el.style.setProperty("content-visibility", "visible");
+		el.setCssProps({ "content-visibility": "visible" }); // 151 审查：静态值走 setCssProps
 	}
 	try {
 		const w = el.clientWidth;
@@ -315,11 +315,14 @@ function buildStyleClone(el: HTMLElement, w: number, h: number, opts?: CloneOpti
 		clone.setCssStyles({ boxSizing: "border-box" });
 		clone.setCssStyles({ backgroundColor: isTransparentColor(bg) ? "#ffffff" : bg });
 		if (opts?.stripRootTransform) {
-			// transform 及 CSS Transforms L2 独立属性一并归零（setProperty 防 lib 差异）
-			clone.style.setProperty("transform", "none");
-			clone.style.setProperty("translate", "none");
-			clone.style.setProperty("rotate", "none");
-			clone.style.setProperty("scale", "none");
+			// transform 及 CSS Transforms L2 独立属性一并归零（setCssProps 内部走
+			// setProperty，防 lib 差异语义不变；151 审查静态值禁 style 直写）
+			clone.setCssProps({
+				transform: "none",
+				translate: "none",
+				rotate: "none",
+				scale: "none",
+			});
 		}
 		return clone;
 	} finally {
