@@ -4,6 +4,11 @@ main.js
 .DS_Store
 coverage/
 
+# 本地开发过程文档（不随仓库公开；本地跟踪继续生效）
+process.md
+CLAUDE.md
+
 # Claude Code 技能安装产物（本机工具配置，非项目源码）
 .agents/
 skills-lock.json
+.claude/
