@@ -1,5 +1,5 @@
 import { Notice, Platform, Plugin, TFile } from "obsidian";
-import type { App, PluginManifest, WorkspaceLeaf, WorkspaceSplit } from "obsidian";
+import type { App, PluginManifest, WorkspaceLeaf } from "obsidian";
 import { MarinMindStore } from "./store/marinmind-store";
 import { loggedReviewTotal, totalReviewsApprox } from "./store/review-log";
 import { CardRepository } from "./db/repositories/card-repo";
@@ -48,10 +48,19 @@ import {
 import { createCaptureTray, destroyCaptureTray, type CaptureTrayLike } from "./capture/tray-icon";
 import { ScreenshotCropModal } from "./capture/screenshot-crop-modal";
 import type { ViewMode } from "./ui/view-mode-bar";
+// 139-H 工作区编排下沉：布局操作函数自本类迁 ui/workspace-layout.ts（零行为变化）；
+// 状态字段与联动事件接线（syncLinkedMindmap/linkedClose*/deepNavigateToCard）留本类
+import {
+	openWorkspace,
+	readerIsLeft,
+	setViewMode as setViewModeLayout,
+	splitMindmapPane,
+} from "./ui/workspace-layout";
 import { MarinMindReviewView, REVIEW_VIEW_TYPE } from "./review/review-view";
 import type { ReviewScope } from "./review/review-view";
 import { DeckPickerModal } from "./review/deck-picker-modal";
 import { ReviewStatsModal } from "./review/review-stats-modal";
+import { exportAnkiCsv } from "./review/anki-export";
 import { exportBackup, promptImportBackup } from "./backup/backup-service";
 import { AttachmentStore } from "./attachments/attachment-store";
 import { removeOrphanAttachments, scanAttachments } from "./attachments/attachment-audit";
@@ -59,6 +68,10 @@ import { importPhotoCard, pickImageFiles, type MediaAnchor } from "./attachments
 import { AudioRecorder, audioDurationSec } from "./reader/audio-recorder";
 import { RecordingBar } from "./reader/recording-bar";
 import { CardEventBus } from "./events/card-bus";
+// 147 通知机制收敛：书签/改名等 leaf 扫描式中介广播改走通用视图注册表
+import { broadcastToViews } from "./events/view-registry";
+// 148 i18n：界面语言装配（设置读取后 setLocale）
+import { setLocale, t } from "./i18n/i18n";
 import {
 	CLIPS_SUBDIR,
 	DEFAULT_BACKUP_DIR,
@@ -85,9 +98,6 @@ import {
 	type ResolvedLocation,
 } from "./storage/data-location";
 import type { Card } from "./types";
-
-/** 工作区预设：study = 阅读 + 复习；research = 阅读 + 脑图 */
-type WorkspaceMode = "study" | "research" | "deep";
 
 /**
  * MarinMind 插件入口
@@ -154,14 +164,15 @@ export default class MarinMindPlugin extends Plugin {
 	 * 视图模式切换的恢复缓存（内存级，读取时优先于 79-3 持久缓存）：隐藏侧
 	 * detach 前保存阅读状态（文件 + 页码）与脑图 id，切回联动/另一侧时原位恢复；
 	 * 跨会话回退源见 settings.workspaceHidden（restoreMapId/hiddenReaderState）。
+	 * 139-H 起随工作区编排下沉 ui/workspace-layout.ts 读写（public 中间态）。
 	 */
-	private lastReaderState: { file: string; page: number | null } | null = null;
-	private lastMapId: string | null = null;
+	public lastReaderState: { file: string; page: number | null } | null = null;
+	public lastMapId: string | null = null;
 	/**
 	 * 深度复习上次导航到的卡（79-5 翻面去重）：评分/翻面会多次 render 同一张
 	 * 当前卡，重复触发阅读滚动 + 脑图定位；换卡才重新导航。
 	 */
-	private lastDeepCardId: string | null = null;
+	public lastDeepCardId: string | null = null;
 	/**
 	 * 用户显式表达的视图模式意图（㊿ 会话内存，重启不保留；null = 未表达）：
 	 * 仅 setViewMode / openWorkspace 置位，手动关标签不更新。联动同步
@@ -170,12 +181,12 @@ export default class MarinMindPlugin extends Plugin {
 	 * 脑图 + 打开文档的并排浏览）不被打扰；联动级联关闭（linkedClose*）
 	 * 置回 null（用户已离开联动）。
 	 */
-	private viewModeIntent: ViewMode | null = null;
+	public viewModeIntent: ViewMode | null = null;
 	/**
 	 * 联动互关抑制标志（㊿）：模式切换（doc/map 分支 detach 隐藏侧）触发的
 	 * 视图 onClose 不得级联关掉保留侧——setViewMode 执行期间置 true。
 	 */
-	private suppressLinkedClose = false;
+	public suppressLinkedClose = false;
 	/** 视图模式变化监听（切换条激活态同步；layout-change 外部变化也触发） */
 	private readonly viewModeListeners = new Set<(mode: ViewMode) => void>();
 	/** 自动入图反馈聚合（㉘）：短窗口内同图累计，批量建卡只弹一条 Notice */
@@ -243,12 +254,12 @@ export default class MarinMindPlugin extends Plugin {
 		// 命令面板入口
 		this.addCommand({
 			id: "open-home",
-			name: "打开 MarinMind 主页",
+			name: t("打开 MarinMind 主页"),
 			callback: () => void this.openHome(),
 		});
 		this.addCommand({
 			id: "open-reader",
-			name: "打开 MarinMind 阅读器（选择文档）",
+			name: t("打开 MarinMind 阅读器（选择文档）"),
 			callback: () => this.openPdfPicker(),
 		});
 		// 库外文档直读入口（㉞；㊼ 起收 PDF/EPUB）：仅桌面注册
@@ -256,44 +267,44 @@ export default class MarinMindPlugin extends Plugin {
 		if (Platform.isDesktopApp) {
 			this.addCommand({
 				id: "open-external-pdf",
-				name: "打开库外文档（桌面）",
+				name: t("打开库外文档（桌面）"),
 				callback: () => void this.openExternalPdf(),
 			});
 			// 114 截图工具：desktopCapturer / getDisplayMedia 仅桌面可靠；
 			// 不注册默认热键（用户可在快捷键面板自绑）
 			this.addCommand({
 				id: "capture-screen",
-				name: "截图并复制到剪贴板（桌面）",
+				name: t("截图并复制到剪贴板（桌面）"),
 				callback: () => void this.captureScreen(),
 			});
 			// 117 外截：Obsidian 窗口挡住目标时的互补路径——隐藏本窗口后拍摄
 			this.addCommand({
 				id: "capture-screen-outside",
-				name: "截图其他窗口（隐藏本窗口后拍摄，桌面）",
+				name: t("截图其他窗口（隐藏本窗口后拍摄，桌面）"),
 				callback: () => void this.captureScreenOutside(),
 			});
 			// 119 屏幕区域剪藏：真实屏幕所见即所得（浏览器页面排版不再失真）
 			this.addCommand({
 				id: "clip-screen-region",
-				name: "剪藏屏幕区域为笔记（桌面）",
+				name: t("剪藏屏幕区域为笔记（桌面）"),
 				callback: () => void this.runScreenCaptureAction("note"),
 			});
 		}
 		// 113 网页剪藏：抓网页正文转 md 笔记文档（全平台——requestUrl 桌面/移动端均可用）
 		this.addCommand({
 			id: "clip-webpage",
-			name: "保存网页为笔记文档",
+			name: t("保存网页为笔记文档"),
 			callback: () => new WebclipModal(this.app, this).open(),
 		});
 		this.addCommand({
 			id: "start-review",
-			name: "开始复习（到期闪卡）",
+			name: t("开始复习（到期闪卡）"),
 			callback: () => void this.openReview(),
 		});
 		// 卡组批：按卡组开练——先弹卡组选择器（卡组由卡片 deck 设置派生，无实体表）
 		this.addCommand({
 			id: "start-review-deck",
-			name: "按卡组复习（选择卡组）",
+			name: t("按卡组复习（选择卡组）"),
 			checkCallback: (checking: boolean) => {
 				// 数据层未就绪时 cards 为空——选组器无从取组，命令不可用
 				if (!this.store) return false;
@@ -305,77 +316,83 @@ export default class MarinMindPlugin extends Plugin {
 				return true;
 			},
 		});
+		// 139-G Anki 导出：闪卡出口通道（CSV 到 vault 根，Anki 文件导入）
+		this.addCommand({
+			id: "export-anki-csv",
+			name: t("导出闪卡为 Anki CSV"),
+			callback: () => void exportAnkiCsv(this),
+		});
 		this.addCommand({
 			id: "open-mindmap",
-			name: "打开思维导图（选择 / 新建脑图）",
+			name: t("打开思维导图（选择 / 新建脑图）"),
 			callback: () => this.openMindmapPicker(),
 		});
 		this.addCommand({
 			id: "open-ai-chat",
-			name: "打开 AI 助手（当前文档问答）",
+			name: t("打开 AI 助手（当前文档问答）"),
 			callback: () => void this.openAiChat(),
 		});
 		this.addCommand({
 			id: "open-workspace-study",
-			name: "学习模式工作区（阅读 + 复习）",
-			callback: () => void this.openWorkspace("study"),
+			name: t("学习模式工作区（阅读 + 复习）"),
+			callback: () => void openWorkspace(this, "study"),
 		});
 		this.addCommand({
 			id: "open-workspace-research",
-			name: "研究模式工作区（阅读 + 脑图）",
-			callback: () => void this.openWorkspace("research"),
+			name: t("研究模式工作区（阅读 + 脑图）"),
+			callback: () => void openWorkspace(this, "research"),
 		});
 		this.addCommand({
 			id: "open-workspace-deep",
-			name: "深度复习工作区（阅读 + 脑图 + 复习）",
-			callback: () => void this.openWorkspace("deep"),
+			name: t("深度复习工作区（阅读 + 脑图 + 复习）"),
+			callback: () => void openWorkspace(this, "deep"),
 		});
 		this.addCommand({
 			id: "view-mode-doc",
-			name: "切换视图：单文档（隐藏脑图）",
+			name: t("切换视图：单文档（隐藏脑图）"),
 			callback: () => void this.setViewMode("doc"),
 		});
 		this.addCommand({
 			id: "view-mode-map",
-			name: "切换视图：单脑图（隐藏文档）",
+			name: t("切换视图：单脑图（隐藏文档）"),
 			callback: () => void this.setViewMode("map"),
 		});
 		this.addCommand({
 			id: "view-mode-linked",
-			name: "切换视图：联动（左文档右脑图）",
+			name: t("切换视图：联动（左文档右脑图）"),
 			callback: () => void this.setViewMode("linked"),
 		});
 		this.addCommand({
 			id: "view-mode-linked-swapped",
-			name: "切换视图：联动（左脑图右文档）",
+			name: t("切换视图：联动（左脑图右文档）"),
 			callback: () => void this.setViewMode("linked-swapped"),
 		});
 		// 视图模式由工作区实际布局推导：手动关标签等外部变化也要刷新切换条激活态
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.notifyViewMode()));
 		this.addCommand({
 			id: "show-stats",
-			name: "复习统计（热力图 / 到期分布 / 库统计）",
+			name: t("复习统计（热力图 / 到期分布 / 库统计）"),
 			callback: () => this.showStats(),
 		});
 		this.addCommand({
 			id: "export-backup",
-			name: "导出备份（.marginpkg）",
+			name: t("导出备份（.marginpkg）"),
 			callback: () => void exportBackup(this),
 		});
 		this.addCommand({
 			id: "import-backup",
-			name: "导入备份（.marginpkg）",
+			name: t("导入备份（.marginpkg）"),
 			callback: () => promptImportBackup(this),
 		});
 		this.addCommand({
 			id: "manage-documents",
-			name: "文档管理（重关联失联文档）",
+			name: t("文档管理（重关联失联文档）"),
 			callback: () => new DocumentManagerModal(this.app, this).open(),
 		});
 		// 84-C 自由媒体卡：无文档归属的照片/语音卡（落「未归类卡片」，主页可见）
 		this.addCommand({
 			id: "capture-photo-card",
-			name: "捕捉照片为自由卡片",
+			name: t("捕捉照片为自由卡片"),
 			checkCallback: (checking: boolean) => {
 				// 数据层未就绪时建不了卡——命令不可用（镜像 start-review-deck 先例）
 				if (!this.store) return false;
@@ -397,7 +414,7 @@ export default class MarinMindPlugin extends Plugin {
 		});
 		this.addCommand({
 			id: "record-free-audio",
-			name: "录音摘录（自由卡片）",
+			name: t("录音摘录（自由卡片）"),
 			checkCallback: (checking: boolean) => {
 				if (!this.store) return false;
 				if (!checking) {
@@ -414,7 +431,7 @@ export default class MarinMindPlugin extends Plugin {
 		// 84-E 附件仓对账：孤儿文件确认后清理（默认取消，宁拒不赌）
 		this.addCommand({
 			id: "cleanup-attachments",
-			name: "扫描并清理附件…",
+			name: t("扫描并清理附件…"),
 			checkCallback: (checking: boolean) => {
 				if (!this.store) return false;
 				if (!checking) {
@@ -596,6 +613,7 @@ export default class MarinMindPlugin extends Plugin {
 	 */
 	private async initStorage(): Promise<void> {
 		this.settings = await loadSettings(this);
+		setLocale(this.settings.language); // 148 i18n：语言在一切视图渲染前装配
 		// 124 剪藏迁移：旧 webclipFolder 字段已退役（loadSettings 不再产出），
 		// 此处从原始记录提取供 initStore 的存量迁移定位旧目录
 		this.legacyWebclipFolder = extractLegacyWebclipFolder(await this.loadData());
@@ -1423,6 +1441,7 @@ export default class MarinMindPlugin extends Plugin {
 	 * 阅读窗格当前文档 id（91 批）：激活标签是阅读器取之，否则回退第一个阅读标签
 	 * （联动单阅读窗格语义，同 ensureMindmapPane 的取叶策略）；无阅读器/未加载为 null。
 	 * 脑图复习入口的「本书」回退源——主题图无绑定文档时跟当前阅读的书。
+	 * 147 注：带激活标签位置语义的查询不收敛注册表（其迭代序非工作区标签序），保持 leaf 扫描。
 	 */
 	activeReaderDocId(): string | null {
 		const readers = this.app.workspace.getLeavesOfType(READER_VIEW_TYPE);
@@ -1606,167 +1625,7 @@ export default class MarinMindPlugin extends Plugin {
 		}
 	}
 
-	// ---------- 多窗格工作区 ----------
-
-	/**
-	 * 工作区预设：阅读窗格 + 右侧复习（study）/ 脑图（research）。
-	 * 已有阅读器标签则复用；没有则弹 PDF 选择器新标签页打开
-	 * （选择器取消无回调 → 放弃布局，不动用户当前笔记）。
-	 */
-	private async openWorkspace(mode: WorkspaceMode): Promise<void> {
-		// 79-5 深度复习是三窗格独立编排，分流到专属方法
-		if (mode === "deep") {
-			await this.openDeepWorkspace();
-			return;
-		}
-		// ㊿ 记录显式意图：研究模式 = 阅读+脑图联动（sync 自动跟随），学习模式无脑图
-		this.viewModeIntent = mode === "research" ? "linked" : "doc";
-		const reader = this.app.workspace.getLeavesOfType(READER_VIEW_TYPE)[0];
-		if (reader) {
-			await this.ensureSidePane(reader, mode);
-			return;
-		}
-		new PdfPickerModal(
-			this.app,
-			(pick) =>
-				void (async () => {
-					const leaf = await this.openInReader(pickTarget(pick));
-					await this.ensureSidePane(leaf, mode);
-				})(),
-			this.recentExternalDocs(),
-			{ plugin: this },
-		).open();
-	}
-
-	/**
-	 * 保证 anchor 右侧并排存在一个 viewType 窗格（79-4 严格布局）：
-	 * - 无目标视图标签 → 从 anchor 右侧分裂新 leaf（split 铁律：setActiveLeaf
-	 *   与 getLeaf 之间零 await），**不装载视图**（调用方以 getViewState().type
-	 *   判定新空 leaf 后自行 setViewState）；
-	 * - 有且与 anchor 不同 tab 组（真并排 / 独立 popout）→ 原样复用返回
-	 *   （用户显式摆出的布局——含 popout——尊重不动）；
-	 * - 有且与 anchor 同组（被拖拽合并成后台标签）→ duplicateLeaf 以该标签为锚
-	 *   在右侧复制（视图 state 随之），校验复制出的类型不符或抛错则**回退手工
-	 *   搬运**：getViewState → anchor 右侧新 leaf setViewState；成功后 detach
-	 *   原后台标签——"阅读器组"里不再藏脑图/复习卡。
-	 * 返回就位 leaf；焦点与装载由调用方负责。
-	 */
-	private async ensureSideLeaf(anchor: WorkspaceLeaf, viewType: string): Promise<WorkspaceLeaf> {
-		const ws = this.app.workspace;
-		const side = ws.getLeavesOfType(viewType)[0];
-		if (!side) {
-			// 新分裂路径（零 await 铁律段，同 ensureSidePane 原实现）
-			ws.setActiveLeaf(anchor, { focus: true });
-			return ws.getLeaf("split", "vertical"); // 'vertical' = 右侧
-		}
-		// 桌面端 leaf 恒挂 WorkspaceTabs：parent 不同 = 不同组（并排或跨窗口）
-		if (side.parent !== anchor.parent) {
-			return side;
-		}
-		// 同组后台标签：复制到 anchor 右侧再撤离原标签
-		try {
-			const dup = await ws.duplicateLeaf(side, "vertical");
-			// 保守校验：duplicateLeaf 对自定义视图的 state 搬运不符即走回退
-			if (dup.getViewState().type !== viewType) {
-				throw new Error("duplicateLeaf 未搬运视图状态");
-			}
-			side.detach();
-			return dup;
-		} catch (err) {
-			console.warn("[MarinMind] duplicateLeaf 拆分失败，回退手工搬运视图状态", err);
-		}
-		// 回退：手工搬运 getViewState → 新 leaf setViewState → 撤离原标签
-		const st = side.getViewState();
-		ws.setActiveLeaf(anchor, { focus: true });
-		const fresh = ws.getLeaf("split", "vertical");
-		await fresh.setViewState(st);
-		side.detach();
-		return fresh;
-	}
-
-	/**
-	 * 保证右侧窗格存在并就位（幂等）：
-	 * 已有目标视图标签则复用（复习重启会话，脑图保持当前图）；没有则从阅读窗格右侧分裂。
-	 */
-	private async ensureSidePane(readerLeaf: WorkspaceLeaf, mode: WorkspaceMode): Promise<void> {
-		const target = mode === "study" ? REVIEW_VIEW_TYPE : MINDMAP_VIEW_TYPE;
-		// 79-4 严格布局：目标视图藏在阅读器同组后台标签时强制拆出右侧再复用
-		const side = await this.ensureSideLeaf(readerLeaf, target);
-		// 新空 leaf（type 不符）装载视图；复用/拆分搬运而来的叶子 state 已就位
-		if (side.getViewState().type !== target) {
-			// ㊴ 研究模式选图：本书摘录目标图 > 上次浏览的图；皆 null（文档加载中）
-			// 不建空态脑图（㊿ 空态 onOpen 会弹选图器），由 loadFromPath 尾部 sync 补建
-			const mapId =
-				mode === "research"
-					? (this.bookTargetMapId(readerLeaf) ?? this.restoreMapId())
-					: null;
-			if (mode !== "research" || mapId) {
-				await side.setViewState(
-					mapId ? { type: MINDMAP_VIEW_TYPE, state: { mapId } } : { type: target },
-				);
-				// 同 splitMindmapPane 双保险（㊿-A）：新视图 onOpen 先于 setState
-				if (mapId && side.view instanceof MarinMindMindmapView) {
-					side.view.loadMap(mapId);
-				}
-			}
-			// 学习模式焦点还给阅读器（研究模式此刻脑图侧可能未建，无焦点可让）
-			this.app.workspace.setActiveLeaf(readerLeaf, { focus: mode === "study" });
-			return;
-		}
-		// 复用既有（或拆分搬运而来）窗格：后台标签可能是延迟加载的占位视图，需先加载
-		await side.loadIfDeferred();
-		if (mode === "study" && side.view instanceof MarinMindReviewView) {
-			// 与"开始复习"命令一致：进入学习状态即重启会话；㊷ 学习模式必有阅读器——
-			// 复习窗格跟随其当前书（无文档/库外读失败时为全部书籍）。卡组批起
-			// scope 是判别联合：必须显式传 null（省略参数 = 保持当前范围，语义相反）
-			const readerDocId =
-				readerLeaf.view instanceof MarinMindReaderView ? readerLeaf.view.docId : null;
-			await side.view.startSession(
-				readerDocId != null ? { kind: "book", docId: readerDocId } : null,
-			);
-		}
-		this.app.workspace.setActiveLeaf(readerLeaf, { focus: true });
-		// 研究模式复用脑图窗格时纠正到本书目标图（㊿ 一对一，弃「保持当前图」）
-		if (mode === "research") {
-			await this.syncLinkedMindmap({ explicit: true }); // 79-1 显式编排绕过门控
-		}
-	}
-
-	/**
-	 * 深度复习工作区（79-5，MN4 学习集式三窗格）：阅读 + 脑图 + 复习。
-	 * 编排：阅读窗格就位（复用/选择器，取消即放弃）→ 研究模式编排补脑图侧
-	 * （ensureSidePane 含 79-4 严格布局 + 显式纠正本书目标图）→ 脑图右侧
-	 * ensureSideLeaf 就位复习窗格（同样防同组后台标签）→ 焦点复习 + 全部书籍
-	 * 开练。viewModeIntent 置 doc（同学习模式）：脑图由复习卡深度导航驱动，
-	 * 不做切文档的书级自动跟随。脑图未建（文档加载中）时复习退居阅读器右侧
-	 * 二窗格，脑图稍后由 loadFromPath 尾部 sync 补建。
-	 */
-	private async openDeepWorkspace(): Promise<void> {
-		this.viewModeIntent = "doc";
-		this.lastDeepCardId = null; // 新会话：首张当前卡也要导航
-		const ws = this.app.workspace;
-		let reader = ws.getLeavesOfType(READER_VIEW_TYPE)[0];
-		if (!reader) {
-			const file = await this.pickPdfFile();
-			if (!file) {
-				return; // 选择器取消：放弃布局，不动用户当前笔记
-			}
-			reader = await this.openInReader(file);
-		}
-		await this.ensureSidePane(reader, "research");
-		// 复习窗格锚在脑图右侧（无脑图时退居阅读器右侧）
-		const anchor = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0] ?? reader;
-		const review = await this.ensureSideLeaf(anchor, REVIEW_VIEW_TYPE);
-		if (review.getViewState().type !== REVIEW_VIEW_TYPE) {
-			await review.setViewState({ type: REVIEW_VIEW_TYPE });
-		}
-		// 焦点给复习（键盘评分依赖 activeLeaf === 复习 leaf）；null = 全部书籍（显式传参）
-		ws.setActiveLeaf(review, { focus: true });
-		await review.loadIfDeferred();
-		if (review.view instanceof MarinMindReviewView) {
-			await review.view.startSession(null);
-		}
-	}
+	// ---------- 多窗格工作区（139-H 布局编排下沉 ui/workspace-layout.ts，此处留事件接线） ----------
 
 	/** 深度复习布局判定（79-5）：阅读/脑图/复习三视图标签齐备（布局推导，同 getViewMode 哲学） */
 	private isDeepReviewLayout(): boolean {
@@ -1835,7 +1694,7 @@ export default class MarinMindPlugin extends Plugin {
 		const readers = this.app.workspace.getLeavesOfType(READER_VIEW_TYPE);
 		const maps = this.app.workspace.getLeavesOfType(MINDMAP_VIEW_TYPE);
 		if (readers.length > 0 && maps.length > 0) {
-			return this.readerIsLeft(readers[0], maps[0]) ? "linked" : "linked-swapped";
+			return readerIsLeft(readers[0], maps[0]) ? "linked" : "linked-swapped";
 		}
 		if (readers.length > 0) {
 			return "doc";
@@ -1844,16 +1703,6 @@ export default class MarinMindPlugin extends Plugin {
 			return "map";
 		}
 		return "linked"; // 两侧皆无：默认联动（首次点开依次补齐两侧）
-	}
-
-	/**
-	 * 93 批：阅读标签是否在脑图标签左侧——两窗格 containerEl 视口 x 坐标比较；
-	 * 同组叠加（后台标签，x 相等）按文档左常态处理。
-	 */
-	private readerIsLeft(reader: WorkspaceLeaf, map: WorkspaceLeaf): boolean {
-		const r = reader.view?.containerEl.getBoundingClientRect().left ?? 0;
-		const m = map.view?.containerEl.getBoundingClientRect().left ?? 0;
-		return r <= m;
 	}
 
 	/** 93 批：当前是否处于任一联动意图（文档左 / 脑图左）——自动跟随与一对一编排的门控 */
@@ -1869,7 +1718,8 @@ export default class MarinMindPlugin extends Plugin {
 		};
 	}
 
-	private notifyViewMode(): void {
+	/** 视图模式变化通知（public 中间态：下沉的 ui/workspace-layout.ts setViewMode finally 调用） */
+	public notifyViewMode(): void {
 		const mode = this.getViewMode();
 		for (const cb of this.viewModeListeners) {
 			cb(mode);
@@ -1877,274 +1727,11 @@ export default class MarinMindPlugin extends Plugin {
 	}
 
 	/**
-	 * 切换到目标视图模式。隐藏 = detach 标签（Obsidian 无"收起窗格"API），
-	 * 隐藏侧状态先存内存缓存（文件 + 页码 / 图 id），切回时原位恢复；
-	 * 取消选择器等一切路径都保证通知切换条刷新（finally）。
+	 * 切换到目标视图模式（薄包装，139-H）：布局编排下沉 ui/workspace-layout.ts，
+	 * 此处保留公开 API 形态（view-mode-bar / 命令调用 plugin.setViewMode）。
 	 */
 	async setViewMode(mode: ViewMode): Promise<void> {
-		this.viewModeIntent = mode; // ㊿ 记录显式意图：联动 sync 仅在任一联动档（isLinkedIntent）下自动跟随
-		// ㊿ 模式切换 detach 隐藏侧期间抑制联动互关（防级联关掉保留侧）
-		this.suppressLinkedClose = true;
-		try {
-			await this.whenReady();
-			if (!this.store) {
-				new Notice("MarinMind：数据层未就绪，无法切换视图");
-				return;
-			}
-			await this.applyViewMode(mode);
-		} catch (err) {
-			// 布局编排失败要可见可诊断，不能变成 "Uncaught (in promise)" 静默搁浅
-			console.error("[MarinMind] 视图模式切换失败", err);
-			new Notice("MarinMind：视图切换失败，详见控制台");
-		} finally {
-			this.suppressLinkedClose = false;
-			this.notifyViewMode();
-		}
-	}
-
-	/** 模式切换布局编排（dbReady + db 判空已由 setViewMode 保证） */
-	private async applyViewMode(mode: ViewMode): Promise<void> {
-		const ws = this.app.workspace;
-		if (mode === "doc") {
-			// 脑图侧：先记下当前图（优先激活标签），再补齐阅读窗格，最后才关脑图标签——
-			// 顺序不能反：先 detach 会把工作区清空，后续 getLeaf("tab") 抛
-			// "No tab group found"（⑲-2 修复，newTabLeaf 兜底为第二道防线）
-			const maps = ws.getLeavesOfType(MINDMAP_VIEW_TYPE);
-			const active = maps.find((l) => l === ws.activeLeaf) ?? maps[0];
-			const st = (active?.getViewState().state ?? {}) as { mapId?: string };
-			if (typeof st.mapId === "string") {
-				this.lastMapId = st.mapId;
-			}
-			await this.ensureReaderPane();
-			if (ws.getLeavesOfType(READER_VIEW_TYPE).length === 0) {
-				return; // PDF 选择器被取消：无阅读窗格可切，中止切换保持现状（脑图不关）
-			}
-			// 102-B 修：摘除脑图侧**之前**先把主页并入阅读器标签组——顺序后置时，
-			// 藏在脑图组的主页（上一轮联动·脑图左并入的）会先被孤悬成左分屏，
-			// await 间隙肉眼可见"主页短暂弹出"再被尾部并入收走；前置后摘除
-			// 脑图即收回空组，主页全程是后台标签
-			const readerPane = ws.getLeavesOfType(READER_VIEW_TYPE)[0];
-			if (readerPane) {
-				await this.mergeHomeIntoPane(readerPane);
-			}
-			for (const leaf of maps) {
-				leaf.detach();
-			}
-			// 79-3 跨会话持久化：隐藏侧脑图写回设置（重启后联动/map 模式可恢复）；
-			// 选择器取消早退路径（上方 return）不写——缓存只反映真实完成的隐藏
-			if (maps.length > 0) {
-				this.settings.workspaceHidden = this.lastMapId ? { mapId: this.lastMapId } : null;
-				await this.saveData({ ...this.settings });
-			}
-			return;
-		}
-		if (mode === "map") {
-			// 阅读侧：保存文件 + 当前页码（优先激活标签），先补齐脑图窗格再关闭全部阅读标签
-			// （同上：先 detach 会空置工作区，⑲-2 修复）。
-			// 页码来自 reader.getState 的实时值——手写/录音由 detach 触发的
-			// onClose → cleanupContent 自动提交，不丢内容
-			const readers = ws.getLeavesOfType(READER_VIEW_TYPE);
-			const active = readers.find((l) => l === ws.activeLeaf) ?? readers[0];
-			const st = (active?.getViewState().state ?? {}) as { file?: string; page?: number };
-			if (typeof st.file === "string") {
-				this.lastReaderState = {
-					file: st.file,
-					page: typeof st.page === "number" ? st.page : null,
-				};
-			}
-			await this.ensureMindmapPane();
-			// 102-B 修：摘除阅读侧之前先把主页并入脑图标签组（同 doc 分支动机）；
-			// 选图器异步未建脑图时本轮跳过——建图走 newTabLeaf 自然落在激活标签组
-			const mapPane = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
-			if (mapPane) {
-				await this.mergeHomeIntoPane(mapPane);
-			}
-			// 脑图侧选图器是异步用户交互（无法在此等待）：选图回调补开脑图时工作区
-			// 可能已空，由 newTabLeaf 兜底；取消选择则空工作区可经「文档」一键恢复
-			// （lastReaderState 已在上方缓存）。
-			for (const leaf of readers) {
-				leaf.detach();
-			}
-			// 79-3 跨会话持久化：隐藏侧阅读状态写回设置（同 doc 分支，取消路径不写）
-			if (readers.length > 0) {
-				this.settings.workspaceHidden = this.lastReaderState
-					? { reader: { ...this.lastReaderState } }
-					: null;
-				await this.saveData({ ...this.settings });
-			}
-			return;
-		}
-		// linked / linked-swapped（93 批四档拆分：文档左常态 / 脑图左镜像）：
-		// 先确保两侧齐备并排（缺侧从对侧右侧分裂补齐），再按目标方位归位——
-		// 方位不符时交换（swapLinkedOrientation），最后 syncLinkedMindmap 纠正
-		// 脑图侧到本书目标图（㊿ 一对一：空态/无关图标签一律被拉回）。
-		const wantMapLeft = mode === "linked-swapped";
-		let reader = ws.getLeavesOfType(READER_VIEW_TYPE)[0];
-		let map = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
-		if (!reader && !map) {
-			// 两侧皆无：先开阅读器（必经选择器），再从其右侧分裂脑图（方位随后统一归位）
-			const file = await this.pickPdfFile();
-			if (!file) {
-				return;
-			}
-			const leaf = await this.openInReader(file);
-			await this.splitMindmapPane(leaf);
-			reader = ws.getLeavesOfType(READER_VIEW_TYPE)[0];
-			map = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
-			if (!reader || !map) {
-				return; // 选图器取消/文档未加载完：脑图未建，保持现状（loadFromPath 尾部 sync 补）
-			}
-		} else if (reader && !map) {
-			await this.splitMindmapPane(reader);
-			map = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
-			if (!map) {
-				return; // 选图器取消/文档加载中：无脑图可编排
-			}
-		} else if (!reader && map) {
-			const file = await this.pickRestoredPdf();
-			if (!file) {
-				return; // 取消选择：不动布局
-			}
-			ws.setActiveLeaf(map, { focus: true });
-			const side = ws.getLeaf("split", "vertical");
-			await this.openInReader(file, undefined, undefined, side);
-			reader = ws.getLeavesOfType(READER_VIEW_TYPE)[0];
-			if (!reader) {
-				return;
-			}
-		}
-		// 两侧齐备：79-4 严格布局——脑图若被拖进阅读器同组（后台标签）先强制拆出
-		if (!reader || !map) {
-			return; // 类型收窄守卫（上方各分支理论上都已 return 或补齐）
-		}
-		await this.ensureSideLeaf(reader, MINDMAP_VIEW_TYPE);
-		const mapLeftNow = !this.readerIsLeft(reader, map);
-		if (mapLeftNow !== wantMapLeft) {
-			await this.swapLinkedOrientation(wantMapLeft);
-			reader = ws.getLeavesOfType(READER_VIEW_TYPE)[0];
-			map = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
-			if (!reader || !map) {
-				return; // 交换失败（无状态可重开）：按现状保持
-			}
-		}
-		ws.setActiveLeaf(reader, { focus: true });
-		await this.syncLinkedMindmap({ explicit: true }); // 79-1 切换条显式编排绕过门控
-		// 102 修：主页并入左侧窗格标签组（文档左/脑图左各取其左）作后台标签——
-		// 方位交换重开对侧后主页最易被孤悬成分屏；sync 可能重建脑图叶，此处现取
-		const leftPane = ws.getLeavesOfType(wantMapLeft ? MINDMAP_VIEW_TYPE : READER_VIEW_TYPE)[0];
-		if (leftPane) {
-			await this.mergeHomeIntoPane(leftPane);
-		}
-	}
-
-	/**
-	 * 主页并入 primary 所在标签组（102 修）：视图模式编排（分裂补侧、detach 隐藏侧、
-	 * 方位交换重开）可能把主页孤悬成独立窗格——与文档/脑图并排形成分屏。约定：
-	 * 文档/脑图单侧视图并入唯一窗格、联动视图并入左侧窗格，作**后台标签**——
-	 * 随时点标签回主页，不再占一块分屏。已同组（从主页开文档的常态）幂等跳过；
-	 * popout 独立窗口的主页不动（getRoot 跨窗口判定，尊重用户显式布局）。
-	 * 并入 = 记录视图状态 → detach 原叶 → createLeafInParent 组尾建**后台标签**
-	 * （102-A：不激活不切可见页——getLeaf("tab") 会把新标签顶成组内可见页，
-	 * 主页渲染完才切回，肉眼可见"主页弹出几秒才缩回标签"）→ 恢复状态并剥离
-	 * active 位（导航页随 getState 持久化）。
-	 */
-	private async mergeHomeIntoPane(primary: WorkspaceLeaf): Promise<void> {
-		const ws = this.app.workspace;
-		let merged = false;
-		for (const home of ws.getLeavesOfType(HOME_VIEW_TYPE)) {
-			if (home.parent === primary.parent) {
-				continue; // 已在目标组（前台/后台标签皆算）
-			}
-			if (home.getRoot() !== primary.getRoot()) {
-				continue; // 跨窗口（popout）：不把主页拉离用户显式摆放的窗口
-			}
-			const st = home.getViewState();
-			home.detach();
-			// children 不在 public .d.ts：运行时取组内标签数作插入位（桌面端
-			// parent 恒挂 WorkspaceTabs，同 ensureSideLeaf 假设）
-			const count = (primary.parent as { children?: unknown[] }).children?.length ?? 0;
-			const fresh = ws.createLeafInParent(primary.parent as WorkspaceSplit, count);
-			// 剥离 active 位：并入的是后台标签，不抢组内可见页
-			await fresh.setViewState({ ...st, active: false });
-			merged = true;
-		}
-		if (merged) {
-			// 双保险：若 setViewState 激活了新叶，激活标签还回主窗格
-			ws.setActiveLeaf(primary, { focus: false });
-		}
-	}
-
-	/**
-	 * 93 批：交换联动布局方位。Obsidian 无公开 API 把已有窗格移到另一侧
-	 * （getLeaf("split") 只向激活标签右侧分裂）——采用"记状态 → detach 一侧 →
-	 * 从锚定侧右侧重开"实现交换：
-	 * - 目标脑图左：缓存文件+页码（优先激活标签，同 map 分支），detach 全部阅读
-	 *   标签，从脑图右侧重开阅读器（页码原位恢复；detach 触发的 onClose 自动
-	 *   提交手写/录音，不丢内容）；
-	 * - 目标文档左：detach 全部脑图标签，从阅读侧右侧按选图优先级重开
-	 *   （splitMindmapPane：本书目标图 > lastMapId）。
-	 * 调用方保证两侧标签齐备且方位确需交换。
-	 */
-	private async swapLinkedOrientation(wantMapLeft: boolean): Promise<void> {
-		const ws = this.app.workspace;
-		const readers = ws.getLeavesOfType(READER_VIEW_TYPE);
-		const maps = ws.getLeavesOfType(MINDMAP_VIEW_TYPE);
-		if (readers.length === 0 || maps.length === 0) {
-			return;
-		}
-		if (wantMapLeft) {
-			const active = readers.find((l) => l === ws.activeLeaf) ?? readers[0];
-			const st = (active?.getViewState().state ?? {}) as { file?: string; page?: number };
-			if (typeof st.file !== "string") {
-				return; // 无文件状态可重开：保持现状
-			}
-			const page = typeof st.page === "number" ? st.page : null;
-			this.lastReaderState = { file: st.file, page };
-			const map = maps[0];
-			// 102-B 修：摘除阅读侧之前先把主页并入脑图组（幸存侧）——后置会在
-			// openInReader 的 PDF 秒级重载间隙里把主页孤悬成可见分屏
-			await this.mergeHomeIntoPane(map);
-			for (const leaf of readers) {
-				leaf.detach();
-			}
-			ws.setActiveLeaf(map, { focus: true });
-			const side = ws.getLeaf("split", "vertical");
-			await this.openInReader(st.file, page ?? undefined, undefined, side);
-			ws.setActiveLeaf(map, { focus: false });
-			return;
-		}
-		const reader = readers[0];
-		// 102-B 修：同上，摘除脑图侧之前并入幸存的阅读组
-		await this.mergeHomeIntoPane(reader);
-		for (const leaf of maps) {
-			leaf.detach();
-		}
-		await this.splitMindmapPane(reader);
-	}
-
-	/**
-	 * 从 anchor 右侧分裂脑图窗格：选图优先级见 bookTargetMapId（㊴），回退
-	 * lastMapId（过渡展示，加载完成后 syncLinkedMindmap 会纠正到本书目标图）。
-	 * 两者皆 null（文档加载中未 upsert）时**不建空态脑图**——空态 onOpen 会弹
-	 * 选图器（㊿ 消灭联动弹窗路径），由 loadFromPath 尾部的 sync 补建。
-	 */
-	private async splitMindmapPane(anchor: WorkspaceLeaf): Promise<void> {
-		const ws = this.app.workspace;
-		const mapId = this.bookTargetMapId(anchor) ?? this.restoreMapId();
-		if (!mapId) {
-			// 文档尚未加载完成：联动 sync（loadFromPath 尾部）稍后补建，此处静默
-			return;
-		}
-		// split 锚点是"调用时刻的激活 leaf"：setActiveLeaf 与 getLeaf 之间不得有 await
-		ws.setActiveLeaf(anchor, { focus: true });
-		const side = ws.getLeaf("split", "vertical");
-		await side.setViewState({ type: MINDMAP_VIEW_TYPE, state: { mapId } });
-		// 双保险（㊿-A）：Obsidian 新视图 onOpen 先于 setState——若 mapId 未及
-		// 送达（版本差异），此处显式加载；已加载则幂等重拉
-		if (side.view instanceof MarinMindMindmapView) {
-			side.view.loadMap(mapId);
-		}
-		ws.setActiveLeaf(anchor, { focus: false });
+		await setViewModeLayout(this, mode);
 	}
 
 	/**
@@ -2196,7 +1783,7 @@ export default class MarinMindPlugin extends Plugin {
 		}
 		const mapLeaf = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
 		if (!mapLeaf) {
-			await this.splitMindmapPane(reader); // 补建（splitMindmapPane 内部同源选图）
+			await splitMindmapPane(this, reader); // 补建（splitMindmapPane 内部同源选图）
 			return;
 		}
 		const cur = (mapLeaf.getViewState().state ?? {}) as { mapId?: string };
@@ -2249,46 +1836,11 @@ export default class MarinMindPlugin extends Plugin {
 		}
 	}
 
-	/** 保证阅读窗格存在：已有则聚焦；缓存可恢复则带页码重开；否则弹 PDF 选择器 */
-	private async ensureReaderPane(): Promise<void> {
-		const ws = this.app.workspace;
-		const reader = ws.getLeavesOfType(READER_VIEW_TYPE)[0];
-		if (reader) {
-			ws.setActiveLeaf(reader, { focus: true });
-			return;
-		}
-		const file = await this.pickRestoredPdf();
-		if (file) {
-			// 79-3 页码同走合并读取（内存优先、持久回退），重开回到隐藏前页
-			await this.openInReader(file, this.hiddenReaderState()?.page ?? undefined);
-		}
-	}
-
-	/** 保证脑图窗格存在：已有则聚焦；选图优先级见 bookTargetMapId（㊴），否则弹选图器 */
-	private async ensureMindmapPane(): Promise<void> {
-		const ws = this.app.workspace;
-		const map = ws.getLeavesOfType(MINDMAP_VIEW_TYPE)[0];
-		if (map) {
-			ws.setActiveLeaf(map, { focus: true });
-			return;
-		}
-		// 调用时机（applyViewMode map 分支）阅读标签尚未 detach，可解析本书目标图
-		const readers = ws.getLeavesOfType(READER_VIEW_TYPE);
-		const mapId =
-			this.bookTargetMapId(readers.find((l) => l === ws.activeLeaf) ?? readers[0]) ??
-			this.restoreMapId();
-		if (mapId) {
-			await this.openMindmap(mapId);
-		} else {
-			this.openMindmapPicker();
-		}
-	}
-
 	/**
 	 * 隐藏阅读侧缓存读取（79-3）：内存 lastReaderState 优先，重启后回退
 	 * data.json 持久化的 workspaceHidden.reader；两侧皆无返回 null。
 	 */
-	private hiddenReaderState(): { file: string; page: number | null } | null {
+	public hiddenReaderState(): { file: string; page: number | null } | null {
 		return this.lastReaderState ?? this.settings.workspaceHidden?.reader ?? null;
 	}
 
@@ -2296,7 +1848,7 @@ export default class MarinMindPlugin extends Plugin {
 	 * lastMapId 可恢复则返回：内存（本会话）优先，79-3 起重启后回退设置持久
 	 * 缓存；图已不存在（被删）时探活失败返回 null。
 	 */
-	private restoreMapId(): string | null {
+	public restoreMapId(): string | null {
 		const id = this.lastMapId ?? this.settings.workspaceHidden?.mapId ?? null;
 		return id && this.mindmaps.get(id) ? id : null;
 	}
@@ -2305,7 +1857,7 @@ export default class MarinMindPlugin extends Plugin {
 	 * 当前阅读文档的摘录目标图 id（㊴ 视图切换自动定位）：见 bookTargetByFilePath。
 	 * 阅读窗格缺失/未登记文档返回 null（调用方回退 lastMapId/等待联动 sync）。
 	 */
-	private bookTargetMapId(reader: WorkspaceLeaf | undefined): string | null {
+	public bookTargetMapId(reader: WorkspaceLeaf | undefined): string | null {
 		if (!reader) {
 			return null;
 		}
@@ -2344,7 +1896,7 @@ export default class MarinMindPlugin extends Plugin {
 	 * 库内路径经 vault 解析 TFile，库外绝对路径（㉞）桌面端 stat 探活；
 	 * 否则弹快速选择器；取消返回 null（调用方放弃布局，不动现状）。
 	 */
-	private async pickRestoredPdf(): Promise<TFile | string | null> {
+	public async pickRestoredPdf(): Promise<TFile | string | null> {
 		// 79-3：内存缓存优先，重启后回退设置持久化的隐藏阅读侧
 		const cached = this.hiddenReaderState()?.file;
 		if (cached) {
@@ -2364,7 +1916,7 @@ export default class MarinMindPlugin extends Plugin {
 	}
 
 	/** PDF 快速选择器包装为 Promise：选择回调 / 关闭取消（onClose 兜底 resolve null） */
-	private pickPdfFile(): Promise<TFile | string | null> {
+	public pickPdfFile(): Promise<TFile | string | null> {
 		return new Promise((resolve) => {
 			let settled = false;
 			const modal = new PdfPickerModal(
@@ -2445,28 +1997,24 @@ export default class MarinMindPlugin extends Plugin {
 		return locateCardInActiveMindmaps(cardId);
 	}
 
-	/** 书签跨阅读标签同步（㊳）：同文档的全部阅读视图刷新侧栏（侧栏未开 no-op） */
+	/** 书签跨阅读标签同步（㊳）：同文档的全部阅读视图刷新侧栏（侧栏未开 no-op；147 起走通用视图注册表广播） */
 	refreshReaderBookmarks(docId: string): void {
-		for (const leaf of this.app.workspace.getLeavesOfType(READER_VIEW_TYPE)) {
-			const view = leaf.view;
-			if (view instanceof MarinMindReaderView && view.docId === docId) {
+		broadcastToViews<MarinMindReaderView>(READER_VIEW_TYPE, (view) => {
+			if (view.docId === docId) {
 				view.refreshBookmarks();
 			}
-		}
+		});
 	}
 
 	/**
 	 * 库外文档改名跟随分发（㊳ fs watcher）：打开中的阅读视图更新内存路径键。
 	 * 补齐 vault rename 监听覆盖不到的库外绝对路径；不重载内容（字节同源，
-	 * pdf-cache 键与文档记录均指向新路径）。
+	 * pdf-cache 键与文档记录均指向新路径）。147 起走通用视图注册表广播。
 	 */
 	applyExternalRename(oldPath: string, newPath: string): void {
-		for (const leaf of this.app.workspace.getLeavesOfType(READER_VIEW_TYPE)) {
-			const view = leaf.view;
-			if (view instanceof MarinMindReaderView) {
-				view.followExternalRename(oldPath, newPath);
-			}
-		}
+		broadcastToViews<MarinMindReaderView>(READER_VIEW_TYPE, (view) => {
+			view.followExternalRename(oldPath, newPath);
+		});
 	}
 
 	private showStats(): void {

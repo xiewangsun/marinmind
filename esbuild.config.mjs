@@ -39,6 +39,9 @@ const context = await esbuild.context({
 	target: "es2018",
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
+	// 生产构建压缩（139-B）：仅去空白/短变量（标准压缩非混淆，社区插件允许），
+	// dev 保持可读便于断点调试
+	minify: prod,
 	treeShaking: true,
 	outfile: "main.js",
 });

@@ -272,6 +272,21 @@ export function filterDocsByQuery(docs: readonly BookDocument[], query: string):
 	);
 }
 
+/**
+ * 按关键词过滤卡片（139-F 全文搜索）：摘录正文（text/OCR 结果）/ 批注 / 标签
+ * 三字段小写包含，保持传入序；query 空白 → 原样拷贝。媒体卡（无正文）靠
+ * 批注/标签命中，纯媒体无文字卡不出现在结果（宁缺不误配）。
+ */
+export function filterCardsByQuery(cards: readonly Card[], query: string): Card[] {
+	const q = query.trim().toLowerCase();
+	if (!q) return [...cards];
+	return cards.filter((c) => {
+		if (c.excerptText?.toLowerCase().includes(q)) return true;
+		if (c.note?.toLowerCase().includes(q)) return true;
+		return c.tags.some((t) => t.toLowerCase().includes(q));
+	});
+}
+
 /** 卡片筛选条件（null = 不限；tag 含即命中——卡可多标签） */
 export interface CardsFilter {
 	documentId: string | null;

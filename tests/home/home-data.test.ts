@@ -11,6 +11,7 @@ import {
 	distinctDecks,
 	distinctTags,
 	filterCards,
+	filterCardsByQuery,
 	filterDocsByCategory,
 	filterDocsByQuery,
 	formatRelativeTime,
@@ -305,6 +306,33 @@ describe("filterDocsByQuery（㊲ 文档搜索）", () => {
 
 	it("无命中 → 空数组", () => {
 		expect(filterDocsByQuery(docs, "不存在")).toEqual([]);
+	});
+});
+
+describe("filterCardsByQuery（139-F 卡片全文搜索）", () => {
+	const cards = [
+		card({ id: "t1", excerptText: "强化学习是机器学习分支", note: null, tags: [] }),
+		card({ id: "n1", excerptText: null, note: "梯度下降笔记", tags: [] }),
+		card({ id: "g1", excerptText: null, note: null, tags: ["英语", "GRE"] }),
+		card({ id: "m1", excerptText: null, note: null, tags: [] }), // 纯媒体卡无文字
+	];
+
+	it("空 query 原样返回（拷贝）", () => {
+		const out = filterCardsByQuery(cards, "  ");
+		expect(out.map((c) => c.id)).toEqual(["t1", "n1", "g1", "m1"]);
+		expect(out).not.toBe(cards);
+	});
+
+	it("正文/批注/标签三字段命中，大小写不敏感，保序", () => {
+		expect(filterCardsByQuery(cards, "机器学习").map((c) => c.id)).toEqual(["t1"]); // 正文
+		expect(filterCardsByQuery(cards, "笔记").map((c) => c.id)).toEqual(["n1"]); // 批注
+		expect(filterCardsByQuery(cards, "gre").map((c) => c.id)).toEqual(["g1"]); // 标签小写
+		expect(filterCardsByQuery(cards, "学习").map((c) => c.id)).toEqual(["t1"]); // 非子串误配
+	});
+
+	it("无文字字段（纯媒体卡）与无命中 → 不出现", () => {
+		expect(filterCardsByQuery(cards, "英语").map((c) => c.id)).toEqual(["g1"]); // m1 无文字不命中
+		expect(filterCardsByQuery(cards, "不存在")).toEqual([]);
 	});
 });
 

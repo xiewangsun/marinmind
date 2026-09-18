@@ -24,6 +24,7 @@ import {
 	distinctTags,
 	EXCERPT_LABELS,
 	filterCards,
+	filterCardsByQuery,
 	filterDocsByCategory,
 	filterDocsByQuery,
 	flattenCategoryTree,
@@ -66,6 +67,9 @@ export interface HomeRenderCtx {
 	/** 卡片页筛选与分页（视图持有，刷新不丢；筛选条件变化自动回第 1 页） */
 	readonly cardsFilter: CardsPageState;
 	setCardsFilter(patch: Partial<CardsPageState>): void;
+	/** 卡片页搜索关键词（139-F；视图持有，整页重渲染回填不抢焦点；输入时只局部刷新列表） */
+	readonly cardQuery: string;
+	setCardQuery(q: string): void;
 	refresh(): void;
 }
 
@@ -1595,8 +1599,20 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 	// 76 显式清单 union：空卡组持久可见（镜像分类树）
 	renderDeckTree(folders, ctx, buildDeckTree(allCards, plugin.store?.getDecks() ?? []), allCards);
 
-	// ---- 右列：筛选行 + 结果列表（doc-list-wrap 为纯结构布局类，两页共用） ----
+	// ---- 右列：搜索行 + 筛选行 + 结果列表（doc-list-wrap 为纯结构布局类，两页共用） ----
 	const listWrap = body.createDiv({ cls: "marinmind-home-doc-list-wrap" });
+	// 139-F 卡片全文搜索：摘录正文（text/OCR）/批注/标签小写包含。
+	// 搜索行只在整页渲染时重建；输入仅局部刷新下方结果区（中文 IME 组字不被打断）
+	const searchRow = listWrap.createDiv({ cls: "marinmind-home-search-row" });
+	const search = searchRow.createEl("input", {
+		cls: "marinmind-home-search",
+		attr: {
+			type: "text",
+			placeholder: "搜索卡片正文、批注或标签…",
+			"aria-label": "搜索卡片（正文、批注或标签）",
+		},
+	});
+	search.value = ctx.cardQuery;
 	// 筛选行：卡组树栏收起单钮（镜像文档页 panel-left 先例：就地切换不重建 DOM）+
 	// 书籍/形态/标签/颜色四下拉（卡组维度 73 起由左列树唯一承载，原卡组下拉删除）
 	const filterRow = listWrap.createDiv({ cls: "marinmind-home-cards-filter" });
@@ -1684,207 +1700,236 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 		} else {
 			batchSelectMode = true;
 		}
-		ctx.refresh(); // 整页重渲染显隐勾选框（卡片页无输入框，无 IME 顾虑）
+		ctx.refresh(); // 整页重渲染显隐勾选框（搜索框随之重建并回填值；按钮点击无 IME 组字顾虑）
 	});
 	enableKeyboardActivation(batchBtn);
 
-	// ---- 结果列表（筛选 → 分页切片；空态与分页条渲染进右列——左列树常驻不被吞） ----
-	const filtered = filterCards(allCards, ctx.cardsFilter, flashIds);
-	const pageCards = paginate(filtered, ctx.cardsFilter.page, CARDS_PAGE_SIZE);
-	// 74 批选存活修剪：选择只经本页操作产生，外部删卡后残留 id 清掉（计数不失真）
-	if (batchSelectedIds.size > 0) {
-		const alive = new Set(allCards.map((c) => c.id));
-		for (const id of [...batchSelectedIds]) {
-			if (!alive.has(id)) batchSelectedIds.delete(id);
-		}
-	}
-	const countEl = filterRow.createDiv({
-		cls: "marinmind-home-cards-count",
-		text: batchSelectMode
-			? `已选 ${batchSelectedIds.size} / ${filtered.length} 张`
-			: `${filtered.length} 张`,
-	});
-	// 74 批选模式：本页全选/删除所选（复习入口让位——纯选择语义）
-	if (batchSelectMode) {
-		const selectPageBtn = filterRow.createEl("button", {
-			cls: "marinmind-home-cards-review",
-			text: "全选本页",
-			attr: { type: "button", title: "勾选/取消当前页全部卡片" },
-		});
-		selectPageBtn.addEventListener("click", () => {
-			const pageIds = pageCards.map((c) => c.id);
-			const allIn = pageIds.length > 0 && pageIds.every((id) => batchSelectedIds.has(id));
-			for (const id of pageIds) {
-				if (allIn) batchSelectedIds.delete(id);
-				else batchSelectedIds.add(id);
-			}
-			// 就地更新本页行勾选态（不整页重建）
-			for (const rowEl of listWrap.querySelectorAll<HTMLElement>(
-				".marinmind-home-card-row",
-			)) {
-				const id = rowEl.getAttribute("data-card-id");
-				if (id != null) applyBatchRowState(rowEl, batchSelectedIds.has(id));
-			}
-			batchUiSync?.();
-		});
-		const deleteBtn = filterRow.createEl("button", {
-			cls: "marinmind-home-cards-review marinmind-home-batch-delete",
-			text: `删除 ${batchSelectedIds.size} 张`,
-			attr: { type: "button", title: "删除全部已勾选卡片" },
-		});
-		deleteBtn.addEventListener("click", () => {
-			const ids = [...batchSelectedIds];
-			if (ids.length === 0) return;
-			new ConfirmModal(
-				plugin.app,
-				"批量删除卡片",
-				`将删除所选 ${ids.length} 张卡片，连同附件、双向链接、脑图节点与复习进度，且无法恢复。`,
-				() => {
-					let deleted = 0;
-					for (const id of ids) {
-						const card = plugin.cards.get(id);
-						if (!card) continue; // 已被外部删除（存活修剪兜底，理论不达）
-						deleteCardCascade(plugin, card);
-						deleted++;
-					}
-					new Notice(`已删除 ${deleted} 张卡片`);
-					clearBatchSelection();
-					// 立即退出批选态重渲染；后续 cardBus removed 事件再经 100ms
-					// 尾随防抖合并刷新一次（含全部删光无事件也已有本次兜底）
-					ctx.refresh();
-				},
-			).open();
-		});
-		// 127 批量移动文档：选目标（文档或未归类）→ 含锚点卡先警告（移动即清锚点）
-		// → 逐卡 move（异常逐卡跳过计数）——目标消失等竞态不阻断整批
-		const moveBtn = filterRow.createEl("button", {
-			cls: "marinmind-home-cards-review",
-			text: `移动 ${batchSelectedIds.size} 张`,
-			attr: { type: "button", title: "移动所选卡片到其他文档（原文锚点将清除）" },
-		});
-		moveBtn.addEventListener("click", () => {
-			const ids = [...batchSelectedIds];
-			if (ids.length === 0) return;
-			const first = plugin.cards.get(ids[0]);
-			new DocumentAssignModal(plugin.app, plugin, first?.documentId ?? null, (item) => {
-				const targetId = item.kind === "doc" ? item.doc.id : null;
-				const targetLabel = item.kind === "doc" ? item.doc.title : "未归类卡片";
-				const doMove = (): void => {
-					let moved = 0;
-					for (const id of ids) {
-						if (!plugin.cards.get(id)) continue; // 已被外部删除（存活修剪兜底）
-						try {
-							plugin.cards.move(id, targetId);
-							moved++;
-						} catch (err) {
-							console.warn("[MarinMind] 卡片移动失败（已跳过）", err);
-						}
-					}
-					new Notice(`已移动 ${moved} 张卡片到「${targetLabel}」`);
-					clearBatchSelection();
-					ctx.refresh();
-				};
-				// 带原文锚点的卡移动即清锚点——确认弹窗明示（不静默丢定位）
-				const anchored = ids.filter((id) => {
-					const c = plugin.cards.get(id);
-					return c != null && (c.page != null || c.rects.length > 0 || c.polygon != null);
-				}).length;
-				if (anchored > 0) {
-					new ConfirmModal(
-						plugin.app,
-						"移动卡片",
-						`所选 ${ids.length} 张卡片中 ${anchored} 张带原文锚点，移动后页码/区域定位将被清除（卡片内容、附件与复习进度保留）。继续？`,
-						doMove,
-					).open();
-				} else {
-					doMove();
-				}
-			}).open();
-		});
-		batchUiSync = () => {
-			countEl.setText(`已选 ${batchSelectedIds.size} / ${filtered.length} 张`);
-			const pageIds = pageCards.map((c) => c.id);
-			selectPageBtn.setText(
-				pageIds.length > 0 && pageIds.every((id) => batchSelectedIds.has(id))
-					? "取消本页"
-					: "全选本页",
-			);
-			const n = batchSelectedIds.size;
-			deleteBtn.setText(`删除 ${n} 张`);
-			deleteBtn.classList.toggle("is-disabled", n === 0);
-			deleteBtn.setAttribute("aria-disabled", String(n === 0));
-			moveBtn.setText(`移动 ${n} 张`);
-			moveBtn.classList.toggle("is-disabled", n === 0);
-			moveBtn.setAttribute("aria-disabled", String(n === 0));
-		};
-		batchUiSync();
-	} else {
-		batchUiSync = null;
-	}
-	// 卡组路径选中时给「复习本组」直达入口——activeDeckPath 剥哨兵：未分组/全部
-	// 无「组」可练不出现（73 坑 A；openReviewDeck 按子树开练与树选中同语义）
-	const deckPath = activeDeckPath(ctx.cardsFilter.deck);
-	if (deckPath && !batchSelectMode) {
-		const link = filterRow.createEl("button", {
-			cls: "marinmind-home-cards-review",
-			text: "复习本组",
-			attr: { type: "button", title: "按当前卡组（含子卡组）开始复习" },
-		});
-		link.addEventListener("click", () => void plugin.openReviewDeck(deckPath));
-	}
-	// 70 任一筛选激活时给「复习筛选结果」入口：当前六维筛选取 id 集 → cards 范围开练
-	const filterActive = (Object.keys(ctx.cardsFilter) as (keyof typeof ctx.cardsFilter)[]).some(
-		(k) => k !== "page" && ctx.cardsFilter[k] != null,
-	);
-	if (filterActive && !batchSelectMode) {
-		const link = filterRow.createEl("button", {
-			cls: "marinmind-home-cards-review",
-			text: "复习筛选结果",
-			attr: { type: "button", title: "按当前筛选条件复习到期卡片" },
-		});
-		link.addEventListener("click", () => {
-			const ids = filterCards(allCards, ctx.cardsFilter, flashIds).map((c) => c.id);
-			void plugin.openReviewCards(ids, "筛选结果");
-		});
-	}
-	if (filtered.length === 0) {
-		emptyHint(
-			listWrap,
-			plugin.cards.count() === 0
-				? "还没有卡片——在阅读器中摘录即自动生成。"
-				: "当前筛选条件下没有卡片。",
+	// ---- 结果区（139-F 局部刷新闭包，镜像文档页 rerenderList 先例）----
+	// 搜索输入只重建本区（计数/批量行/复习入口/列表/分页都依赖结果集），
+	// 搜索行与筛选行不动——中文 IME 组字与焦点不受扰。
+	const resultHost = listWrap.createDiv();
+	const rerenderList = (): void => {
+		resultHost.empty();
+		// 六维筛选 → 关键词过滤（正文/批注/标签）→ 分页切片；空态与分页条渲染进
+		// 右列——左列树常驻不被吞
+		const filtered = filterCardsByQuery(
+			filterCards(allCards, ctx.cardsFilter, flashIds),
+			ctx.cardQuery,
 		);
-		return;
-	}
-	renderCardRows(listWrap, plugin, pageCards, { ctx });
+		const pageCards = paginate(filtered, ctx.cardsFilter.page, CARDS_PAGE_SIZE);
+		// 74 批选存活修剪：选择只经本页操作产生，外部删卡后残留 id 清掉（计数不失真）
+		if (batchSelectedIds.size > 0) {
+			const alive = new Set(allCards.map((c) => c.id));
+			for (const id of [...batchSelectedIds]) {
+				if (!alive.has(id)) batchSelectedIds.delete(id);
+			}
+		}
+		// 操作行（复用筛选行 flex 布局）：计数 + 批选钮/复习入口——依赖结果集的
+		// 动态件全部落局部刷新区，搜索/筛选变化即重建（标签计数不失真）
+		const actionRow = resultHost.createDiv({ cls: "marinmind-home-cards-filter" });
+		const countEl = actionRow.createDiv({
+			cls: "marinmind-home-cards-count",
+			text: batchSelectMode
+				? `已选 ${batchSelectedIds.size} / ${filtered.length} 张`
+				: `${filtered.length} 张`,
+		});
+		// 74 批选模式：本页全选/删除所选（复习入口让位——纯选择语义）
+		if (batchSelectMode) {
+			const selectPageBtn = actionRow.createEl("button", {
+				cls: "marinmind-home-cards-review",
+				text: "全选本页",
+				attr: { type: "button", title: "勾选/取消当前页全部卡片" },
+			});
+			selectPageBtn.addEventListener("click", () => {
+				const pageIds = pageCards.map((c) => c.id);
+				const allIn = pageIds.length > 0 && pageIds.every((id) => batchSelectedIds.has(id));
+				for (const id of pageIds) {
+					if (allIn) batchSelectedIds.delete(id);
+					else batchSelectedIds.add(id);
+				}
+				// 就地更新本页行勾选态（不整页重建）
+				for (const rowEl of resultHost.querySelectorAll<HTMLElement>(
+					".marinmind-home-card-row",
+				)) {
+					const id = rowEl.getAttribute("data-card-id");
+					if (id != null) applyBatchRowState(rowEl, batchSelectedIds.has(id));
+				}
+				batchUiSync?.();
+			});
+			const deleteBtn = actionRow.createEl("button", {
+				cls: "marinmind-home-cards-review marinmind-home-batch-delete",
+				text: `删除 ${batchSelectedIds.size} 张`,
+				attr: { type: "button", title: "删除全部已勾选卡片" },
+			});
+			deleteBtn.addEventListener("click", () => {
+				const ids = [...batchSelectedIds];
+				if (ids.length === 0) return;
+				new ConfirmModal(
+					plugin.app,
+					"批量删除卡片",
+					`将删除所选 ${ids.length} 张卡片，连同附件、双向链接、脑图节点与复习进度，且无法恢复。`,
+					() => {
+						let deleted = 0;
+						for (const id of ids) {
+							const card = plugin.cards.get(id);
+							if (!card) continue; // 已被外部删除（存活修剪兜底，理论不达）
+							deleteCardCascade(plugin, card);
+							deleted++;
+						}
+						new Notice(`已删除 ${deleted} 张卡片`);
+						clearBatchSelection();
+						// 立即退出批选态重渲染；后续 cardBus removed 事件再经 100ms
+						// 尾随防抖合并刷新一次（含全部删光无事件也已有本次兜底）
+						ctx.refresh();
+					},
+				).open();
+			});
+			// 127 批量移动文档：选目标（文档或未归类）→ 含锚点卡先警告（移动即清锚点）
+			// → 逐卡 move（异常逐卡跳过计数）——目标消失等竞态不阻断整批
+			const moveBtn = actionRow.createEl("button", {
+				cls: "marinmind-home-cards-review",
+				text: `移动 ${batchSelectedIds.size} 张`,
+				attr: { type: "button", title: "移动所选卡片到其他文档（原文锚点将清除）" },
+			});
+			moveBtn.addEventListener("click", () => {
+				const ids = [...batchSelectedIds];
+				if (ids.length === 0) return;
+				const first = plugin.cards.get(ids[0]);
+				new DocumentAssignModal(plugin.app, plugin, first?.documentId ?? null, (item) => {
+					const targetId = item.kind === "doc" ? item.doc.id : null;
+					const targetLabel = item.kind === "doc" ? item.doc.title : "未归类卡片";
+					const doMove = (): void => {
+						let moved = 0;
+						for (const id of ids) {
+							if (!plugin.cards.get(id)) continue; // 已被外部删除（存活修剪兜底）
+							try {
+								plugin.cards.move(id, targetId);
+								moved++;
+							} catch (err) {
+								console.warn("[MarinMind] 卡片移动失败（已跳过）", err);
+							}
+						}
+						new Notice(`已移动 ${moved} 张卡片到「${targetLabel}」`);
+						clearBatchSelection();
+						ctx.refresh();
+					};
+					// 带原文锚点的卡移动即清锚点——确认弹窗明示（不静默丢定位）
+					const anchored = ids.filter((id) => {
+						const c = plugin.cards.get(id);
+						return (
+							c != null && (c.page != null || c.rects.length > 0 || c.polygon != null)
+						);
+					}).length;
+					if (anchored > 0) {
+						new ConfirmModal(
+							plugin.app,
+							"移动卡片",
+							`所选 ${ids.length} 张卡片中 ${anchored} 张带原文锚点，移动后页码/区域定位将被清除（卡片内容、附件与复习进度保留）。继续？`,
+							doMove,
+						).open();
+					} else {
+						doMove();
+					}
+				}).open();
+			});
+			batchUiSync = () => {
+				countEl.setText(`已选 ${batchSelectedIds.size} / ${filtered.length} 张`);
+				const pageIds = pageCards.map((c) => c.id);
+				selectPageBtn.setText(
+					pageIds.length > 0 && pageIds.every((id) => batchSelectedIds.has(id))
+						? "取消本页"
+						: "全选本页",
+				);
+				const n = batchSelectedIds.size;
+				deleteBtn.setText(`删除 ${n} 张`);
+				deleteBtn.classList.toggle("is-disabled", n === 0);
+				deleteBtn.setAttribute("aria-disabled", String(n === 0));
+				moveBtn.setText(`移动 ${n} 张`);
+				moveBtn.classList.toggle("is-disabled", n === 0);
+				moveBtn.setAttribute("aria-disabled", String(n === 0));
+			};
+			batchUiSync();
+		} else {
+			batchUiSync = null;
+		}
+		// 卡组路径选中时给「复习本组」直达入口——activeDeckPath 剥哨兵：未分组/全部
+		// 无「组」可练不出现（73 坑 A；openReviewDeck 按子树开练与树选中同语义）
+		const deckPath = activeDeckPath(ctx.cardsFilter.deck);
+		if (deckPath && !batchSelectMode) {
+			const link = actionRow.createEl("button", {
+				cls: "marinmind-home-cards-review",
+				text: "复习本组",
+				attr: { type: "button", title: "按当前卡组（含子卡组）开始复习" },
+			});
+			link.addEventListener("click", () => void plugin.openReviewDeck(deckPath));
+		}
+		// 70 任一筛选（或 139-F 搜索词）激活时给「复习筛选结果」入口：当前可见集
+		// 取 id → cards 范围开练（搜索与所见即所练一致）
+		const filterActive =
+			(Object.keys(ctx.cardsFilter) as (keyof typeof ctx.cardsFilter)[]).some(
+				(k) => k !== "page" && ctx.cardsFilter[k] != null,
+			) || ctx.cardQuery.trim() !== "";
+		if (filterActive && !batchSelectMode) {
+			const link = actionRow.createEl("button", {
+				cls: "marinmind-home-cards-review",
+				text: "复习筛选结果",
+				attr: { type: "button", title: "按当前筛选与搜索条件复习到期卡片" },
+			});
+			link.addEventListener("click", () => {
+				const ids = filterCardsByQuery(
+					filterCards(allCards, ctx.cardsFilter, flashIds),
+					ctx.cardQuery,
+				).map((c) => c.id);
+				void plugin.openReviewCards(ids, "筛选结果");
+			});
+		}
+		if (filtered.length === 0) {
+			emptyHint(
+				resultHost,
+				plugin.cards.count() === 0
+					? "还没有卡片——在阅读器中摘录即自动生成。"
+					: "当前筛选或搜索条件下没有卡片。",
+			);
+			return;
+		}
+		renderCardRows(resultHost, plugin, pageCards, { ctx });
 
-	// ---- 分页条（仅一页时隐藏；页码越界按最后一页显示） ----
-	const totalPages = pageCount(filtered.length, CARDS_PAGE_SIZE);
-	if (totalPages <= 1) return;
-	const cur = Math.min(ctx.cardsFilter.page, totalPages);
-	const pager = listWrap.createDiv({ cls: "marinmind-home-pager" });
-	const prev = pager.createDiv({ cls: "marinmind-home-pager-btn" });
-	// P2-1：分页箭头 ‹› → lucide chevron（与复习导航条同款图标语言）
-	setIcon(prev.createSpan({ cls: "marinmind-home-pager-icon" }), "chevron-left");
-	prev.createSpan({ text: "上一页" });
-	if (cur <= 1) {
-		prev.addClass("is-disabled");
-		prev.setAttribute("aria-disabled", "true"); // P0-1：禁用态语义化（无 tabindex，键盘不进入）
-	} else {
-		enableKeyboardActivation(prev);
-		prev.addEventListener("click", () => ctx.setCardsFilter({ page: cur - 1 }));
-	}
-	pager.createDiv({ cls: "marinmind-home-pager-info", text: `第 ${cur} / ${totalPages} 页` });
-	const next = pager.createDiv({ cls: "marinmind-home-pager-btn" });
-	setIcon(next.createSpan({ cls: "marinmind-home-pager-icon" }), "chevron-right");
-	next.createSpan({ text: "下一页" });
-	if (cur >= totalPages) {
-		next.addClass("is-disabled");
-		next.setAttribute("aria-disabled", "true");
-	} else {
-		enableKeyboardActivation(next);
-		next.addEventListener("click", () => ctx.setCardsFilter({ page: cur + 1 }));
-	}
+		// ---- 分页条（仅一页时隐藏；页码越界按最后一页显示） ----
+		const totalPages = pageCount(filtered.length, CARDS_PAGE_SIZE);
+		if (totalPages <= 1) return;
+		const cur = Math.min(ctx.cardsFilter.page, totalPages);
+		const pager = resultHost.createDiv({ cls: "marinmind-home-pager" });
+		const prev = pager.createDiv({ cls: "marinmind-home-pager-btn" });
+		// P2-1：分页箭头 ‹› → lucide chevron（与复习导航条同款图标语言）
+		setIcon(prev.createSpan({ cls: "marinmind-home-pager-icon" }), "chevron-left");
+		prev.createSpan({ text: "上一页" });
+		if (cur <= 1) {
+			prev.addClass("is-disabled");
+			prev.setAttribute("aria-disabled", "true"); // P0-1：禁用态语义化（无 tabindex，键盘不进入）
+		} else {
+			enableKeyboardActivation(prev);
+			prev.addEventListener("click", () => ctx.setCardsFilter({ page: cur - 1 }));
+		}
+		pager.createDiv({ cls: "marinmind-home-pager-info", text: `第 ${cur} / ${totalPages} 页` });
+		const next = pager.createDiv({ cls: "marinmind-home-pager-btn" });
+		setIcon(next.createSpan({ cls: "marinmind-home-pager-icon" }), "chevron-right");
+		next.createSpan({ text: "下一页" });
+		if (cur >= totalPages) {
+			next.addClass("is-disabled");
+			next.setAttribute("aria-disabled", "true");
+		} else {
+			enableKeyboardActivation(next);
+			next.addEventListener("click", () => ctx.setCardsFilter({ page: cur + 1 }));
+		}
+	};
+	search.addEventListener("input", () => {
+		ctx.setCardQuery(search.value);
+		// ㊾ 搜索变化只清选择集、保留批选模式（镜像文档页先例——清集已足以防
+		// "滤出视图的选中项被误删"，整清模式会让不重建的开关钮与行自相矛盾）
+		batchSelectedIds.clear();
+		void rerenderList();
+	});
+	rerenderList();
 }
 
 // ---------------------------------------------------------------------------

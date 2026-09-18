@@ -1,6 +1,7 @@
 import { ItemView, MarkdownRenderer, Notice, setIcon } from "obsidian";
 import type { WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
+import { t } from "../i18n/i18n";
 import { MarinMindReaderView, READER_VIEW_TYPE } from "../reader/reader-view";
 import { buildChatMessages, type ChatTurn } from "./ai-prompts";
 import {
@@ -71,7 +72,7 @@ export class AiChatView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "AI 助手";
+		return t("AI 助手");
 	}
 
 	getIcon(): string {

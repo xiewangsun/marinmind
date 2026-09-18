@@ -49,6 +49,14 @@ import { PdfDocument, type OutlineEntry } from "./pdf-document";
 import { acquirePdf, pdfCacheKey, retainPdf, type PdfHandle } from "./pdf-cache";
 import { SelectionToolbar, type SelectionSnapshot } from "./selection-toolbar";
 import { jumpAnchorY, rectsRelativeToPage, type ViewportRect } from "./rect-utils";
+import {
+	attributeBoxesToPages,
+	collectSelectionLines,
+	trimRangeToBounds,
+	type SelectionLine,
+} from "./selection-geometry";
+import { registerActiveView, unregisterActiveView } from "../events/view-registry";
+import { t } from "../i18n/i18n";
 import { mergeTextOcclusions, snapOcclusionToLines } from "./occlusion-snap";
 import {
 	DEFAULT_TRANSLATE_TARGET,
@@ -125,22 +133,8 @@ const PATROL_CONCURRENCY = 4;
 /** 80 阅读位置记忆：滚动静止多久后采集页码写库（store 另有 2s 防抖落盘） */
 const LAST_PAGE_FLUSH_MS = 500;
 
-/** 逐字符测量的选区规模上限：超过退回端点修剪老路径（防超大选区逐字测量卡顿） */
-const MAX_MEASURE_CHARS = 3000;
-
-/** 选区按行拆分的产物：行文本（行内空白已折叠、首尾空白已去）+ 行盒（viewport 坐标） */
-interface SelectionLine {
-	text: string;
-	box: ViewportRect;
-}
-
-/** 选区内单个字符的定位与测量（box 为 null 表示零尺寸字符如 \n） */
-interface CharBox {
-	node: Text;
-	offset: number;
-	ch: string;
-	box: ViewportRect | null;
-}
+// 139-D：选区几何（collectSelectionLines / trimRangeToBounds / SelectionLine /
+// MAX_MEASURE_CHARS 等）下沉 src/reader/selection-geometry.ts 纯模块（可测）。
 
 /**
  * 阅读器工具行定义：手型（只读平移）+ 选择（纯文本选择，㉖）+ MarginNote 四类摘录工具。
@@ -535,7 +529,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 
 	/** 标题由当前路径派生（vault 相对与库外绝对路径两种形态 fsBasename 通吃） */
 	getDisplayText(): string {
-		return this.currentFilePath ? fsBasename(this.currentFilePath) : "MarinMind 阅读器";
+		return this.currentFilePath ? fsBasename(this.currentFilePath) : t("MarinMind 阅读器");
 	}
 
 	getIcon(): string {
@@ -577,6 +571,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		// 103-D 文档级事件绑 contentEl.ownerDocument（popout 内可用；重复 onOpen
 		// 幂等——bindDocEvents 先解后绑）。就绪标记先置（后续 setState 走就地加载
 		// 分支）；数据层就绪检查在 loadFromPath 内
+		registerActiveView(this); // 147 通用视图注册表（书签/改名广播目标）
 		this.bindDocEvents();
 		this.viewOpened = true;
 		const pending = this.pendingFile;
@@ -1106,6 +1101,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	}
 
 	protected async onClose(): Promise<void> {
+		unregisterActiveView(this); // 147 通用视图注册表
 		this.unbindDocEvents(); // 文档级事件显式解绑（幂等）
 		// 80 阅读位置记忆：关标签前落库当前页（先于 cleanupContent，理由同 openPath）
 		this.flushLastPage();
@@ -3549,10 +3545,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			}
 			return;
 		}
-		const lines = this.collectSelectionLines(range);
+		const lines = collectSelectionLines(range);
 		if (lines === null) {
 			// 超大选区退回老路径：只修剪整体首尾空白再量矩形（行中行尾空白保留）
-			if (!this.trimRangeToBounds(range)) {
+			if (!trimRangeToBounds(range)) {
 				sel.removeAllRanges();
 				return;
 			}
@@ -3599,7 +3595,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			this.stopOcclusionTextEdit();
 			return;
 		}
-		const lines = this.collectSelectionLines(range);
+		const lines = collectSelectionLines(range);
 		if (lines === null) {
 			// 不走建卡的 3000 字回退路径——遮大段文字无意义，宁拒不赌
 			new Notice("选区过大，无法生成文字遮罩，请分段划选");
@@ -3630,19 +3626,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 
 	/** 行盒按中心点归属页（文本行的中心必落在渲染该文本的页面内；划选建卡与文字遮罩共用） */
 	private lineBoxesByPage(lines: readonly SelectionLine[]): Map<number, ViewportRect[]> {
-		const rectsByPage = new Map<number, ViewportRect[]>();
-		for (const line of lines) {
-			const cx = line.box.left + line.box.width / 2;
-			const cy = line.box.top + line.box.height / 2;
-			const pv = this.pageByPoint(cx, cy);
-			if (!pv) {
-				continue;
-			}
-			const list = rectsByPage.get(pv.pageNumber) ?? [];
-			list.push(line.box);
-			rectsByPage.set(pv.pageNumber, list);
-		}
-		return rectsByPage;
+		return attributeBoxesToPages(
+			lines.map((l) => l.box),
+			(cx, cy) => this.pageByPoint(cx, cy)?.pageNumber ?? null,
+		);
 	}
 
 	/** 行矩形归页校验后建 text 卡（跨页拦截；pageBox 归一化入库；回显走 cardBus） */
@@ -3685,12 +3672,12 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	 * 静默；跨页沿用旧 Notice 且选区保留可重选）。
 	 */
 	private buildSelectionSnapshot(range: Range): SelectionSnapshot | null {
-		const lines = this.collectSelectionLines(range);
+		const lines = collectSelectionLines(range);
 		let rectsByPage: Map<number, ViewportRect[]>;
 		let text: string;
 		if (lines === null) {
 			// 超大选区退回老路径：只修剪整体首尾空白再量矩形（与直接建卡一致）
-			if (!this.trimRangeToBounds(range)) {
+			if (!trimRangeToBounds(range)) {
 				return null;
 			}
 			text = range.toString().trim();
@@ -3836,22 +3823,15 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		});
 	}
 
-	/** 整段 Range 的 client rects 按中心点归属页（超大选区的老路径） */
+	/** 整段 Range 的 client rects 按中心点归属页（超大选区的老路径；归页单源见 selection-geometry） */
 	private rectsByPageFromRange(range: Range): Map<number, ViewportRect[]> {
-		const rectsByPage = new Map<number, ViewportRect[]>();
-		for (const r of Array.from(range.getClientRects())) {
-			if (r.width <= 0 || r.height <= 0) {
-				continue; // getClientRects 可能产生零尺寸行
-			}
-			const pv = this.pageByPoint(r.left + r.width / 2, r.top + r.height / 2);
-			if (!pv) {
-				continue;
-			}
-			const list = rectsByPage.get(pv.pageNumber) ?? [];
-			list.push({ left: r.left, top: r.top, width: r.width, height: r.height });
-			rectsByPage.set(pv.pageNumber, list);
-		}
-		return rectsByPage;
+		const rects = Array.from(range.getClientRects())
+			.filter((r) => r.width > 0 && r.height > 0)
+			.map((r) => ({ left: r.left, top: r.top, width: r.width, height: r.height }));
+		return attributeBoxesToPages(
+			rects,
+			(cx, cy) => this.pageByPoint(cx, cy)?.pageNumber ?? null,
+		);
 	}
 
 	/** 视口坐标点落在哪页（选区归属判定；只查已建骨架的页——选区只可能来自它们） */
@@ -3863,217 +3843,6 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			}
 		}
 		return null;
-	}
-
-	/**
-	 * 选区逐行拆分（多行文字摘录的关键修正）：
-	 * PDF 文本层每行行尾常带成段空白，整段 Range 的 getClientRects 会把它们一并
-	 * 圈进高亮——改为逐字符测量单字盒，按 y 中心聚类成行（容差 0.6×行高，
-	 * 同 y 但 x 大幅回退视为换列另起一行），每行收缩到首/末非空白字符。
-	 * 行文本空白折叠、行间以 \n 拼接；行盒取首末字符子 Range 的 rects 并集。
-	 * 返回 null = 选区为空或过大，调用方应退回老路径。
-	 */
-	private collectSelectionLines(range: Range): SelectionLine[] | null {
-		const pieces: Array<{ node: Text; start: number; end: number }> = [];
-		let text = "";
-		// NodeIterator（非 TreeWalker）：迭代集合包含根节点自身——选区落在单个 span 内
-		// 时 commonAncestor 是 Text 节点，TreeWalker.nextNode() 永远不返回根，会静默丢卡
-		const iter = document.createNodeIterator(
-			range.commonAncestorContainer,
-			NodeFilter.SHOW_TEXT,
-		);
-		for (let n = iter.nextNode(); n; n = iter.nextNode()) {
-			const t = n as Text;
-			if (!range.intersectsNode(t)) {
-				continue;
-			}
-			const s = t === range.startContainer ? range.startOffset : 0;
-			const e = t === range.endContainer ? range.endOffset : t.length;
-			if (e > s) {
-				pieces.push({ node: t, start: s, end: e });
-				text += t.data.slice(s, e);
-			}
-		}
-		if (pieces.length === 0 || text.length > MAX_MEASURE_CHARS) {
-			return null;
-		}
-		// 1) 逐字符测量单字盒（probe 复用一个 Range；零尺寸字符如 \n 记 null 随行）
-		const chars: CharBox[] = [];
-		const probe = document.createRange();
-		for (const p of pieces) {
-			for (let i = p.start; i < p.end; i++) {
-				let box: ViewportRect | null = null;
-				try {
-					probe.setStart(p.node, i);
-					probe.setEnd(p.node, i + 1);
-					const r = probe.getBoundingClientRect();
-					if (r.width > 0 && r.height > 0) {
-						box = { left: r.left, top: r.top, width: r.width, height: r.height };
-					}
-				} catch {
-					// 单字 Range 异常（罕见）按零尺寸处理
-				}
-				chars.push({ node: p.node, offset: i, ch: p.node.data[i], box });
-			}
-		}
-		// 2) 聚类成行：行内容差（上标/基线微抖）远小于行间差
-		const lines: CharBox[][] = [];
-		let cur: CharBox[] = [];
-		let curY = 0;
-		let curH = 0;
-		let prevRight = 0;
-		for (const cb of chars) {
-			if (!cb.box) {
-				if (cur.length > 0) {
-					cur.push(cb); // 零尺寸字符归属当前行
-				}
-				continue;
-			}
-			const yc = cb.box.top + cb.box.height / 2;
-			const tol = Math.max(3, curH * 0.6);
-			if (cur.length === 0 || Math.abs(yc - curY) > tol || cb.box.left < prevRight - 20) {
-				lines.push(cur);
-				cur = [cb];
-				curY = yc;
-				curH = cb.box.height;
-			} else {
-				cur.push(cb);
-				curH = Math.max(curH, cb.box.height);
-			}
-			prevRight = cb.box.left + cb.box.width;
-		}
-		if (cur.length > 0) {
-			lines.push(cur);
-		}
-		// 3) 每行收缩到首/末非空白字符（整行空白直接丢弃——行尾空行不再入卡）
-		const result: SelectionLine[] = [];
-		for (const line of lines) {
-			let s = -1;
-			let e = -1;
-			for (let i = 0; i < line.length; i++) {
-				if (/\S/.test(line[i].ch)) {
-					if (s < 0) {
-						s = i;
-					}
-					e = i;
-				}
-			}
-			if (s < 0) {
-				continue;
-			}
-			const seg = line.slice(s, e + 1);
-			const lineText = seg
-				.map((c) => c.ch)
-				.join("")
-				.replace(/\s+/g, " ")
-				.trim();
-			if (!lineText) {
-				continue;
-			}
-			const box = this.unionRangeBox(seg[0], seg[seg.length - 1]);
-			if (!box) {
-				continue;
-			}
-			result.push({ text: lineText, box });
-		}
-		return result;
-	}
-
-	/** 首末字符子 Range 的 client rects 并集（子 Range 异常时退回首末字符盒近似） */
-	private unionRangeBox(first: CharBox, last: CharBox): ViewportRect | null {
-		const rects: ViewportRect[] = [];
-		try {
-			const r = document.createRange();
-			r.setStart(first.node, first.offset);
-			r.setEnd(last.node, last.offset + 1);
-			for (const cr of Array.from(r.getClientRects())) {
-				if (cr.width > 0 && cr.height > 0) {
-					rects.push({ left: cr.left, top: cr.top, width: cr.width, height: cr.height });
-				}
-			}
-		} catch {
-			// 跨节点边界异常：退回已测字符盒
-		}
-		if (rects.length === 0) {
-			if (first.box) {
-				rects.push(first.box);
-			}
-			if (last.box) {
-				rects.push(last.box);
-			}
-		}
-		if (rects.length === 0) {
-			return null;
-		}
-		let l = Infinity;
-		let t = Infinity;
-		let r2 = -Infinity;
-		let b = -Infinity;
-		for (const box of rects) {
-			l = Math.min(l, box.left);
-			t = Math.min(t, box.top);
-			r2 = Math.max(r2, box.left + box.width);
-			b = Math.max(b, box.top + box.height);
-		}
-		return { left: l, top: t, width: r2 - l, height: b - t };
-	}
-
-	/**
-	 * 就地收缩 Range 到首个/末个非空白字符（就地修改 live 选区，视觉同步收紧）。
-	 * 遍历选区内相交文本节点拼接全文，定位非空白边界后回写 setStart/setEnd。
-	 * 返回 false = 选区全空白（调用方应清空选区放弃建卡）。
-	 */
-	private trimRangeToBounds(range: Range): boolean {
-		// NodeIterator 含根节点（TreeWalker.nextNode() 不返回根，单 span 选区会漏遍历，见上）
-		const iter = document.createNodeIterator(
-			range.commonAncestorContainer,
-			NodeFilter.SHOW_TEXT,
-		);
-		const pieces: Array<{ node: Text; start: number; end: number }> = [];
-		let text = "";
-		for (let n = iter.nextNode(); n; n = iter.nextNode()) {
-			const t = n as Text;
-			if (!range.intersectsNode(t)) {
-				continue;
-			}
-			const s = t === range.startContainer ? range.startOffset : 0;
-			const e = t === range.endContainer ? range.endOffset : t.length;
-			if (e > s) {
-				pieces.push({ node: t, start: s, end: e });
-				text += t.data.slice(s, e);
-			}
-		}
-		const first = text.search(/\S/);
-		if (first < 0) {
-			return false;
-		}
-		let last = text.length;
-		while (last > first && /\s/.test(text[last - 1])) {
-			last--;
-		}
-		// 全局字符下标 → (node, offset)；pieces 为文档序，累减定位
-		const locate = (idx: number): { node: Text; offset: number } | null => {
-			for (const p of pieces) {
-				const len = p.end - p.start;
-				if (idx < len) {
-					return { node: p.node, offset: p.start + idx };
-				}
-				idx -= len;
-			}
-			return null;
-		};
-		const begin = locate(first);
-		const end = locate(last - 1); // 末个非空白字符（Range 边界为排他，需 +1）
-		if (!begin || !end) {
-			return false;
-		}
-		try {
-			range.setStart(begin.node, begin.offset);
-			range.setEnd(end.node, end.offset + 1);
-		} catch {
-			return false; // 跨节点边界异常兜底：放弃修剪，保留原选区
-		}
-		return true;
 	}
 
 	/** 点击高亮：弹出卡片信息与操作菜单；联动定位打开着的脑图（文档→脑图） */

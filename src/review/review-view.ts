@@ -50,6 +50,7 @@ import {
 	highlightLineColor,
 } from "../reader/highlight-colors";
 import { pageWordOf } from "../storage/paths";
+import { t } from "../i18n/i18n";
 import {
 	resolveEngineCall,
 	translationAnchor,
@@ -75,12 +76,12 @@ export type ReviewScope =
 	| { kind: "deck"; deck: string }
 	| { kind: "cards"; cardIds: string[]; label: string };
 
-/** 四档评分：标签与按键（1-4） */
+/** 四档评分：标签与按键（1-4；149 i18n 标签经 t() 换语） */
 const GRADES: { grade: ReviewGrade; label: string; key: string }[] = [
-	{ grade: "again", label: "重来", key: "1" },
-	{ grade: "hard", label: "困难", key: "2" },
-	{ grade: "good", label: "良好", key: "3" },
-	{ grade: "easy", label: "简单", key: "4" },
+	{ grade: "again", label: t("重来"), key: "1" },
+	{ grade: "hard", label: t("困难"), key: "2" },
+	{ grade: "good", label: t("良好"), key: "3" },
+	{ grade: "easy", label: t("简单"), key: "4" },
 ];
 
 /** 数字键 → 档位 */
@@ -270,7 +271,7 @@ export class MarinMindReviewView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "MarinMind 复习";
+		return t("MarinMind 复习");
 	}
 
 	getIcon(): string {
@@ -450,9 +451,34 @@ export class MarinMindReviewView extends ItemView {
 		const doc = card.documentId ? this.plugin.documents.get(card.documentId) : undefined;
 		// 浏览到已考过的卡：直接显示正反面（只读）；待考卡按翻面态；未考预览只显示正面
 		const showBack = s.isRevealed || s.gradedAt != null;
+		// 139-I 大方法拆分：顶栏/卡体/操作区/AI 助手行四个内聚渲染段
+		this.renderReviewTopbar(stage, s, card, doc);
+		this.renderCardFaces(stage, s, card, doc, showBack);
+		this.renderCardActions(stage, s);
+		this.renderCardAiHelpers(stage, s, card);
 
-		// 顶部工具行（107 顶栏合一，参照阅读器/脑图 90 批）：
-		// 列表 ◀ 第 i/N 张 ▶ [范围chip · 书名页码 · 剩余] …… 撤销 翻译 管理 ↗ 原文
+		const hint = stage.createDiv({ cls: "marinmind-review-hint" });
+		if (s.isCurrentPending) {
+			hint.textContent = s.isRevealed
+				? t("按 1-4 评分 · ← → 切换卡片")
+				: t("空格 / 回车翻面 · ← → 切换卡片");
+		} else if (s.gradedAt) {
+			hint.textContent = t("已考过的卡（只读）· ← → 继续浏览");
+		} else {
+			hint.textContent = t("后面的卡（只看正面）· ← → 切换");
+		}
+	}
+
+	/**
+	 * 顶部工具行（107 顶栏合一，参照阅读器/脑图 90 批）：
+	 * 列表 ◀ 第 i/N 张 ▶ [范围chip · 书名页码 · 剩余] …… 撤销 翻译 管理 ↗ 原文
+	 */
+	private renderReviewTopbar(
+		stage: HTMLElement,
+		s: ReviewSession,
+		card: Card,
+		doc: BookDocument | undefined,
+	): void {
 		const topbar = stage.createDiv({ cls: "marinmind-review-topbar" });
 		// 70 卡片组列表开关（panel-left 与主页文件夹收起同图标语言；空会话无列表可开）
 		const listBtn = topbar.createEl("button", {
@@ -481,7 +507,7 @@ export class MarinMindReviewView extends ItemView {
 		prev.addEventListener("click", () => this.navigate(() => s.goPrev()));
 		topbar.createSpan({
 			cls: "marinmind-review-pos",
-			text: `第 ${Math.min(s.positionNo + 1, s.total)} / ${s.total} 张`,
+			text: t("第 {i} / {n} 张", { i: Math.min(s.positionNo + 1, s.total), n: s.total }),
 		});
 		const next = topbar.createEl("button", {
 			cls: "marinmind-review-nav-btn",
@@ -502,14 +528,14 @@ export class MarinMindReviewView extends ItemView {
 		} else if (doc) {
 			source = `《${doc.title}》${card.page != null ? ` · 第 ${card.page} ${pageWordOf(doc.filePath)}` : ""}`;
 		} else {
-			source = "自由卡片";
+			source = t("自由卡片");
 		}
 		if (source) {
 			meta.createSpan({ cls: "marinmind-review-meta-item", text: source });
 		}
 		meta.createSpan({
 			cls: "marinmind-review-meta-item",
-			text: `剩余 ${s.remaining} 张`,
+			text: t("剩余 {n} 张", { n: s.remaining }),
 		});
 		topbar.createEl("div", { cls: "marinmind-review-topbar-spacer" });
 		// 67 撤销上次评分（Ctrl+Z）：会话态 + DB SM-2/日志 一并回退；改评 = 撤销后重评
@@ -555,7 +581,19 @@ export class MarinMindReviewView extends ItemView {
 			setIcon(jump, "arrow-up-right");
 			jump.addEventListener("click", () => void this.plugin.openCardSource(card));
 		}
+	}
 
+	/**
+	 * 卡体正反面（MN4 语义）：正面 = 批注（问题）+ 摘录形貌/遮挡；背面 = 摘录
+	 * 内容（答案）+ 出处 + 溯源上下文切换条（翻面后才出现）。
+	 */
+	private renderCardFaces(
+		stage: HTMLElement,
+		s: ReviewSession,
+		card: Card,
+		doc: BookDocument | undefined,
+		showBack: boolean,
+	): void {
 		const cardBox = stage.createDiv({ cls: "marinmind-review-card" });
 		// P1-c 墨色随卡走：四缘边框 = 卡片身份色（highlightFallbackColor 对
 		// null 色卡按形态回退；翻面/换卡重渲染时墨色浮现，见 CSS 编排注释）
@@ -563,7 +601,7 @@ export class MarinMindReviewView extends ItemView {
 		// 正面（MN4：问题）：有批注时批注即问题，摘录内容移到背面作答案
 		if (card.note) {
 			const q = cardBox.createDiv({ cls: "marinmind-review-question" });
-			q.createSpan({ cls: "marinmind-review-block-label", text: "问题" });
+			q.createSpan({ cls: "marinmind-review-block-label", text: t("问题") });
 			q.createDiv({ cls: "marinmind-review-note", text: card.note });
 		}
 		// ㊷ 有遮挡的卡：正面出图并遮住重点区域（有批注时问题块与遮挡图共存）；
@@ -582,25 +620,27 @@ export class MarinMindReviewView extends ItemView {
 			if (card.note) {
 				// 正面是批注（问题）：摘录内容是答案主体
 				const a = back.createDiv({ cls: "marinmind-review-answer" });
-				a.createSpan({ cls: "marinmind-review-block-label", text: "内容" });
+				a.createSpan({ cls: "marinmind-review-block-label", text: t("内容") });
 				// 108 同正面：答案主体走摘录视觉（含无遮挡卡），blank/audio 回文本/播放器
 				this.renderExcerptFace(a, card);
 			}
 			const source = back.createDiv({ cls: "marinmind-review-source" });
 			source.textContent = doc
 				? `《${doc.title}》${card.page != null ? ` · 第 ${card.page} ${pageWordOf(doc.filePath)}` : ""}`
-				: "无出处信息";
+				: t("无出处信息");
 			// 溯源上下文切换条（㉒）：翻面后才出现，默认收起
 			this.renderContextToggle(back, card, doc);
 		}
+	}
 
-		// 操作区：待考卡 = 翻面/四档评分；浏览态 = 状态徽标
+	/** 操作区：待考卡 = 翻面/四档评分；浏览态 = 状态徽标 */
+	private renderCardActions(stage: HTMLElement, s: ReviewSession): void {
 		const actions = stage.createDiv({ cls: "marinmind-review-actions" });
 		if (s.isCurrentPending) {
 			if (!s.isRevealed) {
 				const btn = actions.createEl("button", {
 					cls: "marinmind-review-btn",
-					text: "翻面看答案",
+					text: t("翻面看答案"),
 				});
 				btn.addEventListener("click", () => {
 					s.reveal();
@@ -610,7 +650,7 @@ export class MarinMindReviewView extends ItemView {
 				for (const { grade, label, key } of GRADES) {
 					const btn = actions.createEl("button", {
 						cls: "marinmind-review-btn",
-						text: `${label}(${key})`,
+						text: t("{label}({key})", { label, key }),
 					});
 					btn.dataset.grade = grade;
 					btn.addEventListener("click", () => this.grade(grade));
@@ -619,18 +659,22 @@ export class MarinMindReviewView extends ItemView {
 		} else if (s.gradedAt) {
 			actions.createDiv({
 				cls: "marinmind-review-badge",
-				text: `已考 · ${GRADE_LABELS[s.gradedAt]}`,
+				text: t("已考 · {grade}", { grade: GRADE_LABELS[s.gradedAt] }),
 			});
 		} else {
 			actions.createDiv({
 				cls: "marinmind-review-badge",
-				text: "后面的卡 · 未考",
+				text: t("后面的卡 · 未考"),
 			});
 		}
+	}
 
-		// AI 复习助手（101 P5）：待考卡且有「问题」（note）才提供——hint/自测的
-		// 泄题防线在数据侧（prompt 只见正面问题，答案不进请求；干扰项除外——
-		// 出题必须知道正确答案，但产物只作 UI 选项）
+	/**
+	 * AI 复习助手（101 P5）：待考卡且有「问题」（note）才提供——hint/自测的
+	 * 泄题防线在数据侧（prompt 只见正面问题，答案不进请求；干扰项除外——
+	 * 出题必须知道正确答案，但产物只作 UI 选项）
+	 */
+	private renderCardAiHelpers(stage: HTMLElement, s: ReviewSession, card: Card): void {
 		if (s.isCurrentPending && card.note) {
 			// 换卡复位（浏览已考卡再回来时状态仍在，同一卡不重复请求）
 			if (this.aiHint && this.aiHint.cardId !== card.id) {
@@ -644,13 +688,13 @@ export class MarinMindReviewView extends ItemView {
 				const aiRow = stage.createDiv({ cls: "marinmind-review-ai-row" });
 				const hintBtn = aiRow.createEl("button", {
 					cls: "marinmind-review-btn is-ai",
-					text: "AI 提示",
+					text: t("AI 提示"),
 				});
 				hintBtn.addEventListener("click", () => void this.requestHint(card));
 				if (card.excerptText) {
 					const quizBtn = aiRow.createEl("button", {
 						cls: "marinmind-review-btn is-ai",
-						text: "选择题自测",
+						text: t("选择题自测"),
 					});
 					quizBtn.addEventListener("click", () => void this.requestQuiz(card));
 				}
@@ -666,24 +710,13 @@ export class MarinMindReviewView extends ItemView {
 				const aiRow = stage.createDiv({ cls: "marinmind-review-ai-row" });
 				const explainBtn = aiRow.createEl("button", {
 					cls: "marinmind-review-btn is-ai",
-					text: "AI 解释",
+					text: t("AI 解释"),
 				});
 				explainBtn.addEventListener(
 					"click",
 					() => void promptCardAiComment(this.app, this.plugin, card),
 				);
 			}
-		}
-
-		const hint = stage.createDiv({ cls: "marinmind-review-hint" });
-		if (s.isCurrentPending) {
-			hint.textContent = s.isRevealed
-				? "按 1-4 评分 · ← → 切换卡片"
-				: "空格 / 回车翻面 · ← → 切换卡片";
-		} else if (s.gradedAt) {
-			hint.textContent = "已考过的卡（只读）· ← → 继续浏览";
-		} else {
-			hint.textContent = "后面的卡（只看正面）· ← → 切换";
 		}
 	}
 

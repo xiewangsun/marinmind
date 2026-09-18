@@ -18,6 +18,7 @@ import {
 	type SrsScheduler,
 } from "../types";
 import { isAbsoluteFsPath, normalizeFsDir, normalizeVaultDir } from "../storage/paths";
+import { isUiLocale, type UiLocale } from "../i18n/i18n";
 import {
 	EMPTY_AI_USAGE,
 	sanitizeAiCustomPrompts,
@@ -57,6 +58,8 @@ export interface MarinMindSettings {
 	dataDir: string;
 	/** 备份导出目录：规则同 dataDir；只影响后续导出落点，历史备份文件不搬移 */
 	backupDir: string;
+	/** 界面语言（148 i18n）：zh 默认；en 走 src/i18n/en.ts 词典，缺词条回退中文 */
+	language: UiLocale;
 	/** 翻译目标语言代码（㉔ 高亮菜单「翻译」的默认值；弹窗内切换会写回），见 TRANSLATE_LANGUAGES */
 	translateTarget: string;
 	/**
@@ -224,6 +227,8 @@ export interface MarinMindSettings {
 export const DEFAULT_SETTINGS: MarinMindSettings = {
 	dataDir: DEFAULT_DATA_DIR,
 	backupDir: DEFAULT_BACKUP_DIR,
+	/** 148 界面语言：默认中文；词条覆盖渐进补齐（en 缺词回退中文） */
+	language: "zh",
 	translateTarget: DEFAULT_TRANSLATE_TARGET,
 	translateEngine: "google",
 	translateBaiduAppid: "",
@@ -313,6 +318,10 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 		}
 	}
 	merged.excerptColors = colors;
+	// 148 界面语言：枚举外值回默认中文
+	merged.language = isUiLocale((raw as { language?: unknown } | null)?.language)
+		? merged.language
+		: "zh";
 	// 65 复习设置两个标量：浅合并天然兼容，钳制防手编 data.json 越界值
 	merged.reviewNewPerDay = clampInt(
 		merged.reviewNewPerDay,

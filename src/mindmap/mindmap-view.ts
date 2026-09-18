@@ -1,6 +1,8 @@
 import { ItemView, Menu, Notice, setIcon } from "obsidian";
 import type { TFile, ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
+import { activeViewsOf, registerActiveView, unregisterActiveView } from "../events/view-registry";
+import { t } from "../i18n/i18n";
 import type { BranchStyle, Card, MindmapNodeWithCard } from "../types";
 import { BRANCH_STYLES, BRANCH_STYLE_LABELS, isBranchStyle } from "../types";
 import { READER_VIEW_TYPE } from "../reader/reader-view";
@@ -87,8 +89,8 @@ import {
 /** 思维导图视图的 viewType */
 export const MINDMAP_VIEW_TYPE = "marinmind-mindmap";
 
-/** 活跃脑图视图注册表（onOpen 加入 / onClose 移除），供阅读器拖拽入图定位目标 */
-const activeViews = new Set<MarinMindMindmapView>();
+// 活跃脑图视图注册表（147 收敛至 events/view-registry.ts 通用表，onOpen 注册
+// / onClose 注销）——下列五个模块级入口改经通用表取本类型快照，行为零变化。
 
 /**
  * 更新全部活跃脑图的落点提示（悬停的 viewport/节点上高亮类）。
@@ -106,7 +108,7 @@ export function updateMindmapDropHint(
 	doc?: Document,
 ): MarinMindMindmapView | null {
 	let hovered: MarinMindMindmapView | null = null;
-	for (const view of activeViews) {
+	for (const view of activeViewsOf<MarinMindMindmapView>(MINDMAP_VIEW_TYPE)) {
 		if (!doc || view.contentEl.ownerDocument === doc) {
 			if (view.updateDropHint(x, y)) {
 				hovered = view;
@@ -124,7 +126,7 @@ export function updateMindmapDropHint(
  * 由各自坐标路径分管；缺省 = 全部清（拖拽结束语义）。
  */
 export function clearMindmapDropHints(doc?: Document): void {
-	for (const view of activeViews) {
+	for (const view of activeViewsOf<MarinMindMindmapView>(MINDMAP_VIEW_TYPE)) {
 		if (!doc || view.contentEl.ownerDocument === doc) {
 			view.clearDropHint();
 		}
@@ -133,7 +135,7 @@ export function clearMindmapDropHints(doc?: Document): void {
 
 /** 活跃脑图视图快照出口（79-6 跨窗口拖卡按窗口分组遍历；只读用途） */
 export function activeMindmapViews(): MarinMindMindmapView[] {
-	return [...activeViews];
+	return activeViewsOf<MarinMindMindmapView>(MINDMAP_VIEW_TYPE);
 }
 
 /**
@@ -141,7 +143,7 @@ export function activeMindmapViews(): MarinMindMindmapView[] {
  * 命中即停（平移 + 闪烁）；不在任何打开的图中返回 false。
  */
 export function locateCardInActiveMindmaps(cardId: string): boolean {
-	for (const view of activeViews) {
+	for (const view of activeViewsOf<MarinMindMindmapView>(MINDMAP_VIEW_TYPE)) {
 		if (view.locateCard(cardId)) {
 			return true;
 		}
@@ -154,7 +156,7 @@ export function locateCardInActiveMindmaps(cardId: string): boolean {
  * 由 main.ts 调用同步画布——loadMap 重拉不动 tx/ty/scale，平移缩放保持。
  */
 export function refreshActiveMindmaps(mapId: string): void {
-	for (const view of activeViews) {
+	for (const view of activeViewsOf<MarinMindMindmapView>(MINDMAP_VIEW_TYPE)) {
 		view.refreshIfShowing(mapId);
 	}
 }
@@ -317,7 +319,7 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "MarinMind 思维导图";
+		return t("MarinMind 思维导图");
 	}
 
 	getIcon(): string {
@@ -325,7 +327,7 @@ export class MarinMindMindmapView extends ItemView {
 	}
 
 	async onOpen(): Promise<void> {
-		activeViews.add(this); // 注册先于任何 await（拖放目标解析用）
+		registerActiveView(this); // 注册先于任何 await（拖放目标解析用；147 通用注册表）
 		this.subscribeCardBus();
 		await this.plugin.whenReady();
 		if (!this.plugin.store) {
@@ -386,7 +388,7 @@ export class MarinMindMindmapView extends ItemView {
 		this.cardBusOffs = [];
 		this.viewModeOff?.();
 		this.viewModeOff = null;
-		activeViews.delete(this);
+		unregisterActiveView(this); // 147 通用注册表（原模块级 Set）
 		this.clearDropHint();
 		this.drag = null;
 		this.nodeEls.clear();

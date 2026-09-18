@@ -1,6 +1,7 @@
 import { ItemView, setIcon } from "obsidian";
 import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
+import { t } from "../i18n/i18n";
 import { WebclipModal } from "../webclip/webclip-modal";
 import type { CardsPageState, CategorySelection } from "./home-data";
 import {
@@ -43,6 +44,8 @@ export class MarinMindHomeView extends ItemView {
 	private selectedCategory: CategorySelection = "all";
 	/** 文档页搜索关键词（会话内状态，不持久化；输入时只局部刷新列表，整页重渲染回填） */
 	private docQuery = "";
+	/** 卡片页搜索关键词（139-F；会话内状态，不持久化；输入时只局部刷新结果区，整页重渲染回填） */
+	private cardQuery = "";
 	/** 卡片页筛选与分页（会话内状态，不持久化；筛选条件变化自动回第 1 页） */
 	private cardsFilter: CardsPageState = {
 		documentId: null,
@@ -70,7 +73,7 @@ export class MarinMindHomeView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "MarinMind 主页";
+		return t("MarinMind 主页");
 	}
 
 	getIcon(): string {
@@ -252,6 +255,15 @@ export class MarinMindHomeView extends ItemView {
 			setDocQuery: (q: string) => {
 				// 只更新状态不重渲染——列表局部刷新由文档页搜索回调自行触发（IME 安全）
 				this.docQuery = q;
+			},
+			get cardQuery(): string {
+				return view.cardQuery;
+			},
+			setCardQuery: (q: string) => {
+				// 只更新状态不重渲染——结果区局部刷新由卡片页搜索回调自行触发（IME 安全）；
+				// 搜索词变化回第 1 页（镜像筛选维度变化语义，页码越界钳制兜底）
+				this.cardQuery = q;
+				this.cardsFilter.page = 1;
 			},
 			get cardsFilter(): CardsPageState {
 				return view.cardsFilter;

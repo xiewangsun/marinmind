@@ -1,6 +1,7 @@
 import { ButtonComponent, Notice, Platform, PluginSettingTab, Setting } from "obsidian";
 import type { App, TextComponent } from "obsidian";
 import type MarinMindPlugin from "../main";
+import { isUiLocale, setLocale, t } from "../i18n/i18n";
 import { HOME_VIEW_TYPE, MarinMindHomeView } from "../home/home-view";
 import { validateDirInput, type MarinMindSettings } from "./settings";
 import { migrateDataDir } from "./migrate-data-dir";
@@ -62,6 +63,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
+		this.renderGeneralSection(containerEl);
 		this.renderAppearanceSection(containerEl);
 		this.renderWorkspaceSection(containerEl);
 		this.renderDataSection(containerEl);
@@ -76,8 +78,37 @@ export class MarinMindSettingTab extends PluginSettingTab {
 	}
 
 	/** 工作区（79-1）：联动方向四档——门控自动跟随/点击定位/互关，显式编排不受限 */
+	/** 常规（148 i18n）：界面语言——中文（默认）/ English（缺词条回退中文） */
+	private renderGeneralSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h2", { text: t("常规") });
+
+		new Setting(containerEl)
+			.setName("界面语言 / Language")
+			.setDesc(
+				"Interface language. English translations are added progressively; untranslated texts fall back to Chinese. 已打开的界面即时生效，命令面板名称需重启 Obsidian 后更新。",
+			)
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption("zh", "中文（默认）")
+					.addOption("en", "English")
+					.setValue(this.plugin.settings.language)
+					.onChange((value) => {
+						if (!isUiLocale(value)) {
+							return;
+						}
+						this.plugin.settings.language = value;
+						setLocale(value); // 即时生效：此后渲染的界面走新语言
+						void this.plugin.saveData({ ...this.plugin.settings });
+						new Notice(
+							t("语言已切换——已打开的界面需重开（或重启 Obsidian）后完全生效"),
+						);
+						this.display(); // 设置页本身换语言重渲染
+					});
+			});
+	}
+
 	private renderWorkspaceSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "工作区" });
+		containerEl.createEl("h2", { text: t("工作区") });
 
 		new Setting(containerEl)
 			.setName("联动方向")
@@ -100,7 +131,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 外观（㊲ 起，㊸ 三态）：主页主题——Linear 深色（默认）/ Linear 浅色 / 跟随 Obsidian 主题 */
 	private renderAppearanceSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "外观" });
+		containerEl.createEl("h2", { text: t("外观") });
 
 		new Setting(containerEl)
 			.setName("主页主题")
@@ -129,7 +160,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 数据存储：数据目录输入（暂存校验）+ 迁移入口 */
 	private renderDataSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "数据存储" });
+		containerEl.createEl("h2", { text: t("数据存储") });
 
 		const setting = new Setting(containerEl).setName("数据目录").setDesc(this.dataDirDesc());
 		let migrateButton: ButtonComponent | undefined;
@@ -180,7 +211,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 阅读（75 划选工具栏 / 77 线型）：text 工具划选的交互与文字摘录形态 */
 	private renderReaderSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "阅读" });
+		containerEl.createEl("h2", { text: t("阅读") });
 
 		new Setting(containerEl)
 			.setName("划选工具栏")
@@ -215,7 +246,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 文字识别 (OCR)（83）：识别语言组合 / 拖框即识 / 识别后自动翻译 */
 	private renderOcrSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "文字识别 (OCR)" });
+		containerEl.createEl("h2", { text: t("文字识别 (OCR)") });
 
 		new Setting(containerEl)
 			.setName("识别语言")
@@ -278,7 +309,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 翻译（㉔ + 83 多引擎）：目标语言 / 引擎选择 / 分引擎凭据 */
 	private renderTranslateSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "翻译" });
+		containerEl.createEl("h2", { text: t("翻译") });
 
 		new Setting(containerEl)
 			.setName("目标语言")
@@ -342,6 +373,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				})
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
+					text.inputEl.type = "password"; // 密钥防肩窥（对齐 AI 预设弹窗，139-A）
 					text.setPlaceholder("密钥").setValue(this.plugin.settings.translateBaiduSecret);
 					text.onChange((value) => {
 						this.plugin.settings.translateBaiduSecret = value.trim();
@@ -368,6 +400,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				})
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
+					text.inputEl.type = "password"; // 密钥防肩窥（对齐 AI 预设弹窗，139-A）
 					text.setPlaceholder("应用密钥").setValue(
 						this.plugin.settings.translateYoudaoAppSecret,
 					);
@@ -386,6 +419,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
+					text.inputEl.type = "password"; // 密钥防肩窥（对齐 AI 预设弹窗，139-A）
 					text.setPlaceholder("Auth-Key（免费版以 :fx 结尾）").setValue(
 						this.plugin.settings.translateDeeplKey,
 					);
@@ -399,7 +433,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** AI（96）：模型预设（OpenAI 兼容端点）/ 测试连接 / 采样与流式 / 上下文预算 / 用量 */
 	private renderAiSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "AI" });
+		containerEl.createEl("h2", { text: t("AI") });
 
 		const presets = sanitizeAiPresets(this.plugin.settings.aiPresets);
 		const activePreset = presets.find((p) => p.id === this.plugin.settings.aiActivePresetId);
@@ -593,6 +627,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
+					text.inputEl.type = "password"; // 密钥防肩窥（对齐 AI 预设弹窗，139-A）
 					text.setPlaceholder("tvly-…").setValue(this.plugin.settings.webSearchTavilyKey);
 					text.onChange((value) => {
 						this.plugin.settings.webSearchTavilyKey = value.trim();
@@ -609,6 +644,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
+					text.inputEl.type = "password"; // 密钥防肩窥（对齐 AI 预设弹窗，139-A）
 					text.setPlaceholder("sk-…").setValue(this.plugin.settings.webSearchBochaKey);
 					text.onChange((value) => {
 						this.plugin.settings.webSearchBochaKey = value.trim();
@@ -673,7 +709,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 复习（65）：批次张数与每日新卡上限（68 起消费——due 分批与新卡混排） */
 	private renderReviewSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "复习" });
+		containerEl.createEl("h2", { text: t("复习") });
 
 		// R3（W-08/W-16）：数字字段 type=number（移动端弹数字键盘）+ 越界行内红字
 		// （镜像数据目录校验先例——Notice 转瞬即逝且与字段分离）
@@ -744,7 +780,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 网页剪藏（113 起 / 124 落点固定）：图片本地化开关（存量剪藏已由启动迁移搬入数据根 clips/） */
 	private renderWebclipSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "网页剪藏" });
+		containerEl.createEl("h2", { text: t("网页剪藏") });
 
 		new Setting(containerEl)
 			.setName("剪藏落点")
@@ -769,7 +805,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 屏幕截图（117/119）：全局热键 + 屏幕剪藏 OCR 开关（仅桌面） */
 	private renderCaptureSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "屏幕截图" });
+		containerEl.createEl("h2", { text: t("屏幕截图") });
 
 		const hotkeyDesc =
 			"在任何应用内按下即冻结全屏直接框选（仅桌面）。格式：修饰键+单键，如 Ctrl+Shift+S；修饰键 Ctrl/Cmd/Alt/Shift/Super（macOS Cmd），至少一个。留空关闭。热键被其他应用占用时注册会失败并提示。";
@@ -825,7 +861,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 	/** 备份：目录即时保存（只影响后续导出落点，无数据迁移） */
 	private renderBackupSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h2", { text: "备份" });
+		containerEl.createEl("h2", { text: t("备份") });
 
 		new Setting(containerEl)
 			.setName("备份目录")

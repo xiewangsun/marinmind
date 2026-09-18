@@ -2,6 +2,7 @@ node_modules/
 main.js
 *.map
 .DS_Store
+coverage/
 
 # Claude Code 技能安装产物（本机工具配置，非项目源码）
 .agents/

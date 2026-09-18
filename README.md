@@ -8,6 +8,8 @@ An all-in-one study tool for [Obsidian](https://obsidian.md) that combines an **
 
 ## Features
 
+> **Desktop-only**: this plugin relies on Node.js/Electron APIs (file system access, system tray, native window capture), so it does not run on mobile.
+
 | Module | Description |
 | ------ | ----------- |
 | Reading & annotating | Read PDF / EPUB / MOBI books; highlight, and excerpt text, rectangular areas, free-form lasso regions, handwriting, photos, and voice notes |
@@ -62,6 +64,7 @@ All network requests are user-initiated and use API keys you configure yourself:
 | Web search (for AI) | Tavily (`api.tavily.com`), Bocha (`api.bochaai.com`), or a self-hosted SearXNG instance — whichever you configure |
 | Translation | Google Translate, Baidu, Youdao, or DeepL — whichever you configure |
 | OCR | On first use, downloads the OCR engine and language data from public CDNs (jsDelivr / tessdata.projectnaptha.com) |
+| Web clipper | Fetches any URL you enter and downloads images from that page into your vault |
 
 ## Development
 
