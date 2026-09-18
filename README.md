@@ -4,7 +4,13 @@ An all-in-one study tool for [Obsidian](https://obsidian.md) that combines an **
 
 > Read and annotate → every excerpt becomes a knowledge card → drag cards onto mind maps → review them until they stick.
 
-<!-- TODO: add screenshots under ./images/ (home page, reader with excerpts, mind map, review) -->
+![Home library](images/home.png)
+
+![Reading with excerpts](images/reader.png)
+
+![Mind map of cards](images/mindmap.png)
+
+![Flashcard review](images/review.png)
 
 ## Features
 
