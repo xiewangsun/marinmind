@@ -99,6 +99,31 @@ describe("book-format 序列化与解析", () => {
 		expect(parseBookMd(withoutAuthor, { fileName: "书籍A.md" }).doc.author).toBeNull();
 	});
 
+	it("分节标题量词（165）：epub 书写「第 N 章」，pdf 仍「第 N 页」；旧「页」文件两者皆收", () => {
+		const epubCard = card({
+			id: "33333333-3333-4333-8333-333333333333",
+			excerptType: "area",
+			page: 3,
+		});
+		const epubText = serializeBookMd(
+			bookInput({ doc: doc({ filePath: "阅读/书.epub" }), cards: [epubCard] }),
+		);
+		expect(epubText).toContain("## 第 3 章");
+		expect(epubText).not.toContain("## 第 3 页");
+
+		const pdfText = serializeBookMd(
+			bookInput({ doc: doc({ filePath: "阅读/书.pdf" }), cards: [epubCard] }),
+		);
+		expect(pdfText).toContain("## 第 3 页");
+
+		// 旧式「页」标题的手编 epub 书文件：解析照收（存量字节不动语义不变）
+		const legacy = parseBookMd(epubText.replace("## 第 3 章", "## 第 3 页"), {
+			fileName: "书.md",
+		});
+		expect(legacy.cards).toHaveLength(1);
+		expect(legacy.cards[0]!.page).toBe(3);
+	});
+
 	it("语音时长 dur 键（84-B）：audio 卡往返还原；缺省不落键（零写入契约）", () => {
 		// audio 卡带时长：序列化含 "dur":37 且解析还原
 		const audioCard = card({

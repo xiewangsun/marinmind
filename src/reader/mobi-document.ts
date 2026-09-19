@@ -1253,6 +1253,8 @@ export function parseMobi(bytes: Uint8Array): EpubBook {
 		spine,
 		toc: book.toc,
 		readEntry: makeVirtualEntryReader(book.chapters, book.imageRecord),
+		// 166：虚拟条目字节已在内存，批量预热 no-op（接口对齐）
+		warmEntries: () => undefined,
 	};
 }
 

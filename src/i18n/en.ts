@@ -494,4 +494,5 @@ export const EN: Record<string, string> = {
 	"已选 {n} 块": "{n} selected",
 	"已创建 {n} 张卡片": "Created {n} cards",
 	链接指向的图片在书内不存在: "The linked image does not exist in this book",
+	链接指向的卡片已不存在: "The linked card no longer exists",
 };

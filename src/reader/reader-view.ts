@@ -4033,14 +4033,16 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		);
 		// 工具组
 		menu.addSeparator();
-		// OCR：区域/手写摘录有矩形才可识别（文字摘录已有文本，照片无矩形）；
-		// ㊻-B md 文档无 pdf 位图可离屏渲染，不给入口
-		if (
-			!this.isReflowDoc &&
-			(card.excerptType === "area" || card.excerptType === "handwriting") &&
-			card.page != null &&
-			card.rects.length > 0
-		) {
+		// OCR（165 起 reflow 文档同开）：区域/套索摘录有矩形才可识别（文字摘录
+		// 已有文本，照片无矩形）；pdf 走离屏位图，reflow（md/clip/epub）走
+		// ㊽ 内容快照附件（快照即摘录区域本身，无需页渲染）；手写卡仅 pdf 存在
+		const isRegionCard = card.excerptType === "area" || card.excerptType === "lasso";
+		const canOcr =
+			card.rects.length > 0 &&
+			(this.isReflowDoc
+				? isRegionCard && card.excerptRef != null
+				: (isRegionCard || card.excerptType === "handwriting") && card.page != null);
+		if (canOcr) {
 			menu.addItem((item) =>
 				item
 					.setTitle(t("识别文字 (OCR)"))
@@ -4370,6 +4372,14 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			await this.ocrHandwritingCard(card);
 			return;
 		}
+		// 165 reflow 分流：识别对象 = ㊽ 内容快照附件（快照即摘录区域裁切，
+		// 无页位图可渲染）；无快照（极旧卡未回填）静默不识别
+		if (this.isReflowDoc) {
+			if (card.excerptRef) {
+				await this.ocrSnapshotCard(card);
+			}
+			return;
+		}
 		const pdf = this.pdf;
 		const page = card.page;
 		if (!pdf || page == null || card.rects.length === 0) {
@@ -4507,6 +4517,50 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		} catch (err) {
 			console.error("[MarinMind] 手写 OCR 失败", err);
 			new Notice("手写 OCR 失败：附件读取或引擎初始化异常，请稍后重试");
+		} finally {
+			notice.hide();
+		}
+	}
+
+	/**
+	 * 165 reflow 区域/套索卡 OCR：识别对象 = ㊽ 内容快照附件（快照即摘录区域
+	 * 裁切，无需页位图渲染）；全图单区域识别（镜像手写卡的整图矩形用法，
+	 * 版面模式沿用区域默认）。已有文字时确认覆盖走 applyOcrText 公共尾部。
+	 */
+	private async ocrSnapshotCard(card: Card): Promise<void> {
+		const notice = new Notice(
+			ocrStartNotice("region", isOcrEngineReady(this.plugin.settings.ocrLangs)),
+			0,
+		);
+		try {
+			const bytes = await this.plugin.attachments.read(card.excerptRef!);
+			const bitmap = await createImageBitmap(new Blob([bytes]));
+			const canvas = document.createElement("canvas");
+			canvas.width = Math.max(1, bitmap.width);
+			canvas.height = Math.max(1, bitmap.height);
+			const ctx = canvas.getContext("2d");
+			if (!ctx) {
+				bitmap.close();
+				return;
+			}
+			ctx.drawImage(bitmap, 0, 0);
+			bitmap.close();
+			const text = await ocrCanvasRegions(canvas, [{ x: 0, y: 0, w: 1, h: 1 }], {
+				langs: this.plugin.settings.ocrLangs,
+				onStatus: (u) => {
+					if (u.progress != null && u.progress > 0 && u.progress < 1) {
+						notice.setMessage(`正在识别文字… ${Math.round(u.progress * 100)}%`);
+					}
+				},
+			});
+			if (!text) {
+				new Notice("未识别出文字（区域可能不含文本，或清晰度不足）");
+				return;
+			}
+			this.applyOcrText(card, text);
+		} catch (err) {
+			console.error("[MarinMind] 快照 OCR 失败", err);
+			new Notice(ocrFailNotice(isOcrEngineReady(this.plugin.settings.ocrLangs)));
 		} finally {
 			notice.hide();
 		}

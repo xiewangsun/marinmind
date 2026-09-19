@@ -25,6 +25,36 @@ function isImagePath(path: string): boolean {
 	return ["svg", "jpg", "jpeg", "png", "gif", "webp"].includes(ext);
 }
 
+/**
+ * 超长章分段渲染阈值（168）：顶层块数超过该值的章，第 HEAD_BLOCKS 块起
+ * 逐块挂 content-visibility:auto（Chromium 原生跳渲染——几十万字的词典类
+ * 章渲染/测量可感卡顿的根治方向）。**阈值化零回归面**：普通章（绝大多数）
+ * 完全不挂，滚动/定位/高度全保持现状精确；仅病理级长章进入近似模式。
+ *
+ * 已知取舍（与挂账「分片懒加载完整方案」的差异）：跳渲染块参与高度时用
+ * contain-intrinsic-size 估计值，章内深跳/卡片定位在长章内为**近似落点**
+ * （滚近后真实高度渐次替换估计值，auto 前缀记忆已渲染尺寸）；区域快照
+ * 不受影响（dom-snapshot 的 DENIED_STYLE_PROPS 已剥 content-visibility，
+ * 镜像文档全量渲染）。
+ */
+const LONG_CHAPTER_BLOCKS = 150;
+/** 长章前部保持全渲染的块数（首屏与章首定位保持精确） */
+const LONG_CHAPTER_HEAD = 40;
+
+/** 章构建后置：超长章对头部之后的顶层块挂浏览器原生跳渲染（见上注释） */
+function relaxLongChapter(chapter: HTMLElement): void {
+	const blocks = Array.from(chapter.children);
+	if (blocks.length <= LONG_CHAPTER_BLOCKS) {
+		return;
+	}
+	for (let i = LONG_CHAPTER_HEAD; i < blocks.length; i++) {
+		(blocks[i] as HTMLElement).setCssProps({
+			contentVisibility: "auto",
+			containIntrinsicSize: "auto 2.5em",
+		});
+	}
+}
+
 /** 整删标签（脚本/样式/嵌入框架/表单控件/音视频——音视频挂账后续优化） */
 const DROP_TAGS = new Set([
 	"script",
@@ -234,9 +264,24 @@ export class EpubSession {
 		const text = item ? entryText(this.book, item.href) : null;
 		const body = text !== null ? parseChapterDom(text) : null;
 		if (body) {
+			// 166 章内图片单趟批量预热：sanitize 逐 img 解析 blob 时每图一趟
+			// filter 解压——插图多的章滚入视口逐图卡顿；渲染前按原始 DOM 收集
+			// 本章图片路径（跳过 fragment/带 scheme 引用），一趟全解压入 LRU
+			const imgPaths = new Set<string>();
+			for (const el of body.querySelectorAll("img, image")) {
+				const raw = el.getAttribute("src") ?? el.getAttribute("xlink:href") ?? "";
+				if (!raw || raw.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+					continue;
+				}
+				imgPaths.add(resolveZipPath(item!.href, raw).path);
+			}
+			if (imgPaths.size > 0) {
+				this.book.warmEntries([...imgPaths]);
+			}
 			for (const node of Array.from(body.childNodes)) {
 				this.sanitizeNode(node, chapter, item!.href, spineIndex, false);
 			}
+			relaxLongChapter(chapter);
 		} else {
 			chapter.textContent = item ? "本章内容无法解析" : "本章内容缺失";
 		}

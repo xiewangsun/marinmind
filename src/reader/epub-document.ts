@@ -53,6 +53,12 @@ export interface EpubBook {
 	toc: EpubTocNode[];
 	/** 按需读取 zip 条目（章节 XHTML/图片等）；条目不存在或 zip 局部损坏返回 null */
 	readonly readEntry: (path: string) => Uint8Array | null;
+	/**
+	 * 批量预热门缓存（166 章内图片单趟预热）：一趟 filter 限次解压多个条目
+	 * 入 LRU（每条目一趟 central directory 扫描 → 全章一趟）；虚拟条目实现
+	 * （mobi）为 no-op（字节已在内存）。
+	 */
+	readonly warmEntries: (paths: readonly string[]) => void;
 }
 
 /**
@@ -361,11 +367,28 @@ function unzipEntries(bytes: Uint8Array, names: readonly string[]): Record<strin
  * 惰性条目读取器（E2）：压缩字节常驻，条目首次访问才单条目解压并缓存
  * （插入序 LRU，总字节超上限淘汰）。缓存可激进淘汰的安全性：章节文本经
  * EpubSession.rendered 幂等只解码一次；图片进 Blob 时已 slice 独立拷贝。
+ * 166：warm 批量预热（一趟 filter 解压多条目入同一 LRU——read 再访问即命中）。
  */
-function makeEntryReader(bytes: Uint8Array): (path: string) => Uint8Array | null {
+function makeEntryReader(bytes: Uint8Array): {
+	read: (path: string) => Uint8Array | null;
+	warm: (paths: readonly string[]) => void;
+} {
 	const cache = new Map<string, Uint8Array>();
 	let total = 0;
-	return (path) => {
+	const admit = (path: string, entry: Uint8Array): void => {
+		cache.set(path, entry);
+		total += entry.byteLength;
+		while (total > MAX_DECODED_BYTES) {
+			const oldest = cache.keys().next().value;
+			if (oldest === undefined) {
+				break;
+			}
+			const evicted = cache.get(oldest);
+			cache.delete(oldest);
+			total -= evicted?.byteLength ?? 0;
+		}
+	};
+	const read = (path: string): Uint8Array | null => {
 		const hit = cache.get(path);
 		if (hit) {
 			cache.delete(path);
@@ -381,19 +404,28 @@ function makeEntryReader(bytes: Uint8Array): (path: string) => Uint8Array | null
 		if (!entry) {
 			return null;
 		}
-		cache.set(path, entry);
-		total += entry.byteLength;
-		while (total > MAX_DECODED_BYTES) {
-			const oldest = cache.keys().next().value;
-			if (oldest === undefined) {
-				break;
-			}
-			const evicted = cache.get(oldest);
-			cache.delete(oldest);
-			total -= evicted?.byteLength ?? 0;
-		}
+		admit(path, entry);
 		return entry;
 	};
+	const warm = (paths: readonly string[]): void => {
+		const want = new Set(paths.filter((p) => !cache.has(p)));
+		if (want.size === 0) {
+			return;
+		}
+		let entries: Record<string, Uint8Array>;
+		try {
+			entries = unzipSync(bytes, { filter: (f) => want.has(f.name) });
+		} catch {
+			return; // 局部损坏：退回逐条目读取路径（各自降级）
+		}
+		for (const p of want) {
+			const entry = entries[p];
+			if (entry) {
+				admit(p, entry);
+			}
+		}
+	};
+	return { read, warm };
 }
 
 /** 字体混淆算法 URI（OCF 3.0 §4.2：内容可逆混淆，非 DRM） */
@@ -546,7 +578,8 @@ export function parseEpub(bytes: Uint8Array): EpubBook {
 		spine: opf.spine,
 		toc,
 		// 162：混淆条目（字体等）按缺失降级——图片引用走既有占位符兜底
-		readEntry: (path) => (obfuscatedPaths?.has(path) ? null : entryReader(path)),
+		readEntry: (path) => (obfuscatedPaths?.has(path) ? null : entryReader.read(path)),
+		warmEntries: entryReader.warm,
 	};
 }
 

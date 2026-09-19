@@ -11,6 +11,7 @@ import type {
 } from "../types";
 import { isLineStyle } from "../types";
 import { newId } from "../utils";
+import { pageWordOf } from "../storage/paths";
 
 /**
  * 书文件 / 脑图文件的 Markdown 序列化纯函数层（㉚）。
@@ -316,7 +317,9 @@ export function parseBookMd(text: string, opts: ParseBookOptions = {}): ParsedBo
 	for (let j = bodyStart; j < lines.length; j++) {
 		const line = lines[j];
 
-		const pageMatch = /^## 第 (\d+) 页\s*$/.exec(line);
+		// 165 措辞：写入按扩展名（epub/mobi 书写「章」，其余「页」）；读取两者
+		// 皆收（存量书文件仍是「页」，字节不动往返不变）
+		const pageMatch = /^## 第 (\d+) (?:页|章)\s*$/.exec(line);
 		if (pageMatch) {
 			page = Number(pageMatch[1]);
 			inBookmarks = false;
@@ -622,7 +625,7 @@ export function serializeBookMd(input: SerializeBookInput): string {
 			a.createdAt === b.createdAt ? (a.id < b.id ? -1 : 1) : a.createdAt - b.createdAt,
 		);
 		out.push("");
-		out.push(key === null ? UNGROUPED_HEADING : `## 第 ${key} 页`);
+		out.push(key === null ? UNGROUPED_HEADING : `## 第 ${key} ${pageWordOf(doc.filePath)}`);
 		for (const card of group) {
 			out.push("");
 			serializeCard(out, card, reviews, links);

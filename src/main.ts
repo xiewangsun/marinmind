@@ -91,6 +91,8 @@ import { ExternalDocWatcher } from "./documents/external-watcher";
 import { externalFileExists, pickExternalPath } from "./storage/external-file";
 import { isAbsoluteFsPath, isHiddenVaultDir, joinRel } from "./storage/paths";
 import { buildCardCopyText, type CardCopyMode } from "./links/card-links";
+// 167 互链反向入口：卡片 wikilink 点击改道进插件
+import { registerCardLinkHandler } from "./links/card-link-handler";
 import { migrateLegacyWebclips } from "./webclip/webclip-migrate";
 import {
 	resolveBackupLocation,
@@ -230,6 +232,8 @@ export default class MarinMindPlugin extends Plugin {
 		this.registerView(HOME_VIEW_TYPE, (leaf) => new MarinMindHomeView(leaf, this));
 		// AI 助手对话面板（98：右停靠侧栏，基于当前阅读文档问答）
 		this.registerView(AI_CHAT_VIEW_TYPE, (leaf) => new AiChatView(leaf, this));
+		// 167 互链反向入口：普通笔记里的卡片 wikilink 点击跳进插件（定位原文）
+		registerCardLinkHandler(this);
 
 		// 数据层启动（设置/定位就绪之后）
 		this.dbReady = this.initStore();

@@ -1,6 +1,6 @@
 {
 	"name": "marinmind",
-	"version": "1.1.0",
+	"version": "1.1.1",
 	"description": "革新性整合阅读标注工具、思维导图和学习卡的一站式学习工具（Obsidian 插件）",
 	"main": "main.js",
 	"scripts": {
