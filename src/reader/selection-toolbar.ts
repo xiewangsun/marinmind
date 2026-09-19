@@ -1,5 +1,6 @@
 import { Menu, setIcon } from "obsidian";
 import type { DocRect, LineStyle } from "../types";
+import { t } from "../i18n/i18n";
 import { LINE_STYLES, LINE_STYLE_LABELS } from "../types";
 import type { AiMenuAction } from "../ai/ai-prompts";
 import { SELECTION_ACTION_LABELS } from "../ai/ai-prompts";
@@ -143,7 +144,7 @@ export class SelectionToolbar {
 			// AI 制卡（99）：划选材料 → QA/填空卡预览（终态动作，同走 runAction）
 			menu.addItem((item) =>
 				item
-					.setTitle("AI 制卡…")
+					.setTitle(t("AI 制卡…"))
 					.setIcon("list-checks")
 					.onClick(() => this.runAction((snap) => this.actions.onAiCardgen(snap))),
 			);

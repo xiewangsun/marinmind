@@ -83,14 +83,16 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName(t("常规")).setHeading();
 
 		new Setting(containerEl)
-			.setName("界面语言 / Language")
+			.setName(t("界面语言 / Language"))
 			.setDesc(
-				"Interface language. English translations are added progressively; untranslated texts fall back to Chinese. 已打开的界面即时生效，命令面板名称需重启 Obsidian 后更新。",
+				t(
+					"Interface language. English translations are added progressively; untranslated texts fall back to Chinese. 已打开的界面即时生效，命令面板名称需重启 Obsidian 后更新。",
+				),
 			)
 			.addDropdown((dropdown) => {
 				dropdown
-					.addOption("zh", "中文（默认）")
-					.addOption("en", "English")
+					.addOption("zh", t("中文（默认）"))
+					.addOption("en", t("English"))
 					.setValue(this.plugin.settings.language)
 					.onChange((value) => {
 						if (!isUiLocale(value)) {
@@ -111,13 +113,15 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName(t("工作区")).setHeading();
 
 		new Setting(containerEl)
-			.setName("联动方向")
+			.setName(t("联动方向"))
 			.setDesc(
-				"文档与脑图联动的门控：双向（默认）为自动跟随 + 点击互相定位；单向档只放行对应方向；「关闭」则两窗格完全独立（自动跟随、点击定位、联动互关全部停用）。工作区命令与视图切换条等显式编排不受此开关影响。",
+				t(
+					"文档与脑图联动的门控：双向（默认）为自动跟随 + 点击互相定位；单向档只放行对应方向；「关闭」则两窗格完全独立（自动跟随、点击定位、联动互关全部停用）。工作区命令与视图切换条等显式编排不受此开关影响。",
+				),
 			)
 			.addDropdown((dropdown) => {
 				for (const dir of LINK_DIRECTIONS) {
-					dropdown.addOption(dir, LINK_DIRECTION_LABELS[dir]);
+					dropdown.addOption(dir, t(LINK_DIRECTION_LABELS[dir]));
 				}
 				dropdown.setValue(this.plugin.settings.linkDirection).onChange((value) => {
 					if (!isLinkDirection(value)) {
@@ -134,16 +138,18 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName(t("外观")).setHeading();
 
 		new Setting(containerEl)
-			.setName("主页主题")
+			.setName(t("主页主题"))
 			.setDesc(
-				"Linear 深色为项目默认风格；浅色为 Linear 浅色变体（㊸）；「跟随 Obsidian 主题」则随当前亮/暗色主题变化。均立即生效。",
+				t(
+					"Linear 深色为项目默认风格；浅色为 Linear 浅色变体（㊸）；「跟随 Obsidian 主题」则随当前亮/暗色主题变化。均立即生效。",
+				),
 			)
 			.addDropdown((dropdown) => {
 				// 选项值直接用存储值（dark/light/auto）——存量 data.json 仅有 dark/auto，均仍合法零迁移
 				dropdown
-					.addOption("dark", "Linear 深色（默认）")
-					.addOption("light", "Linear 浅色")
-					.addOption("auto", "跟随 Obsidian 主题")
+					.addOption("dark", t("Linear 深色（默认）"))
+					.addOption("light", t("Linear 浅色"))
+					.addOption("auto", t("跟随 Obsidian 主题"))
 					.setValue(this.plugin.settings.homeTheme)
 					.onChange((value) => {
 						// 选项值即合法三态（收窄 string 联合）
@@ -162,7 +168,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 	private renderDataSection(containerEl: HTMLElement): void {
 		new Setting(containerEl).setName(t("数据存储")).setHeading();
 
-		const setting = new Setting(containerEl).setName("数据目录").setDesc(this.dataDirDesc());
+		const setting = new Setting(containerEl).setName(t("数据目录")).setDesc(this.dataDirDesc());
 		let migrateButton: ButtonComponent | undefined;
 		setting.addText((text) => {
 			noAssist(text); // R3（W-14）：路径输入
@@ -184,11 +190,13 @@ export class MarinMindSettingTab extends PluginSettingTab {
 			});
 		});
 		new Setting(containerEl)
-			.setName("应用并迁移数据")
-			.setDesc("将数据库与媒体附件复制到上方新目录（旧位置保留作为回退），完成后自动重载。")
+			.setName(t("应用并迁移数据"))
+			.setDesc(
+				t("将数据库与媒体附件复制到上方新目录（旧位置保留作为回退），完成后自动重载。"),
+			)
 			.addButton((button) => {
 				migrateButton = button
-					.setButtonText("应用并迁移数据…")
+					.setButtonText(t("应用并迁移数据…"))
 					.setCta()
 					.setDisabled(
 						this.pendingDataDir === this.plugin.settings.dataDir ||
@@ -198,12 +206,14 @@ export class MarinMindSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName("文档管理")
+			.setName(t("文档管理"))
 			.setDesc(
-				"查看全部文档记录与失联状态，重关联失联文档（卡片与复习进度保留）或清理无用记录。",
+				t(
+					"查看全部文档记录与失联状态，重关联失联文档（卡片与复习进度保留）或清理无用记录。",
+				),
 			)
 			.addButton((button) =>
-				button.setButtonText("打开文档管理面板").onClick(() => {
+				button.setButtonText(t("打开文档管理面板")).onClick(() => {
 					new DocumentManagerModal(this.app, this.plugin).open();
 				}),
 			);
@@ -214,9 +224,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName(t("阅读")).setHeading();
 
 		new Setting(containerEl)
-			.setName("划选工具栏")
+			.setName(t("划选工具栏"))
 			.setDesc(
-				"选中文字后弹出浮动工具栏（色点摘录 / 线型 / 翻译 / 复制 / 书签 / 搜索）；关闭后恢复划选松开即直接建卡。",
+				t(
+					"选中文字后弹出浮动工具栏（色点摘录 / 线型 / 翻译 / 复制 / 书签 / 搜索）；关闭后恢复划选松开即直接建卡。",
+				),
 			)
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.selectionToolbar).onChange(async (value) => {
@@ -226,13 +238,15 @@ export class MarinMindSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName("文字摘录线型")
+			.setName(t("文字摘录线型"))
 			.setDesc(
-				"新建文字摘录的高亮形态（下划线 / 波浪线 / 删除线）；已有卡片点击高亮块菜单「线型…」单独修改。",
+				t(
+					"新建文字摘录的高亮形态（下划线 / 波浪线 / 删除线）；已有卡片点击高亮块菜单「线型…」单独修改。",
+				),
 			)
 			.addDropdown((dropdown) => {
 				for (const style of LINE_STYLES) {
-					dropdown.addOption(style, LINE_STYLE_LABELS[style]);
+					dropdown.addOption(style, t(LINE_STYLE_LABELS[style]));
 				}
 				dropdown.setValue(this.plugin.settings.excerptLineStyle).onChange((value) => {
 					if (!isLineStyle(value)) {
@@ -249,9 +263,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName(t("文字识别 (OCR)")).setHeading();
 
 		new Setting(containerEl)
-			.setName("识别语言")
+			.setName(t("识别语言"))
 			.setDesc(
-				"区域 / 手写 / 整页 OCR 的识别语言组合；切换后首次识别会联网下载对应语言包（约 10-20MB，之后缓存本地离线可用）。",
+				t(
+					"区域 / 手写 / 整页 OCR 的识别语言组合；切换后首次识别会联网下载对应语言包（约 10-20MB，之后缓存本地离线可用）。",
+				),
 			)
 			.addDropdown((dropdown) => {
 				for (const lang of OCR_LANGUAGES) {
@@ -270,9 +286,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName("拖框即识")
+			.setName(t("拖框即识"))
 			.setDesc(
-				"区域摘录工具下框选松开即自动 OCR（免去二次点菜单识别）。默认关：首次使用会静默联网下载引擎，且连续摘录会被逐框识别等待打断。仅桌面端 PDF 文档生效。",
+				t(
+					"区域摘录工具下框选松开即自动 OCR（免去二次点菜单识别）。默认关：首次使用会静默联网下载引擎，且连续摘录会被逐框识别等待打断。仅桌面端 PDF 文档生效。",
+				),
 			)
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.ocrOnAreaExcerpt).onChange(async (value) => {
@@ -282,9 +300,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName("识别后自动翻译")
+			.setName(t("识别后自动翻译"))
 			.setDesc(
-				"OCR 识别成功后自动翻译识别文字，并把译文存为原文正下方的留白卡（目标语言与引擎跟随「翻译」节设置）；翻译失败不影响已识别的文字。",
+				t(
+					"OCR 识别成功后自动翻译识别文字，并把译文存为原文正下方的留白卡（目标语言与引擎跟随「翻译」节设置）；翻译失败不影响已识别的文字。",
+				),
 			)
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.ocrAutoTranslate).onChange(async (value) => {
@@ -295,9 +315,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		// 84-E 照片入库压缩：缩放 + WebP 转码省库体积（GIF/SVG 与小图不受影响）
 		new Setting(containerEl)
-			.setName("照片入库压缩")
+			.setName(t("照片入库压缩"))
 			.setDesc(
-				"超 300KB 的照片在保存为摘录卡片前，先缩放到最长边 2560px 并转为 WebP（画质 0.85，肉眼无损），显著减小库体积；GIF、SVG 与小图原样保留。",
+				t(
+					"超 300KB 的照片在保存为摘录卡片前，先缩放到最长边 2560px 并转为 WebP（画质 0.85，肉眼无损），显著减小库体积；GIF、SVG 与小图原样保留。",
+				),
 			)
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.photoCompress).onChange(async (value) => {
@@ -312,8 +334,8 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName(t("翻译")).setHeading();
 
 		new Setting(containerEl)
-			.setName("目标语言")
-			.setDesc("高亮菜单「翻译」的默认目标语言（翻译弹窗内可临时切换并会记住）。")
+			.setName(t("目标语言"))
+			.setDesc(t("高亮菜单「翻译」的默认目标语言（翻译弹窗内可临时切换并会记住）。"))
 			.addDropdown((dropdown) => {
 				for (const lang of TRANSLATE_LANGUAGES) {
 					dropdown.addOption(lang.code, lang.label);
@@ -333,9 +355,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		// 83 备选引擎（85-B 增有道）：Google（免密钥，国内需代理）/ 百度 · 有道
 		// （国内直连，需凭据）/ DeepL
 		new Setting(containerEl)
-			.setName("翻译引擎")
+			.setName(t("翻译引擎"))
 			.setDesc(
-				"Google 免费接口免密钥（国内通常需代理）；百度 / 有道 / DeepL 需在下方填写凭据（百度与有道国内可直连）。目标语言中的粤语/文言文仅 Google 与百度支持。",
+				t(
+					"Google 免费接口免密钥（国内通常需代理）；百度 / 有道 / DeepL 需在下方填写凭据（百度与有道国内可直连）。目标语言中的粤语/文言文仅 Google 与百度支持。",
+				),
 			)
 			.addDropdown((dropdown) => {
 				for (const engine of TRANSLATE_ENGINES) {
@@ -357,9 +381,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.translateEngine === "baidu") {
 			new Setting(containerEl)
-				.setName("百度翻译凭据")
+				.setName(t("百度翻译凭据"))
 				.setDesc(
-					"fanyi.baidu.com 注册「通用翻译API」（标准版免费，限 1 次/秒），在管理控制台「开发者信息」查 APP ID 与密钥。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					t(
+						"fanyi.baidu.com 注册「通用翻译API」（标准版免费，限 1 次/秒），在管理控制台「开发者信息」查 APP ID 与密钥。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					),
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
@@ -384,9 +410,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.translateEngine === "youdao") {
 			new Setting(containerEl)
-				.setName("有道翻译凭据")
+				.setName(t("有道翻译凭据"))
 				.setDesc(
-					"ai.youdao.com 注册并创建「自然语言翻译服务」应用（文本翻译，新用户免费额度），在应用详情查应用 ID 与应用密钥，并确认已绑定「文本翻译服务」。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					t(
+						"ai.youdao.com 注册并创建「自然语言翻译服务」应用（文本翻译，新用户免费额度），在应用详情查应用 ID 与应用密钥，并确认已绑定「文本翻译服务」。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					),
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
@@ -413,9 +441,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.translateEngine === "deepl") {
 			new Setting(containerEl)
-				.setName("DeepL Auth-Key")
+				.setName(t("DeepL Auth-Key"))
 				.setDesc(
-					"deepl.com/pro#developer 注册 DeepL API Free（每月 50 万字符免费）获取密钥；免费版密钥以 :fx 结尾（自动走免费版端点）。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					t(
+						"deepl.com/pro#developer 注册 DeepL API Free（每月 50 万字符免费）获取密钥；免费版密钥以 :fx 结尾（自动走免费版端点）。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					),
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
@@ -438,14 +468,14 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		const presets = sanitizeAiPresets(this.plugin.settings.aiPresets);
 		const activePreset = presets.find((p) => p.id === this.plugin.settings.aiActivePresetId);
 		new Setting(containerEl)
-			.setName("模型预设")
+			.setName(t("模型预设"))
 			.setDesc(
 				activePreset
 					? `当前启用「${activePreset.name}」（${activePreset.model}）。凭据明文存于插件数据文件，请勿在共享库中使用。`
 					: "未启用——AI 功能需先添加并启用一个模型预设。支持 OpenAI 兼容端点（DeepSeek / 智谱 / OpenAI / oneapi 系中转站等）。",
 			)
 			.addDropdown((dropdown) => {
-				dropdown.addOption("", "未启用");
+				dropdown.addOption("", t("未启用"));
 				for (const preset of presets) {
 					dropdown.addOption(preset.id, preset.name);
 				}
@@ -457,21 +487,21 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				});
 			})
 			.addButton((button) =>
-				button.setButtonText("管理预设…").onClick(() => {
+				button.setButtonText(t("管理预设…")).onClick(() => {
 					new AiPresetModal(this.app, this.plugin, () => this.display()).open();
 				}),
 			);
 
 		// 测试连接：max_tokens=1 的 ping（未启用时按钮禁用；成功 Notice 带模型名）
 		new Setting(containerEl)
-			.setName("测试连接")
-			.setDesc("向当前启用预设发送一条最小请求，验证地址、密钥与模型名可用。")
+			.setName(t("测试连接"))
+			.setDesc(t("向当前启用预设发送一条最小请求，验证地址、密钥与模型名可用。"))
 			.addButton((button) => {
 				button
-					.setButtonText("测试连接")
+					.setButtonText(t("测试连接"))
 					.setDisabled(!activePreset)
 					.onClick(async () => {
-						button.setDisabled(true).setButtonText("测试中…");
+						button.setDisabled(true).setButtonText(t("测试中…"));
 						try {
 							const model = await testAiConnection(this.plugin.settings);
 							new Notice(`AI 连接成功：模型 ${model}`);
@@ -481,7 +511,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 								`AI 连接失败：${err instanceof Error ? err.message : String(err)}`,
 							);
 						} finally {
-							button.setDisabled(false).setButtonText("测试连接");
+							button.setDisabled(false).setButtonText(t("测试连接"));
 						}
 					});
 			});
@@ -489,7 +519,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		// 温度（96）：浮点输入 + 行内红字校验（镜像复习节数字校验先例）
 		const tempDesc =
 			"采样温度（0-2，默认 0.3）：越低越确定、越高越发散；制卡/整理等结构化场景建议保持低值。";
-		const tempSetting = new Setting(containerEl).setName("采样温度").setDesc(tempDesc);
+		const tempSetting = new Setting(containerEl).setName(t("采样温度")).setDesc(tempDesc);
 		tempSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.inputEl.setAttribute("inputmode", "decimal");
@@ -510,14 +540,16 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		});
 
 		new Setting(containerEl)
-			.setName("流式输出")
+			.setName(t("流式输出"))
 			.setDesc(
-				"开启（默认）逐字流式显示 AI 回复；个别自建网关或移动端不支持流式时自动降级整包返回。「关闭」则始终整包返回（最稳但无逐字效果）。",
+				t(
+					"开启（默认）逐字流式显示 AI 回复；个别自建网关或移动端不支持流式时自动降级整包返回。「关闭」则始终整包返回（最稳但无逐字效果）。",
+				),
 			)
 			.addDropdown((dropdown) => {
 				dropdown
-					.addOption("auto", "开启（自动降级）")
-					.addOption("off", "关闭（始终整包）")
+					.addOption("auto", t("开启（自动降级）"))
+					.addOption("off", t("关闭（始终整包）"))
 					.setValue(this.plugin.settings.aiStream)
 					.onChange((value) => {
 						this.plugin.settings.aiStream = value === "off" ? "off" : "auto";
@@ -529,7 +561,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		const budgetDesc =
 			"单次请求上下文 token 预算（2000-200000，默认 24000）：文档问答与摘要按此裁剪送入的内容量（估算值，中文约一字一 token）。";
 		const budgetSetting = new Setting(containerEl)
-			.setName("上下文 token 预算")
+			.setName(t("上下文 token 预算"))
 			.setDesc(budgetDesc);
 		budgetSetting.addText((text) => {
 			text.inputEl.type = "number";
@@ -552,21 +584,21 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		// 自定义指令（97）：划选工具栏 AI 菜单的自定义项管理
 		const customPrompts = sanitizeAiCustomPrompts(this.plugin.settings.aiCustomPrompts);
 		new Setting(containerEl)
-			.setName("自定义 AI 指令")
+			.setName(t("自定义 AI 指令"))
 			.setDesc(
 				customPrompts.length > 0
 					? `已有 ${customPrompts.length} 条（${customPrompts.map((p) => p.label).join("、")}），出现在划选工具栏的 AI 菜单里。`
 					: "添加后出现在划选工具栏的 AI 菜单里（如「举例说明」「出 3 道练习题」）。",
 			)
 			.addButton((button) =>
-				button.setButtonText("管理指令…").onClick(() => {
+				button.setButtonText(t("管理指令…")).onClick(() => {
 					new AiCustomPromptModal(this.app, this.plugin, () => this.display()).open();
 				}),
 			);
 
 		new Setting(containerEl)
-			.setName("AI 制卡自动转闪卡")
-			.setDesc("AI 生成的卡片默认直接进入复习队列（可在制卡预览中逐批调整）。")
+			.setName(t("AI 制卡自动转闪卡"))
+			.setDesc(t("AI 生成的卡片默认直接进入复习队列（可在制卡预览中逐批调整）。"))
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.aiAutoFlashcard).onChange(async (value) => {
 					this.plugin.settings.aiAutoFlashcard = value;
@@ -577,12 +609,12 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		// 用量展示（96）：请求次数与累计 token（流式为估算值），只读 + 清零
 		const usage = this.plugin.settings.aiUsage;
 		new Setting(containerEl)
-			.setName("累计用量")
+			.setName(t("累计用量"))
 			.setDesc(
 				`请求 ${usage.requests} 次 · 输入 ${usage.promptTokens.toLocaleString()} · 输出 ${usage.completionTokens.toLocaleString()} token（流式请求为估算值）。`,
 			)
 			.addButton((button) =>
-				button.setButtonText("清零").onClick(() => {
+				button.setButtonText(t("清零")).onClick(() => {
 					this.plugin.settings.aiUsage = {
 						requests: 0,
 						promptTokens: 0,
@@ -596,12 +628,14 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		// ---------- 联网搜索服务（128 AI 联网后备） ----------
 
 		new Setting(containerEl)
-			.setName("联网搜索服务")
+			.setName(t("联网搜索服务"))
 			.setDesc(
-				"普通模型（DeepSeek 等）无联网能力时，插件先经所选搜索服务取回资料、拼进提问上下文（RAG）让回答带网络信息；GLM / search-preview / sonar / :online 等自带搜索的模型优先走厂商能力、不经此服务。搜索按服务方计费（Tavily 免费档每月 1000 次、博查按次计费、SearXNG 自建免费）。",
+				t(
+					"普通模型（DeepSeek 等）无联网能力时，插件先经所选搜索服务取回资料、拼进提问上下文（RAG）让回答带网络信息；GLM / search-preview / sonar / :online 等自带搜索的模型优先走厂商能力、不经此服务。搜索按服务方计费（Tavily 免费档每月 1000 次、博查按次计费、SearXNG 自建免费）。",
+				),
 			)
 			.addDropdown((dropdown) => {
-				dropdown.addOption("off", "关闭（默认）");
+				dropdown.addOption("off", t("关闭（默认）"));
 				for (const engine of WEB_SEARCH_ENGINES) {
 					dropdown.addOption(engine.id, engine.label);
 				}
@@ -621,9 +655,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.webSearchService === "tavily") {
 			new Setting(containerEl)
-				.setName("Tavily API Key")
+				.setName(t("Tavily API Key"))
 				.setDesc(
-					"app.tavily.com 注册获取（免费档每月 1000 次调用）。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					t(
+						"app.tavily.com 注册获取（免费档每月 1000 次调用）。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					),
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
@@ -638,9 +674,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.webSearchService === "bocha") {
 			new Setting(containerEl)
-				.setName("博查 API Key")
+				.setName(t("博查 API Key"))
 				.setDesc(
-					"open.bochaai.com 注册获取（按次计费，Web Search 每千次 ¥40 起）。国内直连可用。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					t(
+						"open.bochaai.com 注册获取（按次计费，Web Search 每千次 ¥40 起）。国内直连可用。凭据明文存于插件数据文件，请勿在共享库中使用。",
+					),
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：凭据输入
@@ -655,9 +693,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		if (this.plugin.settings.webSearchService === "searxng") {
 			new Setting(containerEl)
-				.setName("SearXNG 实例地址")
+				.setName(t("SearXNG 实例地址"))
 				.setDesc(
-					"自建聚合搜索引擎（searx.github.io/searxng）的地址，如 http://127.0.0.1:8080；实例需在设置中开启 json 输出格式（search.formats 含 json）。自建免费且数据不出本地网络。",
+					t(
+						"自建聚合搜索引擎（searx.github.io/searxng）的地址，如 http://127.0.0.1:8080；实例需在设置中开启 json 输出格式（search.formats 含 json）。自建免费且数据不出本地网络。",
+					),
 				)
 				.addText((text) => {
 					noAssist(text); // R3（W-14）：地址输入
@@ -675,7 +715,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		if (this.plugin.settings.webSearchService !== "off") {
 			const callReady = searchServiceReady(this.plugin.settings);
 			new Setting(containerEl)
-				.setName("测试搜索连接")
+				.setName(t("测试搜索连接"))
 				.setDesc(
 					callReady
 						? "用固定词搜一次，验证服务地址与凭据可用。"
@@ -683,10 +723,10 @@ export class MarinMindSettingTab extends PluginSettingTab {
 				)
 				.addButton((button) => {
 					button
-						.setButtonText("测试搜索")
+						.setButtonText(t("测试搜索"))
 						.setDisabled(!callReady)
 						.onClick(async () => {
-							button.setDisabled(true).setButtonText("测试中…");
+							button.setDisabled(true).setButtonText(t("测试中…"));
 							try {
 								const results = await testSearchConnection(this.plugin.settings);
 								new Notice(
@@ -700,7 +740,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 									`搜索连接失败：${err instanceof Error ? err.message : String(err)}`,
 								);
 							} finally {
-								button.setDisabled(false).setButtonText("测试搜索");
+								button.setDisabled(false).setButtonText(t("测试搜索"));
 							}
 						});
 				});
@@ -715,7 +755,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		// （镜像数据目录校验先例——Notice 转瞬即逝且与字段分离）
 		const batchDesc =
 			"每次拉取的到期复习卡上限（5-200，默认 20）。新卡（首次考的卡）不占此名额，在复习卡之后追加。";
-		const batchSetting = new Setting(containerEl).setName("每批复习张数").setDesc(batchDesc);
+		const batchSetting = new Setting(containerEl).setName(t("每批复习张数")).setDesc(batchDesc);
 		batchSetting.addText((text) => {
 			text.inputEl.type = "number";
 			text.inputEl.setAttribute("inputmode", "numeric");
@@ -735,7 +775,7 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		const newPerDayDesc =
 			"每天最多引入多少张新闪卡（0-999，0 = 不限，默认 0）。开启后新卡排在到期复习卡之后，当日已考新卡计入配额；适合控制新知识引入速度。";
 		const newPerDaySetting = new Setting(containerEl)
-			.setName("每日新卡上限")
+			.setName(t("每日新卡上限"))
 			.setDesc(newPerDayDesc);
 		newPerDaySetting.addText((text) => {
 			text.inputEl.type = "number";
@@ -758,13 +798,15 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		// 103 调度算法：SM-2 / FSRS-4.5 切换（即时生效；SM-2 存量卡切 fsrs 后
 		// 首次评分惰性迁移记忆状态，切回零成本——双向可退）
 		new Setting(containerEl)
-			.setName("调度算法")
+			.setName(t("调度算法"))
 			.setDesc(
-				"SM-2（Anki 简化版，默认）或 FSRS-4.5（记忆稳定性/难度模型，间隔更平滑）。切换即时生效；切换只影响之后的评分，已算出的到期时间不变。",
+				t(
+					"SM-2（Anki 简化版，默认）或 FSRS-4.5（记忆稳定性/难度模型，间隔更平滑）。切换即时生效；切换只影响之后的评分，已算出的到期时间不变。",
+				),
 			)
 			.addDropdown((drop) => {
-				drop.addOption("sm2", "SM-2（Anki 简化版）");
-				drop.addOption("fsrs", "FSRS-4.5");
+				drop.addOption("sm2", t("SM-2（Anki 简化版）"));
+				drop.addOption("fsrs", t("FSRS-4.5"));
 				drop.setValue(this.plugin.settings.scheduler).onChange((value) => {
 					this.plugin.settings.scheduler = value === "fsrs" ? "fsrs" : "sm2";
 					void this.plugin.saveData({ ...this.plugin.settings });
@@ -783,15 +825,17 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName(t("网页剪藏")).setHeading();
 
 		new Setting(containerEl)
-			.setName("剪藏落点")
+			.setName(t("剪藏落点"))
 			.setDesc(
 				`网页剪藏与屏幕剪藏保存到数据目录的 clips/ 子文件夹（与 books/、mindmaps/ 同级），正文图片统一存 assets/。`,
 			);
 
 		new Setting(containerEl)
-			.setName("图片下载到本地")
+			.setName(t("图片下载到本地"))
 			.setDesc(
-				"剪藏时把正文图片下载到数据目录 assets/（并发 3、至多 20 张、单张 ≤20MB）；失败与超限的图片自动回退为远程链接。",
+				t(
+					"剪藏时把正文图片下载到数据目录 assets/（并发 3、至多 20 张、单张 ≤20MB）；失败与超限的图片自动回退为远程链接。",
+				),
 			)
 			.addToggle((toggle) => {
 				toggle
@@ -809,7 +853,9 @@ export class MarinMindSettingTab extends PluginSettingTab {
 
 		const hotkeyDesc =
 			"在任何应用内按下即冻结全屏直接框选（仅桌面）。格式：修饰键+单键，如 Ctrl+Shift+S；修饰键 Ctrl/Cmd/Alt/Shift/Super（macOS Cmd），至少一个。留空关闭。热键被其他应用占用时注册会失败并提示。";
-		const hotkeySetting = new Setting(containerEl).setName("全局截图热键").setDesc(hotkeyDesc);
+		const hotkeySetting = new Setting(containerEl)
+			.setName(t("全局截图热键"))
+			.setDesc(hotkeyDesc);
 		hotkeySetting.addText((text) => {
 			noAssist(text); // R3（W-14）：热键输入
 			text.setValue(this.plugin.settings.captureGlobalHotkey).onChange((value) => {
@@ -833,9 +879,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		});
 
 		new Setting(containerEl)
-			.setName("屏幕剪藏识别文字（OCR）")
+			.setName(t("屏幕剪藏识别文字（OCR）"))
 			.setDesc(
-				"「剪藏屏幕区域为笔记」对选中区域做文字识别，识别文字写入笔记正文与标题；关闭或识别失败则只存截图。首次识别需联网下载语言包（语言同 OCR 设置）。",
+				t(
+					"「剪藏屏幕区域为笔记」对选中区域做文字识别，识别文字写入笔记正文与标题；关闭或识别失败则只存截图。首次识别需联网下载语言包（语言同 OCR 设置）。",
+				),
 			)
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.screenClipOcr).onChange(async (value) => {
@@ -845,9 +893,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName("任务栏托盘常驻图标")
+			.setName(t("任务栏托盘常驻图标"))
 			.setDesc(
-				"系统托盘常驻 MarinMind 截图入口（仅桌面）：左键单击 = 截图（框选）复制；右键菜单 = 剪藏屏幕区域为笔记 / 打开设置。关闭即移除；环境不支持时静默不显示（命令与热键入口不受影响）。",
+				t(
+					"系统托盘常驻 MarinMind 截图入口（仅桌面）：左键单击 = 截图（框选）复制；右键菜单 = 剪藏屏幕区域为笔记 / 打开设置。关闭即移除；环境不支持时静默不显示（命令与热键入口不受影响）。",
+				),
 			)
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.showCaptureTray).onChange(async (value) => {
@@ -864,9 +914,11 @@ export class MarinMindSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName(t("备份")).setHeading();
 
 		new Setting(containerEl)
-			.setName("备份目录")
+			.setName(t("备份目录"))
 			.setDesc(
-				".marginpkg 导出落点。vault 内相对路径或本机绝对路径（仅桌面）；不影响已导出的历史备份。",
+				t(
+					".marginpkg 导出落点。vault 内相对路径或本机绝对路径（仅桌面）；不影响已导出的历史备份。",
+				),
 			)
 			.addText((text) => {
 				noAssist(text); // R3（W-14）：路径输入

@@ -23,10 +23,10 @@ const HOME_PAGES: readonly HomePage[] = ["overview", "documents", "cards", "maps
 
 /** 主页导航页元数据（侧栏渲染） */
 const NAV_ITEMS: { page: HomePage; icon: string; label: string; section: 0 | 1 }[] = [
-	{ page: "overview", icon: "gauge", label: "概览", section: 0 },
-	{ page: "documents", icon: "folder-open", label: "文档", section: 1 },
-	{ page: "cards", icon: "layers", label: "卡片", section: 1 },
-	{ page: "maps", icon: "git-fork", label: "脑图", section: 1 },
+	{ page: "overview", icon: "gauge", label: t("概览"), section: 0 },
+	{ page: "documents", icon: "folder-open", label: t("文档"), section: 1 },
+	{ page: "cards", icon: "layers", label: t("卡片"), section: 1 },
+	{ page: "maps", icon: "git-fork", label: t("脑图"), section: 1 },
 ];
 
 /**
@@ -141,7 +141,7 @@ export class MarinMindHomeView extends ItemView {
 		this.contentEl.empty();
 		const sidebar = this.contentEl.createDiv({ cls: "marinmind-home-sidebar" });
 
-		sidebar.createDiv({ cls: "marinmind-home-brand", text: "MarinMind" });
+		sidebar.createDiv({ cls: "marinmind-home-brand", text: t("MarinMind") });
 
 		const nav = sidebar.createDiv({ cls: "marinmind-home-nav" });
 		let lastSection = -1;
@@ -149,7 +149,7 @@ export class MarinMindHomeView extends ItemView {
 		for (const item of NAV_ITEMS) {
 			if (item.section !== lastSection && item.section === 1) {
 				// 「知识库」分节标签（概览与库内容之间）
-				nav.createDiv({ cls: "marinmind-home-nav-section", text: "知识库" });
+				nav.createDiv({ cls: "marinmind-home-nav-section", text: t("知识库") });
 				lastSection = 1;
 			} else {
 				lastSection = item.section;
@@ -176,7 +176,7 @@ export class MarinMindHomeView extends ItemView {
 		enableKeyboardActivation(openPdf); // P0-1：底部「打开文档」键盘可达
 		const iconEl = openPdf.createDiv({ cls: "marinmind-home-nav-icon" });
 		setIcon(iconEl, "file-plus");
-		openPdf.createDiv({ cls: "marinmind-home-nav-label", text: "打开文档" });
+		openPdf.createDiv({ cls: "marinmind-home-nav-label", text: t("打开文档") });
 
 		// 113 剪藏网页：footer 第二入口（与打开文档同为「获取素材」动作）
 		const clip = footer.createDiv({
@@ -186,7 +186,7 @@ export class MarinMindHomeView extends ItemView {
 		enableKeyboardActivation(clip); // P0-1：底部「剪藏网页」键盘可达
 		const clipIcon = clip.createDiv({ cls: "marinmind-home-nav-icon" });
 		setIcon(clipIcon, "globe");
-		clip.createDiv({ cls: "marinmind-home-nav-label", text: "剪藏网页" });
+		clip.createDiv({ cls: "marinmind-home-nav-label", text: t("剪藏网页") });
 
 		this.contentEl.createDiv({ cls: "marinmind-home-content" });
 	}
@@ -231,7 +231,7 @@ export class MarinMindHomeView extends ItemView {
 		if (!this.plugin.store) {
 			content.createEl("p", {
 				cls: "marinmind-home-empty",
-				text: "数据层未就绪，无法展示主页内容。",
+				text: t("数据层未就绪，无法展示主页内容。"),
 			});
 			return;
 		}

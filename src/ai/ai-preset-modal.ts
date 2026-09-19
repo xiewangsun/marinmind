@@ -1,4 +1,5 @@
 import { ButtonComponent, Modal, Notice, setIcon } from "obsidian";
+import { t } from "../i18n/i18n";
 import type { App } from "obsidian";
 import type MarinMindPlugin from "../main";
 import { newAiId, sanitizeAiPresets, type AiPreset } from "./ai-provider";
@@ -12,19 +13,23 @@ interface PresetField {
 }
 
 const PRESET_FIELDS: readonly PresetField[] = [
-	{ key: "name", label: "名称", placeholder: "如 DeepSeek / 公司中转" },
+	{ key: "name", label: t("名称"), placeholder: t("如 DeepSeek / 公司中转") },
 	{
 		key: "baseUrl",
-		label: "Base URL",
-		placeholder: "https://api.deepseek.com/v1（填到 /v1 层级）",
+		label: t("Base URL"),
+		placeholder: t("https://api.deepseek.com/v1（填到 /v1 层级）"),
 	},
 	{
 		key: "apiKey",
-		label: "API Key",
-		placeholder: "sk-…（凭据明文存于插件数据文件）",
+		label: t("API Key"),
+		placeholder: t("sk-…（凭据明文存于插件数据文件）"),
 		password: true,
 	},
-	{ key: "model", label: "模型名", placeholder: "如 deepseek-chat / glm-4.6 / gpt-4o-mini" },
+	{
+		key: "model",
+		label: t("模型名"),
+		placeholder: t("如 deepseek-chat / glm-4.6 / gpt-4o-mini"),
+	},
 ];
 
 /**
@@ -47,7 +52,7 @@ export class AiPresetModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.titleEl.setText("AI 模型预设");
+		this.titleEl.setText(t("AI 模型预设"));
 		this.renderList();
 	}
 
@@ -64,7 +69,9 @@ export class AiPresetModal extends Modal {
 		if (presets.length === 0) {
 			body.createDiv({
 				cls: "marinmind-ai-preset-empty",
-				text: "尚无预设——点击下方「新增预设」添加一个 OpenAI 兼容端点（DeepSeek / 智谱 / OpenAI / oneapi 系中转站等）。",
+				text: t(
+					"尚无预设——点击下方「新增预设」添加一个 OpenAI 兼容端点（DeepSeek / 智谱 / OpenAI / oneapi 系中转站等）。",
+				),
 			});
 		}
 		for (const preset of presets) {
@@ -93,7 +100,7 @@ export class AiPresetModal extends Modal {
 			});
 			const edit = actions.createEl("button", {
 				cls: "clickable-icon",
-				attr: { "aria-label": "编辑" },
+				attr: { "aria-label": t("编辑") },
 			});
 			setIcon(edit, "pencil");
 			edit.addEventListener("click", (evt) => {

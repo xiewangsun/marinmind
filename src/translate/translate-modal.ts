@@ -1,4 +1,5 @@
 import { ButtonComponent, Modal, Notice } from "obsidian";
+import { t } from "../i18n/i18n";
 import type { App } from "obsidian";
 import {
 	DEFAULT_TRANSLATE_TARGET,
@@ -55,14 +56,14 @@ export class TranslateModal extends Modal {
 	}
 
 	onOpen(): void {
-		this.titleEl.setText("翻译");
+		this.titleEl.setText(t("翻译"));
 
 		// 头部：目标语言下拉 + 源语言检测结果
 		const head = this.contentEl.createDiv({ cls: "marinmind-tr-head" });
 		// R3（W-04）：select 无关联 label，补可访问名
 		const selectEl = head.createEl("select", {
 			cls: "marinmind-tr-lang",
-			attr: { "aria-label": "目标语言" },
+			attr: { "aria-label": t("目标语言") },
 		});
 		for (const lang of TRANSLATE_LANGUAGES) {
 			const option = selectEl.createEl("option", { text: lang.label });
@@ -79,13 +80,13 @@ export class TranslateModal extends Modal {
 		});
 		this.detectEl = head.createSpan({ cls: "marinmind-tr-detect" });
 
-		this.contentEl.createDiv({ cls: "marinmind-tr-label", text: "原文" });
+		this.contentEl.createDiv({ cls: "marinmind-tr-label", text: t("原文") });
 		this.contentEl.createDiv({
 			cls: "marinmind-tr-text marinmind-tr-source",
 			text: this.opts.sourceText,
 		});
 
-		this.contentEl.createDiv({ cls: "marinmind-tr-label", text: "译文" });
+		this.contentEl.createDiv({ cls: "marinmind-tr-label", text: t("译文") });
 		// R3（W-03）：异步结果区播报（翻译完成/出错时屏幕阅读器可感知）
 		this.resultEl = this.contentEl.createDiv({
 			cls: "marinmind-tr-text marinmind-tr-result",

@@ -87,17 +87,17 @@ export class AiChatView extends ItemView {
 		const head = this.contentEl.createDiv({ cls: "marinmind-ai-chat-head" });
 		const scopeEl = head.createEl("select", {
 			cls: "marinmind-ai-chat-scope",
-			attr: { "aria-label": "上下文范围" },
+			attr: { "aria-label": t("上下文范围") },
 		});
-		scopeEl.createEl("option", { text: "当前页为上下文" }).value = "page";
-		scopeEl.createEl("option", { text: "全文为上下文" }).value = "doc";
+		scopeEl.createEl("option", { text: t("当前页为上下文") }).value = "page";
+		scopeEl.createEl("option", { text: t("全文为上下文") }).value = "doc";
 		scopeEl.value = this.ctxScope;
 		scopeEl.addEventListener("change", () => {
 			this.ctxScope = scopeEl.value === "doc" ? "doc" : "page";
 		});
 		const reset = head.createEl("button", {
 			cls: "clickable-icon",
-			attr: { "aria-label": "重置对话" },
+			attr: { "aria-label": t("重置对话") },
 		});
 		setIcon(reset, "rotate-ccw");
 		reset.addEventListener("click", () => {
@@ -118,7 +118,7 @@ export class AiChatView extends ItemView {
 		this.inputEl = foot.createEl("textarea", {
 			cls: "marinmind-ai-chat-input",
 			attr: {
-				placeholder: "问当前文档的问题…（Enter 发送，Shift+Enter 换行）",
+				placeholder: t("问当前文档的问题…（Enter 发送，Shift+Enter 换行）"),
 				rows: "2",
 			},
 		});
@@ -132,14 +132,17 @@ export class AiChatView extends ItemView {
 		// （预设可能在设置里换过，不做一次性置灰避免过期态）
 		this.webBtn = foot.createEl("button", {
 			cls: "clickable-icon marinmind-ai-chat-web",
-			attr: { type: "button", "aria-label": "联网搜索（文档内容 + 网络资料一起作上下文）" },
+			attr: {
+				type: "button",
+				"aria-label": t("联网搜索（文档内容 + 网络资料一起作上下文）"),
+			},
 		});
 		setIconSafe(this.webBtn, "globe", "search");
 		this.webBtn.toggleClass("is-on", this.webOn);
 		this.webBtn.addEventListener("click", () => this.toggleWeb());
 		this.sendBtn = foot.createEl("button", {
 			cls: "marinmind-ai-chat-send",
-			text: "发送",
+			text: t("发送"),
 			attr: { type: "button" },
 		});
 		this.sendBtn.addEventListener("click", () => void this.send());
@@ -160,7 +163,9 @@ export class AiChatView extends ItemView {
 		this.listEl.empty();
 		this.listEl.createDiv({
 			cls: "marinmind-ai-chat-empty",
-			text: "基于当前文档问答：先在阅读器打开文档，选择上下文范围（当前页 / 全文），然后提问。回答中的「第 N 页」可点击跳转。点 🌐 可叠加联网搜索：模型自带搜索（GLM / gpt-4o-search-preview / sonar 系列，或 OpenRouter 模型名加 :online 后缀）直接用；普通模型可到 设置 → AI → 联网搜索服务 配置 Tavily / 博查 / SearXNG 后，插件先搜后拼资料作答（联网可能产生额外费用）。",
+			text: t(
+				"基于当前文档问答：先在阅读器打开文档，选择上下文范围（当前页 / 全文），然后提问。回答中的「第 N 页」可点击跳转。点 🌐 可叠加联网搜索：模型自带搜索（GLM / gpt-4o-search-preview / sonar 系列，或 OpenRouter 模型名加 :online 后缀）直接用；普通模型可到 设置 → AI → 联网搜索服务 配置 Tavily / 博查 / SearXNG 后，插件先搜后拼资料作答（联网可能产生额外费用）。",
+			),
 		});
 	}
 
@@ -271,7 +276,7 @@ export class AiChatView extends ItemView {
 		// 正文容器（133）：markdown 渲染进 body，页/来源 chip 挂 bubble 尾——
 		// 重渲正文（原子换装清旧）不吞 chips，chips 后插也永远在正文之下
 		const body = bubble.createDiv();
-		body.setText("思考中…");
+		body.setText(t("思考中…"));
 
 		this.abort = new AbortController();
 		let reply = "";
@@ -402,7 +407,7 @@ export class AiChatView extends ItemView {
 				}
 				this.renderPageChips(bubble, reply);
 			} else {
-				bubble.setText("（AI 返回内容为空，请重试或更换模型）");
+				bubble.setText(t("（AI 返回内容为空，请重试或更换模型）"));
 			}
 		} catch (err) {
 			if (err instanceof DOMException && err.name === "AbortError") {
@@ -410,7 +415,7 @@ export class AiChatView extends ItemView {
 				if (bubble.isConnected && reply.trim()) {
 					paintMd(); // 中止保部分：已到内容照样格式化成型
 				} else if (bubble.isConnected) {
-					bubble.setText("（已停止）");
+					bubble.setText(t("（已停止）"));
 				}
 			} else {
 				const message = err instanceof Error ? err.message : String(err);
@@ -463,10 +468,10 @@ export class AiChatView extends ItemView {
 		});
 		const mark = chips.createDiv({
 			cls: "marinmind-ai-chat-webmark",
-			attr: { "aria-label": "联网来源" },
+			attr: { "aria-label": t("联网来源") },
 		});
 		setIconSafe(mark, "globe", "search");
-		mark.createSpan({ text: "来源" });
+		mark.createSpan({ text: t("来源") });
 		for (const s of sources.slice(0, 8)) {
 			let label = s.title.trim();
 			if (!label) {

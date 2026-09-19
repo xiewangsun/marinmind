@@ -1,4 +1,5 @@
 import { FuzzySuggestModal } from "obsidian";
+import { t } from "../i18n/i18n";
 import type { App, FuzzyMatch } from "obsidian";
 import type MarinMindPlugin from "../main";
 import { distinctDecks } from "../home/home-data";
@@ -15,7 +16,7 @@ export class DeckPickerModal extends FuzzySuggestModal<string> {
 		private readonly onChoose: (deck: string) => void,
 	) {
 		super(app);
-		this.setPlaceholder("选择卡组…");
+		this.setPlaceholder(t("选择卡组…"));
 	}
 
 	getItems(): string[] {

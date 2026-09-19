@@ -1,4 +1,5 @@
 import { FuzzySuggestModal } from "obsidian";
+import { t } from "../i18n/i18n";
 import type { App, FuzzyMatch } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Mindmap } from "../types";
@@ -28,7 +29,7 @@ export class MindmapPickerModal extends FuzzySuggestModal<Entry> {
 		private readonly onChoose: (map: Mindmap) => void,
 	) {
 		super(app);
-		this.setPlaceholder("选择思维导图…");
+		this.setPlaceholder(t("选择思维导图…"));
 	}
 
 	getItems(): Entry[] {
@@ -73,8 +74,8 @@ export class MindmapPickerModal extends FuzzySuggestModal<Entry> {
 		new TextPromptModal(
 			this.app,
 			{
-				title: "新建脑图",
-				placeholder: "输入脑图名称…",
+				title: t("新建脑图"),
+				placeholder: t("输入脑图名称…"),
 				multiline: false,
 			},
 			(name) => {

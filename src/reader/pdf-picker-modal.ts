@@ -1,4 +1,5 @@
 import { FuzzySuggestModal, Platform } from "obsidian";
+import { t } from "../i18n/i18n";
 import type { App, FuzzyMatch, TFile } from "obsidian";
 import { MOBI_EXTS } from "../storage/paths";
 import { pickExternalPath } from "../storage/external-file";
@@ -117,7 +118,7 @@ export class PdfPickerModal extends FuzzySuggestModal<PdfPickResult> {
 			// R2（E2-07）：标题入具名 span——匿名 flex 文本节点无法施加截断三件套
 			const title = head.createSpan({ cls: "marinmind-picker-title" });
 			title.textContent = this.titleOf(match.item.absPath);
-			head.createSpan({ cls: "marinmind-picker-ext-badge", text: "库外" });
+			head.createSpan({ cls: "marinmind-picker-ext-badge", text: t("库外") });
 			const dir = el.createDiv({ cls: "marinmind-picker-dir" });
 			dir.textContent = match.item.absPath; // 绝对路径整行次级展示（CSS 省略）
 			return;
@@ -163,7 +164,7 @@ export class PdfPickerModal extends FuzzySuggestModal<PdfPickResult> {
 		}
 		const footer = this.modalEl.createEl("div", { cls: "marinmind-picker-external" });
 		const btn = footer.createEl("button", {
-			text: "📂 打开库外文档…",
+			text: t("📂 打开库外文档…"),
 		});
 		btn.addEventListener("click", async () => {
 			const absPath = await pickExternalPath();

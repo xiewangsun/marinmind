@@ -1,4 +1,5 @@
 import { FuzzySuggestModal } from "obsidian";
+import { t } from "../i18n/i18n";
 import type { App, FuzzyMatch } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { BookDocument, Card } from "../types";
@@ -22,7 +23,7 @@ export class CardPickerModal extends FuzzySuggestModal<Card> {
 		private readonly onChoose: (card: Card) => void,
 	) {
 		super(app);
-		this.setPlaceholder("选择要加入的卡片…");
+		this.setPlaceholder(t("选择要加入的卡片…"));
 	}
 
 	getItems(): Card[] {

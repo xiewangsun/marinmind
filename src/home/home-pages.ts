@@ -1,6 +1,7 @@
 import { DropdownComponent, Menu, Notice, Platform, setIcon, TFile } from "obsidian";
 import type { App } from "obsidian";
 import type MarinMindPlugin from "../main";
+import { t } from "../i18n/i18n";
 import type { BookDocument, Card, Mindmap } from "../types";
 import { now } from "../utils";
 import { ConfirmModal } from "../mindmap/confirm-modal";
@@ -268,7 +269,7 @@ async function openDocRecord(app: App, plugin: MarinMindPlugin, doc: BookDocumen
 export function renderOverviewPage(container: HTMLElement, ctx: HomeRenderCtx): void {
 	const { plugin } = ctx;
 	const wrap = container.createDiv({ cls: "marinmind-home-page" });
-	wrap.createDiv({ cls: "marinmind-home-page-title", text: "概览" });
+	wrap.createDiv({ cls: "marinmind-home-page-title", text: t("概览") });
 
 	// 统计行
 	const stats = wrap.createDiv({ cls: "marinmind-home-stats" });
@@ -317,7 +318,10 @@ export function renderOverviewPage(container: HTMLElement, ctx: HomeRenderCtx): 
 
 	// 脑图快捷
 	const mapsHead = sectionHeading(wrap, "脑图");
-	const moreMaps = mapsHead.createDiv({ cls: "marinmind-home-heading-action", text: "查看全部" });
+	const moreMaps = mapsHead.createDiv({
+		cls: "marinmind-home-heading-action",
+		text: t("查看全部"),
+	});
 	moreMaps.addEventListener("click", () => ctx.switchPage("maps"));
 	enableKeyboardActivation(moreMaps);
 	const maps = plugin.mindmaps.list().slice(0, 3);
@@ -355,7 +359,7 @@ export async function renderDocumentsPage(
 ): Promise<void> {
 	const { plugin } = ctx;
 	const wrap = container.createDiv({ cls: "marinmind-home-page marinmind-home-page-docs" });
-	wrap.createDiv({ cls: "marinmind-home-page-title", text: "文档" });
+	wrap.createDiv({ cls: "marinmind-home-page-title", text: t("文档") });
 	if (plugin.settings.homeDocsView === "grid") {
 		wrap.addClass("is-grid"); // ㊵ 书架模式加宽内容区（列表维持默认基调）
 	}
@@ -380,8 +384,8 @@ export async function renderDocumentsPage(
 		// R3（W-04）：占位符不构成可访问名，补 aria-label
 		attr: {
 			type: "text",
-			placeholder: "搜索标题或路径…",
-			"aria-label": "搜索文档（标题或路径）",
+			placeholder: t("搜索标题或路径…"),
+			"aria-label": t("搜索文档（标题或路径）"),
 		},
 	});
 	search.value = ctx.docQuery;
@@ -390,7 +394,7 @@ export async function renderDocumentsPage(
 	const folderToggle = searchRow.createDiv({ cls: "marinmind-home-view-toggle" });
 	const folderBtn = folderToggle.createDiv({
 		cls: "marinmind-home-view-toggle-btn",
-		attr: { "aria-label": "显示/隐藏文件夹栏", title: "显示/隐藏文件夹栏" },
+		attr: { "aria-label": t("显示/隐藏文件夹栏"), title: t("显示/隐藏文件夹栏") },
 	});
 	setIcon(folderBtn, "panel-left");
 	const syncFoldersBtn = (): void => {
@@ -410,12 +414,12 @@ export async function renderDocumentsPage(
 	const toggle = searchRow.createDiv({ cls: "marinmind-home-view-toggle" });
 	const listBtn = toggle.createDiv({
 		cls: "marinmind-home-view-toggle-btn",
-		attr: { "aria-label": "列表视图", title: "列表视图" },
+		attr: { "aria-label": t("列表视图"), title: t("列表视图") },
 	});
 	setIcon(listBtn, "list");
 	const gridBtn = toggle.createDiv({
 		cls: "marinmind-home-view-toggle-btn",
-		attr: { "aria-label": "窗格视图（封面书架）", title: "窗格视图（封面书架）" },
+		attr: { "aria-label": t("窗格视图（封面书架）"), title: t("窗格视图（封面书架）") },
 	});
 	setIcon(gridBtn, "layout-grid");
 	// ㊾ 批量管理开关（配方同卡片页批选；开 = 行/瓷片出勾选框、点击即勾选、批量操作行浮现）
@@ -423,8 +427,8 @@ export async function renderDocumentsPage(
 	const docBatchBtn = docBatchToggle.createDiv({
 		cls: "marinmind-home-view-toggle-btn",
 		attr: {
-			"aria-label": "批量选择",
-			title: "批量选择（批量删除 / 移动分类）",
+			"aria-label": t("批量选择"),
+			title: t("批量选择（批量删除 / 移动分类）"),
 			"aria-pressed": String(docBatchSelectMode),
 		},
 	});
@@ -443,11 +447,11 @@ export async function renderDocumentsPage(
 	// ㊾ 批量操作行（批选模式时渲染在搜索行与列表之间）：计数 + 全选 + 批量删除 + 批量移动分类
 	if (docBatchSelectMode) {
 		const batchRow = listWrap.createDiv({ cls: "marinmind-home-doc-batch-row" });
-		const countEl = batchRow.createDiv({ cls: "marinmind-home-cards-count", text: "" }); // docBatchUiSync 填数
+		const countEl = batchRow.createDiv({ cls: "marinmind-home-cards-count", text: t("") }); // docBatchUiSync 填数
 		const selectAllBtn = batchRow.createEl("button", {
 			cls: "marinmind-home-cards-review",
-			text: "全选",
-			attr: { type: "button", title: "勾选/取消当前筛选下全部文档" },
+			text: t("全选"),
+			attr: { type: "button", title: t("勾选/取消当前筛选下全部文档") },
 		});
 		selectAllBtn.addEventListener("click", () => {
 			const fresh = filterDocsByQuery(
@@ -468,8 +472,8 @@ export async function renderDocumentsPage(
 		});
 		const batchDeleteBtn = batchRow.createEl("button", {
 			cls: "marinmind-home-cards-review marinmind-home-batch-delete",
-			text: "删除",
-			attr: { type: "button", title: "删除全部已勾选文档的记录（书籍文件保留）" },
+			text: t("删除"),
+			attr: { type: "button", title: t("删除全部已勾选文档的记录（书籍文件保留）") },
 		});
 		batchDeleteBtn.addEventListener("click", () => {
 			const ids = [...docBatchSelectedIds];
@@ -485,8 +489,8 @@ export async function renderDocumentsPage(
 		});
 		const batchMoveBtn = batchRow.createEl("button", {
 			cls: "marinmind-home-cards-review",
-			text: "移动分类",
-			attr: { type: "button", title: "移动全部已勾选文档到其他分类" },
+			text: t("移动分类"),
+			attr: { type: "button", title: t("移动全部已勾选文档到其他分类") },
 		});
 		batchMoveBtn.addEventListener("click", () => {
 			if (docBatchSelectedIds.size === 0) return;
@@ -520,7 +524,10 @@ export async function renderDocumentsPage(
 					// 跳视图——批量管理上下文里用户可能继续操作，与单本右键有意不同）
 					promptPathName(
 						plugin.app,
-						{ title: "新建分类", placeholder: "分类名称（支持多层，如：学习/英语）" },
+						{
+							title: t("新建分类"),
+							placeholder: t("分类名称（支持多层，如：学习/英语）"),
+						},
 						(normalized) => {
 							plugin.store?.addFolder(normalized);
 							apply(normalized);
@@ -686,8 +693,8 @@ function renderFolderTree(
 ): void {
 	folders.empty();
 	const fixed: { sel: CategorySelection; label: string; count: number; icon: string }[] = [
-		{ sel: "all", label: "全部", count: tree.all, icon: "library" },
-		{ sel: null, label: "未分类", count: tree.uncategorized, icon: "file" },
+		{ sel: "all", label: t("全部"), count: tree.all, icon: "library" },
+		{ sel: null, label: t("未分类"), count: tree.uncategorized, icon: "file" },
 	];
 	for (const item of fixed) {
 		const isActive = ctx.selectedCategory === item.sel;
@@ -710,7 +717,7 @@ function renderFolderTree(
 
 	const createBtn = folders.createDiv({
 		cls: "marinmind-home-folder-create",
-		text: "＋ 新建分类",
+		text: t("＋ 新建分类"),
 	});
 	createBtn.addEventListener("click", () => promptNewCategory(ctx));
 	enableKeyboardActivation(createBtn);
@@ -767,7 +774,7 @@ function renderFolderNode(
 	const entry = container.createDiv({
 		cls: `marinmind-home-folder marinmind-home-folder-nested${isActive ? " is-active" : ""}`,
 		// 74 可达性：重命名/删除入口由右键（移动端长按）承载，hover 提示降低发现门槛
-		attr: { title: "右键或长按：重命名 / 删除" },
+		attr: { title: t("右键或长按：重命名 / 删除") },
 	});
 	// DOM 序：行在前、子级容器随后（chevron 闭包引用，先建后接线）
 	const kids =
@@ -808,7 +815,7 @@ function renderFolderNode(
 function promptNewCategory(ctx: HomeRenderCtx): void {
 	promptPathName(
 		ctx.plugin.app,
-		{ title: "新建分类", placeholder: "分类名称（支持多层，如：学习/英语）" },
+		{ title: t("新建分类"), placeholder: t("分类名称（支持多层，如：学习/英语）") },
 		(normalized) => {
 			ctx.plugin.store?.addFolder(normalized);
 			ctx.setSelectedCategory(normalized);
@@ -827,12 +834,12 @@ function showFolderMenu(
 	const menu = new Menu();
 	menu.addItem((item) =>
 		item
-			.setTitle("重命名分类")
+			.setTitle(t("重命名分类"))
 			.setIcon("pencil")
 			.onClick(() => {
 				promptPathName(
 					ctx.plugin.app,
-					{ title: "重命名分类", initialText: category },
+					{ title: t("重命名分类"), initialText: category },
 					(normalized) => {
 						if (normalized === category) return;
 						renameCategory(ctx, category, normalized);
@@ -843,7 +850,7 @@ function showFolderMenu(
 	menu.addSeparator();
 	menu.addItem((item) =>
 		item
-			.setTitle("删除分类")
+			.setTitle(t("删除分类"))
 			.setIcon("trash-2")
 			.onClick(() => {
 				// 子树 = 该分类本身 + 多层子孙路径下的全部文档
@@ -1090,7 +1097,7 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 	const menu = new Menu();
 	menu.addItem((item) =>
 		item
-			.setTitle("打开")
+			.setTitle(t("打开"))
 			.setIcon("book-open")
 			.onClick(() => void openDocRecord(plugin.app, plugin, doc)),
 	);
@@ -1098,7 +1105,7 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 	if (isAbsoluteFsPath(doc.filePath) && Platform.isDesktopApp) {
 		menu.addItem((item) =>
 			item
-				.setTitle("复制入库")
+				.setTitle(t("复制入库"))
 				.setIcon("copy-plus")
 				.onClick(
 					() =>
@@ -1117,9 +1124,9 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 	// 76 显式清单一并进树——新建的空分类立刻出现在归入菜单
 	const tree = buildCategoryTree(plugin.documents.list(), plugin.store?.getFolders() ?? []);
 	const paths = flattenCategoryTree(tree.roots);
-	menu.addItem((item) => item.setTitle("归入分类：").setDisabled(true));
+	menu.addItem((item) => item.setTitle(t("归入分类：")).setDisabled(true));
 	if (paths.length === 0) {
-		menu.addItem((item) => item.setTitle("（暂无分类）").setDisabled(true));
+		menu.addItem((item) => item.setTitle(t("（暂无分类）")).setDisabled(true));
 	}
 	const cur = doc.category ? normalizeCategory(doc.category) : null;
 	for (const p of paths) {
@@ -1141,12 +1148,12 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 	}
 	menu.addItem((item) =>
 		item
-			.setTitle("新建分类并归入…")
+			.setTitle(t("新建分类并归入…"))
 			.setIcon("folder-plus")
 			.onClick(() => {
 				promptPathName(
 					plugin.app,
-					{ title: "新建分类", placeholder: "分类名称（支持多层，如：学习/英语）" },
+					{ title: t("新建分类"), placeholder: t("分类名称（支持多层，如：学习/英语）") },
 					(normalized) => {
 						plugin.store?.addFolder(normalized); // 76 显式清单：创建即持久
 						plugin.documents.update(doc.id, { category: normalized });
@@ -1159,7 +1166,7 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 	if (doc.category) {
 		menu.addItem((item) =>
 			item
-				.setTitle("移入未分类")
+				.setTitle(t("移入未分类"))
 				.setIcon("file-minus")
 				.onClick(() => {
 					plugin.documents.update(doc.id, { category: null });
@@ -1170,7 +1177,7 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 	menu.addSeparator();
 	menu.addItem((item) =>
 		item
-			.setTitle("文档管理…")
+			.setTitle(t("文档管理…"))
 			.setIcon("settings-2")
 			.onClick(() => new DocumentManagerModal(plugin.app, plugin).open()),
 	);
@@ -1178,7 +1185,7 @@ function showDocMenu(ctx: HomeRenderCtx, doc: BookDocument, evt: MouseEvent): vo
 	// 与文档管理弹窗「删除记录」单源共享（doc-delete.ts）。危险操作置菜单最末（项目惯例）
 	menu.addItem((item) =>
 		item
-			.setTitle("删除文档…")
+			.setTitle(t("删除文档…"))
 			.setIcon("trash-2")
 			.onClick(() => confirmDeleteDocument(plugin.app, plugin, doc, () => ctx.refresh())),
 	);
@@ -1207,8 +1214,8 @@ function renderDeckTree(
 	// 固定项：deck 筛选三态——null=全部 / UNSET_DECK 哨兵=未分组 / 路径=归一子树匹配
 	// （未分组用 inbox：layers 已被侧栏「卡片」导航占用，语义撞车走 E-19 同款审查）
 	const fixed: { deck: string | null; label: string; count: number; icon: string }[] = [
-		{ deck: null, label: "全部", count: tree.all, icon: "library" },
-		{ deck: UNSET_DECK, label: "未分组", count: tree.uncategorized, icon: "inbox" },
+		{ deck: null, label: t("全部"), count: tree.all, icon: "library" },
+		{ deck: UNSET_DECK, label: t("未分组"), count: tree.uncategorized, icon: "inbox" },
 	];
 	for (const item of fixed) {
 		const isActive = ctx.cardsFilter.deck === item.deck;
@@ -1231,7 +1238,7 @@ function renderDeckTree(
 
 	const createBtn = folders.createDiv({
 		cls: "marinmind-home-folder-create",
-		text: "＋ 新建卡组",
+		text: t("＋ 新建卡组"),
 	});
 	createBtn.addEventListener("click", () => promptNewDeck(ctx));
 	enableKeyboardActivation(createBtn);
@@ -1250,7 +1257,7 @@ function renderDeckNode(
 	const entry = container.createDiv({
 		cls: `marinmind-home-folder marinmind-home-folder-nested${isActive ? " is-active" : ""}`,
 		// 74 可达性：重命名/删除入口由右键（移动端长按）承载，hover 提示降低发现门槛
-		attr: { title: "右键或长按：重命名 / 删除" },
+		attr: { title: t("右键或长按：重命名 / 删除") },
 	});
 	const kids =
 		node.children.length > 0
@@ -1289,7 +1296,7 @@ function renderDeckNode(
 function promptNewDeck(ctx: HomeRenderCtx): void {
 	promptPathName(
 		ctx.plugin.app,
-		{ title: "新建卡组", placeholder: "卡组名称（支持多层，如：学习/英语）" },
+		{ title: t("新建卡组"), placeholder: t("卡组名称（支持多层，如：学习/英语）") },
 		(normalized) => {
 			ctx.plugin.store?.addDeck(normalized);
 			ctx.setCardsFilter({ deck: normalized });
@@ -1308,12 +1315,12 @@ function showDeckMenu(
 	const menu = new Menu();
 	menu.addItem((item) =>
 		item
-			.setTitle("重命名卡组")
+			.setTitle(t("重命名卡组"))
 			.setIcon("pencil")
 			.onClick(() => {
 				promptPathName(
 					ctx.plugin.app,
-					{ title: "重命名卡组", initialText: deck },
+					{ title: t("重命名卡组"), initialText: deck },
 					(normalized) => {
 						if (normalized === deck) return;
 						renameDeck(ctx, deck, normalized);
@@ -1324,7 +1331,7 @@ function showDeckMenu(
 	menu.addSeparator();
 	menu.addItem((item) =>
 		item
-			.setTitle("删除卡组")
+			.setTitle(t("删除卡组"))
 			.setIcon("trash-2")
 			.onClick(() => {
 				// 子树 = 该卡组本身 + 多层子孙路径下的全部卡片
@@ -1449,9 +1456,9 @@ function showCardMenu(ctx: HomeRenderCtx, card: Card, evt: MouseEvent): void {
 	// 76 显式清单一并进树——新建的空卡组立刻出现在归入菜单
 	const tree = buildDeckTree(plugin.cards.listAll(), plugin.store?.getDecks() ?? []);
 	const paths = flattenCategoryTree(tree.roots);
-	menu.addItem((item) => item.setTitle("归入卡组：").setDisabled(true));
+	menu.addItem((item) => item.setTitle(t("归入卡组：")).setDisabled(true));
 	if (paths.length === 0) {
-		menu.addItem((item) => item.setTitle("（暂无卡组）").setDisabled(true));
+		menu.addItem((item) => item.setTitle(t("（暂无卡组）")).setDisabled(true));
 	}
 	const cur = card.deck ? normalizeCategory(card.deck) : null;
 	for (const p of paths) {
@@ -1471,12 +1478,12 @@ function showCardMenu(ctx: HomeRenderCtx, card: Card, evt: MouseEvent): void {
 	}
 	menu.addItem((item) =>
 		item
-			.setTitle("新建卡组并归入…")
+			.setTitle(t("新建卡组并归入…"))
 			.setIcon("folder-plus")
 			.onClick(() => {
 				promptPathName(
 					plugin.app,
-					{ title: "新建卡组", placeholder: "卡组名称（支持多层，如：学习/英语）" },
+					{ title: t("新建卡组"), placeholder: t("卡组名称（支持多层，如：学习/英语）") },
 					(normalized) => {
 						plugin.store?.addDeck(normalized); // 76 显式清单：创建即持久
 						plugin.cards.update(card.id, { deck: normalized });
@@ -1489,7 +1496,7 @@ function showCardMenu(ctx: HomeRenderCtx, card: Card, evt: MouseEvent): void {
 	if (card.deck) {
 		menu.addItem((item) =>
 			item
-				.setTitle("移出卡组")
+				.setTitle(t("移出卡组"))
 				.setIcon("file-minus")
 				.onClick(() => {
 					plugin.cards.update(card.id, { deck: null });
@@ -1572,13 +1579,16 @@ function bindCardActions(el: HTMLElement, ctx: HomeRenderCtx, card: Card): void 
 export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): void {
 	const { plugin } = ctx;
 	const wrap = container.createDiv({ cls: "marinmind-home-page marinmind-home-page-cards" });
-	wrap.createDiv({ cls: "marinmind-home-page-title", text: "卡片" });
+	wrap.createDiv({ cls: "marinmind-home-page-title", text: t("卡片") });
 
 	const stats = wrap.createDiv({ cls: "marinmind-home-stats" });
 	statBrick(stats, plugin.cards.count(), "张卡片");
 	statBrick(stats, plugin.reviews.dueCount(), "待复习", () => void plugin.openReview());
 	// 69 统计弱链接：热力图/到期分布/连续天数面板（快照渲染，重开即新）
-	const statsLink = stats.createEl("button", { cls: "marinmind-home-stats-link", text: "统计" });
+	const statsLink = stats.createEl("button", {
+		cls: "marinmind-home-stats-link",
+		text: t("统计"),
+	});
 	statsLink.addEventListener("click", () => new ReviewStatsModal(plugin.app, plugin).open());
 
 	// ---- 两列主体：左列卡组树 + 右列筛选与列表（结构镜像文档页） ----
@@ -1608,8 +1618,8 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 		cls: "marinmind-home-search",
 		attr: {
 			type: "text",
-			placeholder: "搜索卡片正文、批注或标签…",
-			"aria-label": "搜索卡片（正文、批注或标签）",
+			placeholder: t("搜索卡片正文、批注或标签…"),
+			"aria-label": t("搜索卡片（正文、批注或标签）"),
 		},
 	});
 	search.value = ctx.cardQuery;
@@ -1619,7 +1629,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 	const folderToggle = filterRow.createDiv({ cls: "marinmind-home-view-toggle" });
 	const folderBtn = folderToggle.createDiv({
 		cls: "marinmind-home-view-toggle-btn",
-		attr: { "aria-label": "显示/隐藏卡组栏", title: "显示/隐藏卡组栏" },
+		attr: { "aria-label": t("显示/隐藏卡组栏"), title: t("显示/隐藏卡组栏") },
 	});
 	setIcon(folderBtn, "panel-left");
 	const syncFoldersBtn = (): void => {
@@ -1637,30 +1647,30 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 	enableKeyboardActivation(folderBtn);
 
 	// 四下拉（dropdown 走 obsidian 全局类，主页变量覆盖自动跟随深浅主题）
-	const docSel = new DropdownComponent(filterRow).addOption("", "全部书籍");
+	const docSel = new DropdownComponent(filterRow).addOption("", t("全部书籍"));
 	for (const d of plugin.documents.list()) docSel.addOption(d.id, d.title);
 	docSel.setValue(ctx.cardsFilter.documentId ?? "");
 	docSel.onChange((v) => ctx.setCardsFilter({ documentId: v || null }));
 
-	const typeSel = new DropdownComponent(filterRow).addOption("", "全部形态");
-	for (const [type, label] of Object.entries(EXCERPT_LABELS)) typeSel.addOption(type, label);
+	const typeSel = new DropdownComponent(filterRow).addOption("", t("全部形态"));
+	for (const [type, label] of Object.entries(EXCERPT_LABELS)) typeSel.addOption(type, t(label));
 	typeSel.setValue(ctx.cardsFilter.excerptType ?? "");
 	typeSel.onChange((v) => ctx.setCardsFilter({ excerptType: v || null }));
 
-	const tagSel = new DropdownComponent(filterRow).addOption("", "全部标签");
+	const tagSel = new DropdownComponent(filterRow).addOption("", t("全部标签"));
 	for (const tag of distinctTags(allCards)) tagSel.addOption(tag, `#${tag}`);
 	tagSel.setValue(ctx.cardsFilter.tag ?? "");
 	tagSel.onChange((v) => ctx.setCardsFilter({ tag: v || null }));
 
 	// 70 颜色下拉：候选从实际卡片派生（distinctColors 含旧色相与「未设色」哨兵，
 	// 不取 settings.excerptColors——那是四工具色配置不是存量卡全集）
-	const colorSel = new DropdownComponent(filterRow).addOption("", "全部颜色");
+	const colorSel = new DropdownComponent(filterRow).addOption("", t("全部颜色"));
 	for (const color of distinctColors(allCards)) {
 		colorSel.addOption(
 			color,
 			color === UNSET_COLOR
-				? "未设色"
-				: (HIGHLIGHT_COLORS.find((c) => c.value === color)?.label ?? color),
+				? t("未设色")
+				: t(HIGHLIGHT_COLORS.find((c) => c.value === color)?.label ?? color),
 		);
 	}
 	colorSel.setValue(ctx.cardsFilter.color ?? "");
@@ -1671,7 +1681,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 	const fcBtn = fcToggle.createDiv({
 		cls: "marinmind-home-view-toggle-btn marinmind-home-view-toggle-btn-wide",
 		attr: {
-			"aria-label": "只显示闪卡",
+			"aria-label": t("只显示闪卡"),
 			title: `只显示已转为闪卡的卡片（共 ${flashIds.size} 张）`,
 			"aria-pressed": String(ctx.cardsFilter.flashcard === true),
 		},
@@ -1688,7 +1698,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 	const batchToggle = filterRow.createDiv({ cls: "marinmind-home-view-toggle" });
 	const batchBtn = batchToggle.createDiv({
 		cls: "marinmind-home-view-toggle-btn",
-		attr: { "aria-label": "批量选择", title: "批量选择（批量删除卡片）" },
+		attr: { "aria-label": t("批量选择"), title: t("批量选择（批量删除卡片）") },
 	});
 	setIcon(batchBtn, "list-checks");
 	batchBtn.classList.toggle("is-active", batchSelectMode);
@@ -1737,8 +1747,8 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 		if (batchSelectMode) {
 			const selectPageBtn = actionRow.createEl("button", {
 				cls: "marinmind-home-cards-review",
-				text: "全选本页",
-				attr: { type: "button", title: "勾选/取消当前页全部卡片" },
+				text: t("全选本页"),
+				attr: { type: "button", title: t("勾选/取消当前页全部卡片") },
 			});
 			selectPageBtn.addEventListener("click", () => {
 				const pageIds = pageCards.map((c) => c.id);
@@ -1759,7 +1769,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 			const deleteBtn = actionRow.createEl("button", {
 				cls: "marinmind-home-cards-review marinmind-home-batch-delete",
 				text: `删除 ${batchSelectedIds.size} 张`,
-				attr: { type: "button", title: "删除全部已勾选卡片" },
+				attr: { type: "button", title: t("删除全部已勾选卡片") },
 			});
 			deleteBtn.addEventListener("click", () => {
 				const ids = [...batchSelectedIds];
@@ -1789,7 +1799,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 			const moveBtn = actionRow.createEl("button", {
 				cls: "marinmind-home-cards-review",
 				text: `移动 ${batchSelectedIds.size} 张`,
-				attr: { type: "button", title: "移动所选卡片到其他文档（原文锚点将清除）" },
+				attr: { type: "button", title: t("移动所选卡片到其他文档（原文锚点将清除）") },
 			});
 			moveBtn.addEventListener("click", () => {
 				const ids = [...batchSelectedIds];
@@ -1837,8 +1847,8 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 				const pageIds = pageCards.map((c) => c.id);
 				selectPageBtn.setText(
 					pageIds.length > 0 && pageIds.every((id) => batchSelectedIds.has(id))
-						? "取消本页"
-						: "全选本页",
+						? t("取消本页")
+						: t("全选本页"),
 				);
 				const n = batchSelectedIds.size;
 				deleteBtn.setText(`删除 ${n} 张`);
@@ -1858,8 +1868,8 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 		if (deckPath && !batchSelectMode) {
 			const link = actionRow.createEl("button", {
 				cls: "marinmind-home-cards-review",
-				text: "复习本组",
-				attr: { type: "button", title: "按当前卡组（含子卡组）开始复习" },
+				text: t("复习本组"),
+				attr: { type: "button", title: t("按当前卡组（含子卡组）开始复习") },
 			});
 			link.addEventListener("click", () => void plugin.openReviewDeck(deckPath));
 		}
@@ -1872,8 +1882,8 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 		if (filterActive && !batchSelectMode) {
 			const link = actionRow.createEl("button", {
 				cls: "marinmind-home-cards-review",
-				text: "复习筛选结果",
-				attr: { type: "button", title: "按当前筛选与搜索条件复习到期卡片" },
+				text: t("复习筛选结果"),
+				attr: { type: "button", title: t("按当前筛选与搜索条件复习到期卡片") },
 			});
 			link.addEventListener("click", () => {
 				const ids = filterCardsByQuery(
@@ -1902,7 +1912,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 		const prev = pager.createDiv({ cls: "marinmind-home-pager-btn" });
 		// P2-1：分页箭头 ‹› → lucide chevron（与复习导航条同款图标语言）
 		setIcon(prev.createSpan({ cls: "marinmind-home-pager-icon" }), "chevron-left");
-		prev.createSpan({ text: "上一页" });
+		prev.createSpan({ text: t("上一页") });
 		if (cur <= 1) {
 			prev.addClass("is-disabled");
 			prev.setAttribute("aria-disabled", "true"); // P0-1：禁用态语义化（无 tabindex，键盘不进入）
@@ -1913,7 +1923,7 @@ export function renderCardsPage(container: HTMLElement, ctx: HomeRenderCtx): voi
 		pager.createDiv({ cls: "marinmind-home-pager-info", text: `第 ${cur} / ${totalPages} 页` });
 		const next = pager.createDiv({ cls: "marinmind-home-pager-btn" });
 		setIcon(next.createSpan({ cls: "marinmind-home-pager-icon" }), "chevron-right");
-		next.createSpan({ text: "下一页" });
+		next.createSpan({ text: t("下一页") });
 		if (cur >= totalPages) {
 			next.addClass("is-disabled");
 			next.setAttribute("aria-disabled", "true");
@@ -1941,9 +1951,9 @@ export function renderMapsPage(container: HTMLElement, ctx: HomeRenderCtx): void
 	const { plugin } = ctx;
 	const wrap = container.createDiv({ cls: "marinmind-home-page" });
 	const titleRow = wrap.createDiv({ cls: "marinmind-home-title-row" });
-	titleRow.createDiv({ cls: "marinmind-home-page-title", text: "脑图" });
+	titleRow.createDiv({ cls: "marinmind-home-page-title", text: t("脑图") });
 	const createBtn = titleRow.createDiv({ cls: "marinmind-home-btn marinmind-home-btn-primary" });
-	createBtn.createSpan({ text: "＋ 新建脑图" });
+	createBtn.createSpan({ text: t("＋ 新建脑图") });
 	createBtn.addEventListener("click", () => plugin.openMindmapPicker());
 	enableKeyboardActivation(createBtn);
 
@@ -1990,7 +2000,7 @@ function showMapMenu(ctx: HomeRenderCtx, m: Mindmap, evt: MouseEvent): void {
 	const menu = new Menu();
 	menu.addItem((item) =>
 		item
-			.setTitle("打开")
+			.setTitle(t("打开"))
 			.setIcon("brain")
 			.onClick(() => void plugin.openMindmap(m.id)),
 	);
@@ -1999,7 +2009,7 @@ function showMapMenu(ctx: HomeRenderCtx, m: Mindmap, evt: MouseEvent): void {
 	// refreshActiveMindmaps → loadMap 自愈回选图器（本文件接线，map-delete 保持轻依赖）
 	menu.addItem((item) =>
 		item
-			.setTitle("删除脑图…")
+			.setTitle(t("删除脑图…"))
 			.setIcon("trash-2")
 			.onClick(() =>
 				confirmDeleteMindmap(plugin.app, plugin, m, () => {

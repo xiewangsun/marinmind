@@ -1,4 +1,5 @@
 import { ButtonComponent, Menu, Modal } from "obsidian";
+import { t } from "../i18n/i18n";
 import type { App } from "obsidian";
 import type MarinMindPlugin from "../main";
 import type { Card, DocRect } from "../types";
@@ -160,7 +161,7 @@ export class CardPreviewModal extends Modal {
 		// ㊻-A 复制嵌入互链
 		menu.addItem((mi) =>
 			mi
-				.setTitle("复制嵌入")
+				.setTitle(t("复制嵌入"))
 				.setIcon("copy")
 				.onClick(() => {
 					void this.plugin.copyCardLink(this.card, "embed");
@@ -169,7 +170,7 @@ export class CardPreviewModal extends Modal {
 		// 卡组批（73）：打标签 / 设卡组——与复习视图 ⋯ 菜单经 card-actions 单源共享
 		menu.addItem((mi) =>
 			mi
-				.setTitle("打标签")
+				.setTitle(t("打标签"))
 				.setIcon("tags")
 				.onClick(() => {
 					promptCardTags(this.app, this.plugin, this.freshCard());
@@ -177,7 +178,7 @@ export class CardPreviewModal extends Modal {
 		);
 		menu.addItem((mi) =>
 			mi
-				.setTitle("设卡组")
+				.setTitle(t("设卡组"))
 				.setIcon("layers")
 				.onClick(() => {
 					promptCardDeck(this.app, this.plugin, this.freshCard());
@@ -188,7 +189,7 @@ export class CardPreviewModal extends Modal {
 		if ((this.card.excerptText ?? "").trim().length > 0) {
 			menu.addItem((mi) =>
 				mi
-					.setTitle("AI 制卡…")
+					.setTitle(t("AI 制卡…"))
 					.setIcon("list-checks")
 					.onClick(() => {
 						promptCardGen(this.app, this.plugin, this.freshCard());
@@ -198,7 +199,7 @@ export class CardPreviewModal extends Modal {
 		if (canCardAiComment(this.card)) {
 			menu.addItem((mi) =>
 				mi
-					.setTitle("AI 补充解释")
+					.setTitle(t("AI 补充解释"))
 					.setIcon("sparkles")
 					.onClick(() => {
 						void promptCardAiComment(this.app, this.plugin, this.freshCard());
@@ -209,7 +210,7 @@ export class CardPreviewModal extends Modal {
 		if (this.card.documentId != null) {
 			menu.addItem((mi) =>
 				mi
-					.setTitle("相关卡片（AI）…")
+					.setTitle(t("相关卡片（AI）…"))
 					.setIcon("git-compare")
 					.onClick(() => {
 						promptCardLinks(this.app, this.plugin, this.freshCard());
@@ -234,7 +235,7 @@ export class CardPreviewModal extends Modal {
 		if (this.card.excerptType === "audio") {
 			menu.addItem((mi) =>
 				mi
-					.setTitle("重录")
+					.setTitle(t("重录"))
 					.setIcon("mic")
 					.onClick(() => {
 						const fresh = this.freshCard();
@@ -257,7 +258,7 @@ export class CardPreviewModal extends Modal {
 		menu.addSeparator();
 		menu.addItem((mi) =>
 			mi
-				.setTitle("删除")
+				.setTitle(t("删除"))
 				.setIcon("trash-2")
 				.onClick(() => {
 					new ConfirmModal(
@@ -302,7 +303,7 @@ export class CardPreviewModal extends Modal {
 		// 暖窗命中时占位一闪而过，无突兀感
 		const loading = host.createDiv({
 			cls: "marinmind-card-preview-loading",
-			text: "摘录图加载中…",
+			text: t("摘录图加载中…"),
 		});
 		const result = await renderExcerptVisual(this.plugin, this.card, host, {
 			preferCrop: true,
@@ -314,7 +315,7 @@ export class CardPreviewModal extends Modal {
 		if (!result.rendered) {
 			host.createDiv({
 				cls: "marinmind-card-preview-fallback",
-				text: "（摘录图不可用——附件缺失或原文文件无法读取）",
+				text: t("（摘录图不可用——附件缺失或原文文件无法读取）"),
 			});
 		}
 	}
@@ -342,7 +343,7 @@ export class CardPreviewModal extends Modal {
 		if (!ref) {
 			host.createDiv({
 				cls: "marinmind-card-preview-fallback",
-				text: "（照片附件缺失，无法编辑遮挡）",
+				text: t("（照片附件缺失，无法编辑遮挡）"),
 			});
 			return;
 		}
@@ -352,7 +353,7 @@ export class CardPreviewModal extends Modal {
 		} catch {
 			host.createDiv({
 				cls: "marinmind-card-preview-fallback",
-				text: "（照片附件读取失败，无法编辑遮挡）",
+				text: t("（照片附件读取失败，无法编辑遮挡）"),
 			});
 			return;
 		}
@@ -375,12 +376,12 @@ export class CardPreviewModal extends Modal {
 		this.bindOccDrag(wrap);
 		host.createDiv({
 			cls: "marinmind-photo-occ-hint",
-			text: "在图上拖框添加遮挡；点击遮挡块删除该块。",
+			text: t("在图上拖框添加遮挡；点击遮挡块删除该块。"),
 		});
 		if (card.occlusions.length > 0) {
 			const clear = host.createEl("button", {
 				cls: "marinmind-review-link",
-				text: "清除全部遮挡",
+				text: t("清除全部遮挡"),
 			});
 			clear.addEventListener("click", () => {
 				this.plugin.cards.update(card.id, { occlusions: [] });
@@ -395,7 +396,7 @@ export class CardPreviewModal extends Modal {
 		card.occlusions.forEach((occ, i) => {
 			const block = wrap.createDiv({
 				cls: "marinmind-photo-occ-block",
-				attr: { title: "点击删除此遮挡" },
+				attr: { title: t("点击删除此遮挡") },
 			});
 			block.setCssStyles({ left: `${occ.x * 100}%` });
 			block.setCssStyles({ top: `${occ.y * 100}%` });

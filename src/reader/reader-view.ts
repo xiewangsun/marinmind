@@ -152,23 +152,23 @@ const TOOLBAR_TOOLS: ReadonlyArray<{
 	title: string;
 	hint: string;
 }> = [
-	{ tool: "hand", icon: "hand", title: "手型", hint: "只读浏览，拖拽平移页面" },
+	{ tool: "hand", icon: "hand", title: t("手型"), hint: "只读浏览，拖拽平移页面" },
 	{
 		tool: "select",
 		icon: "text-cursor-input",
-		title: "选择",
+		title: t("选择"),
 		hint: "划选文字以复制（不生成卡片）",
 	},
-	{ tool: "text", icon: "highlighter", title: "文字", hint: "划选文字生成卡片（默认）" },
+	{ tool: "text", icon: "highlighter", title: t("文字"), hint: "划选文字生成卡片（默认）" },
 	// 90 批 MN3 对照：矩形摘录=虚线选框（box-select）；square-dashed/square 为缺名兜底
 	{
 		tool: "area",
 		icon: resolveIcon(["box-select", "square-dashed", "square"]),
-		title: "矩形",
+		title: t("矩形"),
 		hint: "拖拽框选规则区域",
 	},
-	{ tool: "lasso", icon: "lasso", title: "套索", hint: "自由圈选不规则区域" },
-	{ tool: "blank", icon: "sticky-note", title: "留白", hint: "点击页面空白处添加备注" },
+	{ tool: "lasso", icon: "lasso", title: t("套索"), hint: "自由圈选不规则区域" },
+	{ tool: "blank", icon: "sticky-note", title: t("留白"), hint: "点击页面空白处添加备注" },
 ];
 
 /** ㊹ 四类摘录工具判定：这四类有色系记忆（excerptColors）与按钮循环切色语义 */
@@ -816,7 +816,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				const menu = new Menu();
 				menu.addItem((item) =>
 					item
-						.setTitle("识别本页文字 (OCR)")
+						.setTitle(t("识别本页文字 (OCR)"))
 						.setIcon("scan-text")
 						.onClick(() => void this.ocrPage(pv.pageNumber)),
 				);
@@ -1081,7 +1081,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (path && isAbsoluteFsPath(path)) {
 			menu.addItem((item) =>
 				item
-					.setTitle("复制完整路径")
+					.setTitle(t("复制完整路径"))
 					.setIcon("copy")
 					.onClick(async () => {
 						await navigator.clipboard.writeText(path);
@@ -1639,8 +1639,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
-				"aria-label": "目录与书签",
-				title: "目录与书签",
+				"aria-label": t("目录与书签"),
+				title: t("目录与书签"),
 			},
 		});
 		setIcon(this.tocBtn, "list");
@@ -1677,8 +1677,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				cls: "marinmind-tool-btn",
 				attr: {
 					type: "button",
-					"aria-label": "手写批注模式",
-					title: "手写批注模式",
+					"aria-label": t("手写批注模式"),
+					title: t("手写批注模式"),
 				},
 			});
 			setIconSafe(this.handwriteBtn, "pencil", "pencil-line");
@@ -1697,8 +1697,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
-				"aria-label": "复习本书到期闪卡",
-				title: "复习本书到期闪卡（进入后可切全部书籍）",
+				"aria-label": t("复习本书到期闪卡"),
+				title: t("复习本书到期闪卡（进入后可切全部书籍）"),
 			},
 		});
 		// 90 批 MN3 对照：复习=学习语义 graduation-cap（原 swords 像对战；与脑图
@@ -1714,8 +1714,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
-				"aria-label": "搜索文档",
-				title: "搜索文档（全文检索，点击结果跳转定位）",
+				"aria-label": t("搜索文档"),
+				title: t("搜索文档（全文检索，点击结果跳转定位）"),
 			},
 		});
 		setIcon(searchBtn, "search");
@@ -1730,8 +1730,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
-				"aria-label": "更多工具",
-				title: "更多工具（手型 / 选择 / 插入图片·录音 / AI 摘录 / 缩放 / 摘录目标脑图 / 自动转闪卡）",
+				"aria-label": t("更多工具"),
+				title: t(
+					"更多工具（手型 / 选择 / 插入图片·录音 / AI 摘录 / 缩放 / 摘录目标脑图 / 自动转闪卡）",
+				),
 			},
 		});
 		setIcon(this.overflowBtn, "more-horizontal");
@@ -1765,7 +1767,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		menu.addSeparator();
 		menu.addItem((mi) =>
 			mi
-				.setTitle("插入图片摘录…")
+				.setTitle(t("插入图片摘录…"))
 				.setIcon("image-plus")
 				.onClick(() => this.pickImages()),
 		);
@@ -1781,13 +1783,13 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			menu.addSeparator();
 			menu.addItem((mi) =>
 				mi
-					.setTitle("AI 摘录")
+					.setTitle(t("AI 摘录"))
 					.setIcon("wand-2")
 					.onClick(() => this.openAutoExcerpt()),
 			);
 			menu.addItem((mi) =>
 				mi
-					.setTitle("缩放…")
+					.setTitle(t("缩放…"))
 					.setIcon("zoom-in")
 					.onClick(() => this.showZoomMenu(evt)),
 			);
@@ -1814,7 +1816,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			);
 			menu.addItem((mi) =>
 				mi
-					.setTitle("自动转闪卡")
+					.setTitle(t("自动转闪卡"))
 					.setIcon("zap")
 					.setChecked(doc.autoFlashcard)
 					.onClick(() => this.toggleAutoFlashcard()),
@@ -1826,7 +1828,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			menu.addSeparator();
 			menu.addItem((mi) =>
 				mi
-					.setTitle("AI 助手…")
+					.setTitle(t("AI 助手…"))
 					.setIcon("sparkles")
 					.onClick(() => {
 						void this.plugin.openAiChat();
@@ -1834,7 +1836,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			);
 			menu.addItem((mi) =>
 				mi
-					.setTitle("AI 摘要…")
+					.setTitle(t("AI 摘要…"))
 					.setIcon("scroll-text")
 					.onClick(() => {
 						new AiSummaryModal(this.app, this.plugin, this).open();
@@ -1843,7 +1845,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			// 100 AI 大纲建框架：全文 → LLM 层级大纲 → 建入摘录目标图（归章语义同目录建框架）
 			menu.addItem((mi) =>
 				mi
-					.setTitle("AI 大纲建框架…")
+					.setTitle(t("AI 大纲建框架…"))
 					.setIcon("list-tree")
 					.onClick(() => {
 						new AiOutlineModal(this.app, this.plugin, this).open();
@@ -1875,26 +1877,26 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		}
 		menu.addItem((mi) =>
 			mi
-				.setTitle("输入缩放比例…")
+				.setTitle(t("输入缩放比例…"))
 				.setIcon(resolveIcon(["text-cursor-input", "pencil"]))
 				.onClick(() => this.promptZoomInput()),
 		);
 		menu.addSeparator();
 		menu.addItem((mi) =>
 			mi
-				.setTitle("放大")
+				.setTitle(t("放大"))
 				.setIcon("zoom-in")
 				.onClick(() => this.setZoom(this.scale * ZOOM_STEP)),
 		);
 		menu.addItem((mi) =>
 			mi
-				.setTitle("缩小")
+				.setTitle(t("缩小"))
 				.setIcon("zoom-out")
 				.onClick(() => this.setZoom(this.scale / ZOOM_STEP)),
 		);
 		menu.addItem((mi) =>
 			mi
-				.setTitle("适应宽度")
+				.setTitle(t("适应宽度"))
 				.setIcon("stretch-horizontal")
 				.onClick(() => this.fitWidth()),
 		);
@@ -1910,8 +1912,8 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		new TextPromptModal(
 			this.app,
 			{
-				title: "缩放比例",
-				placeholder: "输入百分比（20-500，如 150 或 150%）",
+				title: t("缩放比例"),
+				placeholder: t("输入百分比（20-500，如 150 或 150%）"),
 				initialText: String(Math.round(this.scale * 100)),
 				multiline: false,
 				enterSubmit: true,
@@ -2168,14 +2170,14 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (target?.overridden) {
 			menu.addItem((mi) =>
 				mi
-					.setTitle("切回同名脑图（默认）")
+					.setTitle(t("切回同名脑图（默认）"))
 					.setIcon("book-open")
 					.onClick(() => this.setCollectTarget(null)),
 			);
 		}
 		menu.addItem((mi) =>
 			mi
-				.setTitle("选择其他脑图…")
+				.setTitle(t("选择其他脑图…"))
 				.setIcon("share-2")
 				.onClick(() => {
 					new MindmapPickerModal(this.app, this.plugin, (map) => {
@@ -2225,10 +2227,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		this.tocBtn?.classList.add("is-active");
 		const panel = this.contentEl.createDiv({ cls: "marinmind-toc-panel" });
 		const head = panel.createDiv({ cls: "marinmind-toc-head" });
-		head.createSpan({ cls: "marinmind-toc-title", text: "目录 · 书签 · 翻译" });
+		head.createSpan({ cls: "marinmind-toc-title", text: t("目录 · 书签 · 翻译") });
 		const closeBtn = head.createEl("button", {
 			cls: "marinmind-toc-close",
-			attr: { type: "button", "aria-label": "收起侧栏", title: "收起侧栏" },
+			attr: { type: "button", "aria-label": t("收起侧栏"), title: t("收起侧栏") },
 		});
 		setIcon(closeBtn, "x");
 		closeBtn.addEventListener("click", () => this.toggleToc());
@@ -2301,7 +2303,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			// ㊼ epub 章=页模型，书签照常启用（章级）
 			sec.createDiv({
 				cls: "marinmind-toc-empty",
-				text: "Markdown 文档为单页长文，请用「目录」页的标题导航",
+				text: t("Markdown 文档为单页长文，请用「目录」页的标题导航"),
 			});
 			return;
 		}
@@ -2310,7 +2312,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		const addBtn = actions.createEl("button", {
 			cls: "marinmind-toc-add",
 			text: this.docKind === "epub" ? "＋ 当前章" : "＋ 当前页",
-			attr: { type: "button", title: "把当前阅读位置加为书签" },
+			attr: { type: "button", title: t("把当前阅读位置加为书签") },
 		});
 		if (!docId) {
 			addBtn.disabled = true;
@@ -2322,7 +2324,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (bookmarks.length === 0) {
 			list.createDiv({
 				cls: "marinmind-toc-empty",
-				text: "暂无书签——点「＋ 当前页」标记阅读位置",
+				text: t("暂无书签——点「＋ 当前页」标记阅读位置"),
 			});
 			return;
 		}
@@ -2340,7 +2342,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			row.createSpan({ cls: "marinmind-toc-pageno", text: String(bm.page) });
 			const del = row.createEl("button", {
 				cls: "marinmind-toc-del",
-				attr: { type: "button", "aria-label": "删除书签", title: "删除书签" },
+				attr: { type: "button", "aria-label": t("删除书签"), title: t("删除书签") },
 			});
 			setIcon(del, "x");
 			del.addEventListener("click", () => {
@@ -2369,7 +2371,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			this.ttRenderedSeq = -1;
 			sec.createDiv({
 				cls: "marinmind-toc-empty",
-				text: "划选文字后点工具栏「翻译」，译文会送到这里即时对照（也可停在本页签，划选自动刷新）",
+				text: t(
+					"划选文字后点工具栏「翻译」，译文会送到这里即时对照（也可停在本页签，划选自动刷新）",
+				),
 			});
 			return;
 		}
@@ -2383,7 +2387,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		// R3（W-04）：select 无关联 label，补可访问名（镜像翻译弹窗）
 		const selectEl = head.createEl("select", {
 			cls: "marinmind-tt-lang",
-			attr: { "aria-label": "目标语言" },
+			attr: { "aria-label": t("目标语言") },
 		});
 		for (const lang of TRANSLATE_LANGUAGES) {
 			const option = selectEl.createEl("option", { text: lang.label });
@@ -2402,10 +2406,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		});
 		const detectEl = head.createSpan({ cls: "marinmind-tr-detect" });
 
-		sec.createDiv({ cls: "marinmind-tr-label", text: "原文" });
+		sec.createDiv({ cls: "marinmind-tr-label", text: t("原文") });
 		sec.createDiv({ cls: "marinmind-tr-text marinmind-tr-source", text: snap.text });
 
-		sec.createDiv({ cls: "marinmind-tr-label", text: "译文" });
+		sec.createDiv({ cls: "marinmind-tr-label", text: t("译文") });
 		const resultEl = sec.createDiv({
 			cls: "marinmind-tr-text marinmind-tr-result",
 			// R3（W-03）：异步译文完成/出错时屏幕阅读器可感知（镜像翻译弹窗）
@@ -2416,7 +2420,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		const actions = sec.createDiv({ cls: "marinmind-tr-actions" });
 		const saveBtn = actions.createEl("button", {
 			cls: "marinmind-tt-btn is-cta",
-			text: "存为留白",
+			text: t("存为留白"),
 			attr: { type: "button" },
 		});
 		saveBtn.addEventListener("click", () => {
@@ -2431,7 +2435,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		});
 		const copyBtn = actions.createEl("button", {
 			cls: "marinmind-tt-btn",
-			text: "复制译文",
+			text: t("复制译文"),
 			attr: { type: "button" },
 		});
 		copyBtn.addEventListener("click", () => {
@@ -2472,11 +2476,11 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		this.ttTranslation = null;
 		els.save.disabled = true;
 		els.copy.disabled = true;
-		els.detect.setText("");
+		els.detect.setText(t(""));
 		els.result.empty();
 		els.result.addClass("is-loading");
 		els.result.removeClass("marinmind-tr-error");
-		els.result.setText("翻译中…");
+		els.result.setText(t("翻译中…"));
 		try {
 			// 凭据缺失在此抛出 → 错误态展示（侧栏常驻，比一闪而过的 Notice 合适）
 			const call = resolveEngineCall(this.plugin.settings);
@@ -2514,7 +2518,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		els.result.createDiv({ text: message });
 		const retry = els.result.createDiv({ cls: "marinmind-tr-retry" }).createEl("button", {
 			cls: "marinmind-tt-btn",
-			text: "重试",
+			text: t("重试"),
 			attr: { type: "button" },
 		});
 		retry.addEventListener("click", () => void this.runSidebarTranslate());
@@ -2593,13 +2597,13 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		sec.empty();
 		// P2 懒解析中间态：pdf 大纲尚未就绪（侧栏打开触发解析中）——区分"解析中"与"无大纲"
 		if (this.docKind === "pdf" && !this.outlineLoaded) {
-			sec.createDiv({ cls: "marinmind-toc-empty", text: "正在解析目录…" });
+			sec.createDiv({ cls: "marinmind-toc-empty", text: t("正在解析目录…") });
 			return;
 		}
 		if (this.outlineEntries.length === 0) {
 			sec.createDiv({
 				cls: "marinmind-toc-empty",
-				text: "本文档没有内嵌目录——可切到「书签」自行标记位置",
+				text: t("本文档没有内嵌目录——可切到「书签」自行标记位置"),
 			});
 			return;
 		}
@@ -2622,7 +2626,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (entry.children.length > 0) {
 			const chev = row.createDiv({
 				cls: "marinmind-toc-chev",
-				attr: { "aria-label": "展开/折叠", title: "展开/折叠子目录" },
+				attr: { "aria-label": t("展开/折叠"), title: t("展开/折叠子目录") },
 			});
 			setIcon(chev, open ? "chevron-down" : "chevron-right");
 			const kids = container.createDiv({ cls: "marinmind-toc-kids" });
@@ -2681,7 +2685,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			{
 				title: `添加书签（第 ${page} ${this.pageWord}）`,
 				initialText: defaultLabel,
-				placeholder: "书签名称（如章节名，留空用默认）",
+				placeholder: t("书签名称（如章节名，留空用默认）"),
 			},
 			(label: string | null) => {
 				const text = label?.trim() || defaultLabel;
@@ -3472,9 +3476,9 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		new TextPromptModal(
 			this.app,
 			{
-				title: "留白备注",
+				title: t("留白备注"),
 				initialText: "",
-				placeholder: "输入留白备注文字…",
+				placeholder: t("输入留白备注文字…"),
 			},
 			(note: string | null) => {
 				const text = note?.trim();
@@ -3879,7 +3883,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		// 编辑组
 		menu.addItem((item) =>
 			item
-				.setTitle("编辑标题/批注")
+				.setTitle(t("编辑标题/批注"))
 				.setIcon("pencil")
 				.onClick(() => {
 					// 78 统一标题/批注双字段（card-actions 单源，与脑图节点编辑器同源语义）；
@@ -3890,7 +3894,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		// 颜色 + 线型（77）
 		menu.addItem((item) =>
 			item
-				.setTitle("颜色…")
+				.setTitle(t("颜色…"))
 				.setIcon("palette")
 				.onClick(() => {
 					// 多色高亮（㊳）：改色走 cards.update → cardBus changed → 各视图回环
@@ -3902,7 +3906,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (card.excerptType === "text") {
 			menu.addItem((item) =>
 				item
-					.setTitle("线型…")
+					.setTitle(t("线型…"))
 					.setIcon("underline")
 					.onClick((evt) => {
 						const current = highlightLineStyle(card);
@@ -3936,13 +3940,13 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		// 链接组
 		menu.addItem((item) =>
 			item
-				.setTitle("复制卡片链接")
+				.setTitle(t("复制卡片链接"))
 				.setIcon("link")
 				.onClick(() => void this.plugin.copyCardLink(card, "link")),
 		);
 		menu.addItem((item) =>
 			item
-				.setTitle("复制嵌入代码")
+				.setTitle(t("复制嵌入代码"))
 				.setIcon("copy")
 				.onClick(() => void this.plugin.copyCardLink(card, "embed")),
 		);
@@ -3958,7 +3962,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		) {
 			menu.addItem((item) =>
 				item
-					.setTitle("识别文字 (OCR)")
+					.setTitle(t("识别文字 (OCR)"))
 					.setIcon("scan-text")
 					.onClick(() => void this.ocrCard(card)),
 			);
@@ -3968,14 +3972,14 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if ((card.excerptText ?? "").trim().length > 0) {
 			menu.addItem((item) =>
 				item
-					.setTitle("翻译")
+					.setTitle(t("翻译"))
 					.setIcon("languages")
 					.onClick(() => this.openTranslate(card)),
 			);
 			// 99 AI 制卡：摘录文字为材料出 QA/填空卡，继承本文档锚点（自动入图归章）
 			menu.addItem((item) =>
 				item
-					.setTitle("AI 制卡…")
+					.setTitle(t("AI 制卡…"))
 					.setIcon("list-checks")
 					.onClick(() => promptCardGen(this.app, this.plugin, card)),
 			);
@@ -3986,7 +3990,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (canCardAiComment(card)) {
 			menu.addItem((item) =>
 				item
-					.setTitle("AI 补充解释")
+					.setTitle(t("AI 补充解释"))
 					.setIcon("sparkles")
 					.onClick(() => void promptCardAiComment(this.app, this.plugin, card)),
 			);
@@ -3996,14 +4000,14 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (card.excerptType === "photo" && card.page != null) {
 			menu.addItem((item) =>
 				item
-					.setTitle("定位到页面…")
+					.setTitle(t("定位到页面…"))
 					.setIcon("crosshair")
 					.onClick(() => this.startPhotoRelocate(card)),
 			);
 			if (card.rects.length > 0) {
 				menu.addItem((item) =>
 					item
-						.setTitle("取消定位")
+						.setTitle(t("取消定位"))
 						.setIcon("locate-off")
 						.onClick(() => {
 							this.plugin.cards.update(card.id, { rects: [] });
@@ -4017,7 +4021,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (card.rects.length > 0 && card.page != null && card.excerptType !== "photo") {
 			menu.addItem((item) =>
 				item
-					.setTitle("遮挡区域…")
+					.setTitle(t("遮挡区域…"))
 					.setIcon("eye-off")
 					.onClick(() => this.startOcclusionEdit(card)),
 			);
@@ -4025,7 +4029,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			// 与拖框遮挡互斥的瞬态模式）；入口与遮挡区域同守卫（photo/audio 无矩形不给）
 			menu.addItem((item) =>
 				item
-					.setTitle("文字遮罩…")
+					.setTitle(t("文字遮罩…"))
 					.setIcon("text-select")
 					.onClick(() => this.startOcclusionTextEdit(card)),
 			);
@@ -4046,7 +4050,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			if (card.occlusions.length > 0) {
 				menu.addItem((item) =>
 					item
-						.setTitle("清除遮挡")
+						.setTitle(t("清除遮挡"))
 						.setIcon("eraser")
 						.onClick(() => {
 							this.plugin.cards.update(card.id, { occlusions: [] });
@@ -4067,7 +4071,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		// 脑图组
 		menu.addItem((item) =>
 			item
-				.setTitle("加入思维导图…")
+				.setTitle(t("加入思维导图…"))
 				.setIcon(ADD_TO_MINDMAP_ICON)
 				.onClick(() => this.addToMindmap(card)),
 		);
@@ -4075,7 +4079,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		menu.addSeparator();
 		menu.addItem((item) =>
 			item
-				.setTitle("删除卡片")
+				.setTitle(t("删除卡片"))
 				.setIcon("trash-2")
 				.onClick(() => this.deleteCard(card)),
 		);
@@ -4211,7 +4215,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		const menu = new Menu();
 		menu.addItem((item) =>
 			item
-				.setTitle("删除此遮挡")
+				.setTitle(t("删除此遮挡"))
 				.setIcon("eraser")
 				.onClick(() => {
 					this.plugin.cards.update(card.id, {
@@ -4222,7 +4226,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (card.occlusions.length > 1) {
 			menu.addItem((item) =>
 				item
-					.setTitle("清除全部遮挡")
+					.setTitle(t("清除全部遮挡"))
 					.setIcon("trash-2")
 					.onClick(() => {
 						this.plugin.cards.update(card.id, { occlusions: [] });
@@ -4576,7 +4580,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			settings: this.plugin.settings,
 			onUsage: (usage) => this.plugin.addAiUsage(usage),
 			apply: {
-				label: "转为卡片",
+				label: t("转为卡片"),
 				onApply: (text) => {
 					if (!docId) {
 						new Notice("原文文档已关闭，无法定位");

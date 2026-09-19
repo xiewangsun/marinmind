@@ -819,8 +819,8 @@ export class MarinMindMindmapView extends ItemView {
 			attr: {
 				type: "button",
 				"aria-pressed": "true",
-				"aria-label": "添加到脑图",
-				title: "开关：新摘录自动添加到脑图",
+				"aria-label": t("添加到脑图"),
+				title: t("开关：新摘录自动添加到脑图"),
 			},
 		});
 		// 90 批 MN3 对照：入图=节点连线图 network（原 git-fork 像版本控制；zap 留给
@@ -834,8 +834,8 @@ export class MarinMindMindmapView extends ItemView {
 			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
-				"aria-label": "复习本书到期闪卡",
-				title: "复习本书到期闪卡（跨书主题图回退当前书/全部书籍）",
+				"aria-label": t("复习本书到期闪卡"),
+				title: t("复习本书到期闪卡（跨书主题图回退当前书/全部书籍）"),
 			},
 		});
 		// 90 批 MN3 对照：复习=学习语义 graduation-cap（原 swords 像对战；与阅读器
@@ -850,8 +850,8 @@ export class MarinMindMindmapView extends ItemView {
 			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
-				"aria-label": "搜索脑图节点",
-				title: "搜索脑图节点（标题 / 批注 / 摘录）",
+				"aria-label": t("搜索脑图节点"),
+				title: t("搜索脑图节点（标题 / 批注 / 摘录）"),
 			},
 		});
 		setIcon(searchBtn, "search");
@@ -863,8 +863,8 @@ export class MarinMindMindmapView extends ItemView {
 			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
-				"aria-label": "折叠全部",
-				title: "折叠全部",
+				"aria-label": t("折叠全部"),
+				title: t("折叠全部"),
 			},
 		});
 		setIcon(this.collapseBtnEl, "chevrons-down-up");
@@ -885,8 +885,10 @@ export class MarinMindMindmapView extends ItemView {
 			cls: "marinmind-tool-btn",
 			attr: {
 				type: "button",
-				"aria-label": "更多操作",
-				title: "更多操作（添加卡片 / 新建文字卡片 / 分支样式 / 固定根 / 重命名 / 删除 / 导出 / 自动布局 / 适配视图 / 目录建框架 / 撤销 / 重做 / 刷新）",
+				"aria-label": t("更多操作"),
+				title: t(
+					"更多操作（添加卡片 / 新建文字卡片 / 分支样式 / 固定根 / 重命名 / 删除 / 导出 / 自动布局 / 适配视图 / 目录建框架 / 撤销 / 重做 / 刷新）",
+				),
 			},
 		});
 		setIcon(this.headerOverflowBtn, "more-horizontal");
@@ -922,13 +924,13 @@ export class MarinMindMindmapView extends ItemView {
 		// 卡片组（90 批迁入；无图时方法内 Notice 兜底）
 		menu.addItem((mi) =>
 			mi
-				.setTitle("添加已有卡片…")
+				.setTitle(t("添加已有卡片…"))
 				.setIcon("list-plus")
 				.onClick(() => this.openCardPicker()),
 		);
 		menu.addItem((mi) =>
 			mi
-				.setTitle("新建文字卡片")
+				.setTitle(t("新建文字卡片"))
 				.setIcon("plus")
 				.onClick(() => this.createTextCard()),
 		);
@@ -936,13 +938,13 @@ export class MarinMindMindmapView extends ItemView {
 		menu.addSeparator();
 		menu.addItem((mi) =>
 			mi
-				.setTitle("分支样式…")
+				.setTitle(t("分支样式…"))
 				.setIcon("git-branch")
 				.onClick(() => this.showMapStyleMenu(evt)),
 		);
 		menu.addItem((mi) =>
 			mi
-				.setTitle("固定根")
+				.setTitle(t("固定根"))
 				.setIcon("pin")
 				.setChecked(this.fixedRootId != null)
 				.onClick(() => this.toggleFixedRoot()),
@@ -951,13 +953,13 @@ export class MarinMindMindmapView extends ItemView {
 		menu.addSeparator();
 		menu.addItem((mi) =>
 			mi
-				.setTitle("重命名")
+				.setTitle(t("重命名"))
 				.setIcon("pencil")
 				.onClick(() => this.renameMap()),
 		);
 		menu.addItem((mi) =>
 			mi
-				.setTitle("删除脑图")
+				.setTitle(t("删除脑图"))
 				.setIcon("trash-2")
 				.onClick(() => this.deleteMap()),
 		);
@@ -965,7 +967,7 @@ export class MarinMindMindmapView extends ItemView {
 		// 捕获传参模式——MenuItem onClick 参数为 MouseEvent|KeyboardEvent 不能直传）
 		menu.addItem((mi) =>
 			mi
-				.setTitle("导出（大纲 / OPML / 图片）…")
+				.setTitle(t("导出（大纲 / OPML / 图片）…"))
 				.setIcon("download")
 				.onClick(() => this.openExportMenu(evt)),
 		);
@@ -973,27 +975,27 @@ export class MarinMindMindmapView extends ItemView {
 		menu.addSeparator();
 		menu.addItem((mi) =>
 			mi
-				.setTitle("自动布局")
+				.setTitle(t("自动布局"))
 				.setIcon("layout-template")
 				.onClick(() => this.autoLayout()),
 		);
 		// 104-B 适配视图：布局不再隐式缩放适配后的显式出口（缩到全图可见并居中）
 		menu.addItem((mi) =>
 			mi
-				.setTitle("适配视图")
+				.setTitle(t("适配视图"))
 				.setIcon(resolveIcon(["expand", "scan", "frame"]))
 				.onClick(() => this.fitToContent()),
 		);
 		menu.addItem((mi) =>
 			mi
-				.setTitle("从文档目录建框架")
+				.setTitle(t("从文档目录建框架"))
 				.setIcon("list-tree")
 				.onClick(() => this.pickOutlineSource()),
 		);
 		// 100 AI 整理：根级散卡语义归组（子级整理在节点右键菜单）
 		menu.addItem((mi) =>
 			mi
-				.setTitle("AI 整理…")
+				.setTitle(t("AI 整理…"))
 				.setIcon("wand")
 				.onClick(() => this.openAiOrganize(null)),
 		);
@@ -1001,21 +1003,21 @@ export class MarinMindMindmapView extends ItemView {
 		menu.addSeparator();
 		menu.addItem((mi) =>
 			mi
-				.setTitle("撤销 (Ctrl+Z)")
+				.setTitle(t("撤销 (Ctrl+Z)"))
 				.setIcon("undo-2")
 				.setDisabled(!this.undoStack.canUndo())
 				.onClick(() => this.undoHistory()),
 		);
 		menu.addItem((mi) =>
 			mi
-				.setTitle("重做 (Ctrl+Shift+Z)")
+				.setTitle(t("重做 (Ctrl+Shift+Z)"))
 				.setIcon("redo-2")
 				.setDisabled(!this.undoStack.canRedo())
 				.onClick(() => this.redoHistory()),
 		);
 		menu.addItem((mi) =>
 			mi
-				.setTitle("刷新")
+				.setTitle(t("刷新"))
 				.setIcon("rotate-cw")
 				.onClick(() => this.refresh()),
 		);
@@ -1035,7 +1037,7 @@ export class MarinMindMindmapView extends ItemView {
 		for (const s of BRANCH_STYLES) {
 			menu.addItem((mi) =>
 				mi
-					.setTitle(BRANCH_STYLE_LABELS[s])
+					.setTitle(t(BRANCH_STYLE_LABELS[s]))
 					.setChecked(s === this.mapDefault)
 					.onClick(() => this.setDefaultStyle(s)),
 			);
@@ -1549,15 +1551,15 @@ export class MarinMindMindmapView extends ItemView {
 		}
 		el.replaceChildren();
 		if (!this.mapId) {
-			el.createSpan({ text: "未打开脑图：" });
+			el.createSpan({ text: t("未打开脑图：") });
 			el.createEl("button", {
 				cls: "marinmind-mm-empty-btn",
 				attr: { type: "button" },
-				text: "选择脑图…",
+				text: t("选择脑图…"),
 			}).addEventListener("click", () => this.showPicker());
 			return;
 		}
-		el.createSpan({ text: "画布空白：双击新建文字卡片，或用右上角工具栏添加卡片" });
+		el.createSpan({ text: t("画布空白：双击新建文字卡片，或用右上角工具栏添加卡片") });
 	}
 
 	// ---------- 拖拽入图（阅读器高亮拖卡落点） ----------
@@ -1771,7 +1773,7 @@ export class MarinMindMindmapView extends ItemView {
 		}
 		new TextPromptModal(
 			this.app,
-			{ title: "新建子卡片", placeholder: "输入卡片内容…" },
+			{ title: t("新建子卡片"), placeholder: t("输入卡片内容…") },
 			(text) => {
 				if (!text) {
 					return;
@@ -1792,7 +1794,7 @@ export class MarinMindMindmapView extends ItemView {
 			this.app,
 			{
 				title: parentId ? "新建兄弟卡片" : "新建根节点卡片",
-				placeholder: "输入卡片内容…",
+				placeholder: t("输入卡片内容…"),
 			},
 			(text) => {
 				if (!text) {
@@ -1970,7 +1972,7 @@ export class MarinMindMindmapView extends ItemView {
 		if (node.card.documentId) {
 			const src = document.createElement("button");
 			setIcon(src.createSpan({ cls: "marinmind-mm-btn-icon" }), "arrow-up-right");
-			src.createSpan({ text: "原文" });
+			src.createSpan({ text: t("原文") });
 			src.addEventListener("click", () => {
 				this.closeNodeEditor(false);
 				void this.plugin.openCardSource(node.card);
@@ -2959,7 +2961,7 @@ export class MarinMindMindmapView extends ItemView {
 		const pos = this.toWorld(evt.clientX, evt.clientY);
 		new TextPromptModal(
 			this.app,
-			{ title: "新建文字卡片", placeholder: "输入卡片内容…" },
+			{ title: t("新建文字卡片"), placeholder: t("输入卡片内容…") },
 			(text) => {
 				if (!text || !this.mapId) {
 					return;
@@ -3034,7 +3036,7 @@ export class MarinMindMindmapView extends ItemView {
 		if (card.documentId && card.page != null) {
 			menu.addItem((item) =>
 				item
-					.setTitle("跳转原文")
+					.setTitle(t("跳转原文"))
 					.setIcon("book-open")
 					.onClick(() => {
 						this.closeNodeEditor(false);
@@ -3045,20 +3047,20 @@ export class MarinMindMindmapView extends ItemView {
 		// 编辑组
 		menu.addItem((item) =>
 			item
-				.setTitle("编辑标题/批注")
+				.setTitle(t("编辑标题/批注"))
 				.setIcon("pencil")
 				.onClick(() => this.openNodeEditor(node)),
 		);
 		// 卡片互链（㊻-A）：复制 wikilink / 嵌入语法，贴到普通笔记或 Canvas 白板
 		menu.addItem((item) =>
 			item
-				.setTitle("复制卡片链接")
+				.setTitle(t("复制卡片链接"))
 				.setIcon("link")
 				.onClick(() => void this.plugin.copyCardLink(card, "link")),
 		);
 		menu.addItem((item) =>
 			item
-				.setTitle("复制嵌入代码")
+				.setTitle(t("复制嵌入代码"))
 				.setIcon("copy")
 				.onClick(() => void this.plugin.copyCardLink(card, "embed")),
 		);
@@ -3066,7 +3068,7 @@ export class MarinMindMindmapView extends ItemView {
 		// 卡片互链（53）：建链入口 + 有邻居时的解链入口（数据层 CardLink 早已就绪）
 		menu.addItem((item) =>
 			item
-				.setTitle("链接到卡片…")
+				.setTitle(t("链接到卡片…"))
 				.setIcon("link-2")
 				.onClick(() => this.openLinkPicker(card)),
 		);
@@ -3075,7 +3077,7 @@ export class MarinMindMindmapView extends ItemView {
 		if (card.documentId != null) {
 			menu.addItem((item) =>
 				item
-					.setTitle("相关卡片（AI）…")
+					.setTitle(t("相关卡片（AI）…"))
 					.setIcon("git-compare")
 					.onClick(() => {
 						this.closeNodeEditor(false);
@@ -3087,7 +3089,7 @@ export class MarinMindMindmapView extends ItemView {
 		if (neighborIds.length > 0) {
 			menu.addItem((item) =>
 				item
-					.setTitle("解除卡片链接…")
+					.setTitle(t("解除卡片链接…"))
 					.setIcon("corner-up-left")
 					.onClick(() => this.unlinkCard(card, neighborIds, evt)),
 			);
@@ -3095,7 +3097,7 @@ export class MarinMindMindmapView extends ItemView {
 		// 卡片合并（60）：源卡并入目标（文本并入、节点/链接/复习态转移、源卡删除）
 		menu.addItem((item) =>
 			item
-				.setTitle("合并到卡片…")
+				.setTitle(t("合并到卡片…"))
 				.setIcon("git-merge")
 				.onClick(() => this.openMergePicker(card)),
 		);
@@ -3121,7 +3123,7 @@ export class MarinMindMindmapView extends ItemView {
 		// 复习视图 dueByIds 直查，未启用/未到期的子树卡自然缺席
 		menu.addItem((item) =>
 			item
-				.setTitle("复习此分支")
+				.setTitle(t("复习此分支"))
 				.setIcon("graduation-cap")
 				.onClick(() => {
 					const byId = new Map(this.nodes.map((n) => [n.id, n]));
@@ -3139,7 +3141,7 @@ export class MarinMindMindmapView extends ItemView {
 		// 分支样式（⑱）：作用于该节点的子树（其子节点如何挂出）
 		menu.addItem((item) =>
 			item
-				.setTitle("分支样式…")
+				.setTitle(t("分支样式…"))
 				.setIcon("git-branch")
 				.onClick(() => this.showBranchStyleMenu(node, evt)),
 		);
@@ -3147,7 +3149,7 @@ export class MarinMindMindmapView extends ItemView {
 		if (this.nodes.filter((n) => n.parentId === node.id).length >= 4) {
 			menu.addItem((item) =>
 				item
-					.setTitle("AI 整理子级…")
+					.setTitle(t("AI 整理子级…"))
 					.setIcon("wand")
 					.onClick(() => {
 						this.closeNodeEditor(false);
@@ -3159,20 +3161,20 @@ export class MarinMindMindmapView extends ItemView {
 		if (node.childMapId) {
 			menu.addItem((item) =>
 				item
-					.setTitle("打开子脑图")
+					.setTitle(t("打开子脑图"))
 					.setIcon("external-link")
 					.onClick(() => this.openChildMap(node)),
 			);
 			menu.addItem((item) =>
 				item
-					.setTitle("解除子脑图")
+					.setTitle(t("解除子脑图"))
 					.setIcon("unfold-vertical")
 					.onClick(() => this.uncollapseChildMap(node)),
 			);
 		} else if (this.nodes.some((n) => n.parentId === node.id)) {
 			menu.addItem((item) =>
 				item
-					.setTitle("坍缩为子脑图")
+					.setTitle(t("坍缩为子脑图"))
 					.setIcon("fold-vertical")
 					.onClick(() => this.collapseToChildMap(node)),
 			);
@@ -3182,14 +3184,14 @@ export class MarinMindMindmapView extends ItemView {
 		if (pinned?.nodeId === node.id) {
 			menu.addItem((item) =>
 				item
-					.setTitle("取消固定根节点")
+					.setTitle(t("取消固定根节点"))
 					.setIcon("pin-off")
 					.onClick(() => this.clearFixedRoot(node.mapId)),
 			);
 		} else {
 			menu.addItem((item) =>
 				item
-					.setTitle("设为固定根节点")
+					.setTitle(t("设为固定根节点"))
 					.setIcon("pin")
 					.onClick(() => this.setFixedRootFor(node)),
 			);
@@ -3197,7 +3199,7 @@ export class MarinMindMindmapView extends ItemView {
 		// 危险操作（删除）
 		menu.addItem((item) =>
 			item
-				.setTitle("移出脑图")
+				.setTitle(t("移出脑图"))
 				.setIcon("unlink")
 				.onClick(() => {
 					this.plugin.mindmaps.removeNode(node.id);
@@ -3214,7 +3216,7 @@ export class MarinMindMindmapView extends ItemView {
 		menu.addSeparator();
 		menu.addItem((item) =>
 			item
-				.setTitle("删除卡片")
+				.setTitle(t("删除卡片"))
 				.setIcon("trash-2")
 				.onClick(() => {
 					// 节点移除由 cardBus 删除事件回环完成（DB 级联删行 + applyCardRemoval）；
@@ -3484,19 +3486,19 @@ export class MarinMindMindmapView extends ItemView {
 		const menu = new Menu();
 		menu.addItem((item) =>
 			item
-				.setTitle("导出 Markdown 大纲")
+				.setTitle(t("导出 Markdown 大纲"))
 				.setIcon("file-text")
 				.onClick(() => void this.exportOutline()),
 		);
 		menu.addItem((item) =>
 			item
-				.setTitle("导出 OPML 大纲")
+				.setTitle(t("导出 OPML 大纲"))
 				.setIcon("code")
 				.onClick(() => void this.exportOpml()),
 		);
 		menu.addItem((item) =>
 			item
-				.setTitle("导出 PNG 图片")
+				.setTitle(t("导出 PNG 图片"))
 				.setIcon("image")
 				.onClick(() => void this.exportPng()),
 		);
@@ -3840,7 +3842,7 @@ export class MarinMindMindmapView extends ItemView {
 		for (const s of BRANCH_STYLES) {
 			menu.addItem((item) =>
 				item
-					.setTitle(BRANCH_STYLE_LABELS[s])
+					.setTitle(t(BRANCH_STYLE_LABELS[s]))
 					.setIcon(node.branchStyle === s ? "check" : "circle")
 					.onClick(() => this.applyBranchStyle(node.id, s)),
 			);
@@ -4039,7 +4041,7 @@ export class MarinMindMindmapView extends ItemView {
 		const pos = this.toWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
 		new TextPromptModal(
 			this.app,
-			{ title: "新建文字卡片", placeholder: "输入卡片内容…" },
+			{ title: t("新建文字卡片"), placeholder: t("输入卡片内容…") },
 			(text) => {
 				if (!text || !this.mapId) {
 					return;
@@ -4078,7 +4080,7 @@ export class MarinMindMindmapView extends ItemView {
 		}
 		new TextPromptModal(
 			this.app,
-			{ title: "重命名脑图", initialText: map.name, multiline: false },
+			{ title: t("重命名脑图"), initialText: map.name, multiline: false },
 			(name) => {
 				if (!name || !this.mapId) {
 					return;
