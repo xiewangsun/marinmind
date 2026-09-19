@@ -4,7 +4,7 @@ import type MarinMindPlugin from "../main";
 import { activeViewsOf, registerActiveView, unregisterActiveView } from "../events/view-registry";
 import { t } from "../i18n/i18n";
 import type { BranchStyle, Card, MindmapNodeWithCard } from "../types";
-import { BRANCH_STYLES, BRANCH_STYLE_LABELS, isBranchStyle } from "../types";
+import { BRANCH_STYLES, BRANCH_STYLE_LABELS, isBranchStyle, REFLOW_COLUMN_WIDTHS } from "../types";
 import { READER_VIEW_TYPE } from "../reader/reader-view";
 import { TextPromptModal } from "../reader/note-edit-modal";
 import { CardPickerModal } from "./card-picker-modal";
@@ -3646,7 +3646,12 @@ export class MarinMindMindmapView extends ItemView {
 				return;
 			}
 			new Notice("正在渲染文档以定位标题位置（大文件可能数秒）…", 4000);
-			entries = await measureMdOutline(this.app, this, text);
+			entries = await measureMdOutline(
+				this.app,
+				this,
+				text,
+				REFLOW_COLUMN_WIDTHS[this.plugin.settings.reflowColumnWidth], // 161 与阅读器栏宽同源
+			);
 		} else {
 			let bytes: ArrayBuffer;
 			try {

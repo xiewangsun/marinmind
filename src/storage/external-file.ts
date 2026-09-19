@@ -87,7 +87,8 @@ export async function pickExternalPath(): Promise<string | null> {
 	const result = await dialog.showOpenDialog({
 		title: "选择库外文档",
 		properties: ["openFile"],
-		filters: [{ name: "文档", extensions: ["pdf", "epub", ...MOBI_EXTS] }],
+		// 161 库外 md：桌面直读（字节经 readExternalBinary，内链解析降级）
+		filters: [{ name: "文档", extensions: ["pdf", "epub", "md", ...MOBI_EXTS] }],
 	});
 	if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
 		return null;

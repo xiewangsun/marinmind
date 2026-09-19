@@ -15,6 +15,7 @@ function doc(partial: Partial<BookDocument> = {}): BookDocument {
 		id: "11111111-1111-4111-8111-111111111111",
 		filePath: "阅读/书籍A.pdf",
 		title: "书籍A",
+		author: null, // 163：可选字段显式 null（与解析产物 toEqual 对齐；序列化省略行）
 		category: null,
 		collectMapId: null,
 		autoFlashcard: false,
@@ -85,6 +86,17 @@ describe("book-format 序列化与解析", () => {
 		expect(parsed.bookmarks).toEqual([]);
 		expect(parsed.doc).toEqual(doc());
 		expect(parsed.warnings).toEqual([]);
+	});
+
+	it("作者 author 行（163）：有值落行往返；null 省略行（零写入契约）", () => {
+		const withAuthor = serializeBookMd(bookInput({ doc: doc({ author: "张三" }) }));
+		expect(withAuthor).toContain("author: 张三");
+		const parsed = parseBookMd(withAuthor, { fileName: "书籍A.md" });
+		expect(parsed.doc.author).toBe("张三");
+		// null（含缺行）：不落行，解析回 null
+		const withoutAuthor = serializeBookMd(bookInput());
+		expect(withoutAuthor).not.toContain("author:");
+		expect(parseBookMd(withoutAuthor, { fileName: "书籍A.md" }).doc.author).toBeNull();
 	});
 
 	it("语音时长 dur 键（84-B）：audio 卡往返还原；缺省不落键（零写入契约）", () => {

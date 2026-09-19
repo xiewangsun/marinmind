@@ -340,10 +340,10 @@ describe("parseEpub 错误路径（中文文案，宁拒不赌）", () => {
 		expect(() => parseEpub(new Uint8Array([1, 2, 3]))).toThrow(/无法解压/);
 	});
 
-	it("encryption.xml 存在即拒（DRM / 字体混淆不区分）", () => {
+	it("encryption.xml 空清单拒收（162 分级前的存在即拒语义收窄为无法解析）", () => {
 		expect(() =>
 			parseEpub(sampleEpub3({ "META-INF/encryption.xml": "<encryption/>" })),
-		).toThrow(/加密内容/);
+		).toThrow(/无法解析/);
 	});
 
 	it("缺 container.xml / container 无 rootfile / OPF 文件缺失 / 空 spine", () => {
@@ -395,5 +395,131 @@ describe("epubCoverBytes filter 限次提取（㊼ 主页封面）", () => {
 		);
 		expect(noCover).toBeNull();
 		expect(epubCoverBytes(new Uint8Array([1, 2, 3]))).toBeNull();
+	});
+});
+
+describe("作者解析（163 OPF dc:creator）", () => {
+	it("首个非空 dc:creator → author；无前缀 creator 变体通吃；缺失 null", () => {
+		const withCreator = parseEpub(
+			sampleEpub3({
+				"OEBPS/content.opf": `<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+	<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+		<dc:identifier id="uid">urn:uuid:x</dc:identifier>
+		<dc:title>作者书</dc:title>
+		<dc:creator>张三</dc:creator>
+		<dc:creator>李四</dc:creator>
+	</metadata>
+	<manifest>
+		<item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+	</manifest>
+	<spine><itemref idref="c1"/></spine>
+</package>`,
+			}),
+		);
+		expect(withCreator.author).toBe("张三");
+
+		const unprefixed = parseEpub(
+			sampleEpub3({
+				"OEBPS/content.opf": `<?xml version="1.0"?>
+<package version="3.0" unique-identifier="uid">
+	<metadata xmlns="http://purl.org/dc/elements/1.1/">
+		<identifier id="uid">urn:uuid:y</identifier>
+		<title>无前缀书</title>
+		<creator>王五</creator>
+	</metadata>
+	<manifest>
+		<item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+	</manifest>
+	<spine><itemref idref="c1"/></spine>
+</package>`,
+			}),
+		);
+		expect(unprefixed.author).toBe("王五");
+
+		expect(parseEpub(sampleEpub3()).author).toBeNull();
+	});
+});
+
+/** 162 加密分级：混淆（可跳过开书）与 DRM（拒收）分家 */ function encryptionXml(
+	algorithm: string,
+	uri: string,
+	prefixed = true,
+): string {
+	const p = prefixed ? "enc:" : "";
+	const ns = prefixed ? ' xmlns:enc="http://www.w3.org/2001/04/xmlenc#"' : "";
+	return `<?xml version="1.0"?>
+<encryption${ns}>
+	<${p}EncryptedData>
+		<${p}EncryptionMethod Algorithm="${algorithm}"/>
+		<${p}CipherData><${p}CipherReference URI="${uri}"/></${p}CipherData>
+	</${p}EncryptedData>
+</encryption>`;
+}
+
+describe("EPUB 加密分级（162：字体混淆跳过 / DRM 拒收）", () => {
+	it("IDPF 字体混淆：开书正常，混淆条目 readEntry 降级 null，spine 照读", () => {
+		const book = parseEpub(
+			sampleEpub3({
+				"META-INF/encryption.xml": encryptionXml(
+					"http://www.idpf.org/2008/embedding",
+					"OEBPS/fonts/body.otf",
+				),
+				"OEBPS/fonts/body.otf": new Uint8Array([1, 2, 3]),
+			}),
+		);
+		expect(book.title).toBe("测试书");
+		expect(book.readEntry("OEBPS/text/ch1.xhtml")).not.toBeNull();
+		expect(book.readEntry("OEBPS/fonts/body.otf")).toBeNull();
+	});
+
+	it("Adobe 混淆算法同样放行；无 enc: 前缀的清单也能解析", () => {
+		const book = parseEpub(
+			sampleEpub3({
+				"META-INF/encryption.xml": encryptionXml(
+					"http://ns.adobe.com/pdf/enc#RC",
+					"OEBPS/fonts/main.woff",
+					false,
+				),
+				"OEBPS/fonts/main.woff": new Uint8Array([9]),
+			}),
+		);
+		expect(book.spine.length).toBeGreaterThan(0);
+		expect(book.readEntry("OEBPS/fonts/main.woff")).toBeNull();
+	});
+
+	it("未知算法（真 DRM，如 aes128-cbc）→ 拒收并报 DRM", () => {
+		expect(() =>
+			parseEpub(
+				sampleEpub3({
+					"META-INF/encryption.xml": encryptionXml(
+						"http://www.w3.org/2001/04/xmlenc#aes128-cbc",
+						"OEBPS/text/ch1.xhtml",
+					),
+				}),
+			),
+		).toThrowError(/DRM/);
+	});
+
+	it("混淆条目撞 spine 正文（畸形书）→ 明确报错", () => {
+		expect(() =>
+			parseEpub(
+				sampleEpub3({
+					"META-INF/encryption.xml": encryptionXml(
+						"http://www.idpf.org/2008/embedding",
+						"OEBPS/text/ch1.xhtml",
+					),
+				}),
+			),
+		).toThrowError(/章节内容被加密/);
+	});
+
+	it("加密清单为空 / 畸形 → 拒不赌报错", () => {
+		expect(() =>
+			parseEpub(sampleEpub3({ "META-INF/encryption.xml": "<encryption/>" })),
+		).toThrowError(/无法解析/);
+		expect(() =>
+			parseEpub(sampleEpub3({ "META-INF/encryption.xml": "not-xml <<<" })),
+		).toThrowError();
 	});
 });

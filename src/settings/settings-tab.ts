@@ -10,6 +10,7 @@ import { resolveBackupLocation } from "../storage/data-location";
 import {
 	isLinkDirection,
 	isLineStyle,
+	isReflowColumnWidth,
 	LINK_DIRECTIONS,
 	LINK_DIRECTION_LABELS,
 	LINE_STYLES,
@@ -255,6 +256,28 @@ export class MarinMindSettingTab extends PluginSettingTab {
 					this.plugin.settings.excerptLineStyle = value;
 					void this.plugin.saveData({ ...this.plugin.settings });
 				});
+			});
+
+		new Setting(containerEl)
+			.setName(t("重排文档栏宽"))
+			.setDesc(
+				t(
+					"Markdown / 剪藏 / EPUB 阅读的栏宽三档（窄 640 / 标准 820 / 宽 1040）；标准为历史默认。换档后需重开文档生效。",
+				),
+			)
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption("narrow", t("窄（640px）"))
+					.addOption("standard", t("标准（820px，默认）"))
+					.addOption("wide", t("宽（1040px）"))
+					.setValue(this.plugin.settings.reflowColumnWidth)
+					.onChange((value) => {
+						if (!isReflowColumnWidth(value)) {
+							return;
+						}
+						this.plugin.settings.reflowColumnWidth = value;
+						void this.plugin.saveData({ ...this.plugin.settings });
+					});
 			});
 	}
 

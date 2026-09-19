@@ -31,6 +31,13 @@ export interface BookDocument {
 	 */
 	filePath: string;
 	title: string;
+	/**
+	 * 作者（163 元数据）：mobi EXTH 100 / epub OPF dc:creator 解析所得，
+	 **可选**字段（旧记录与书文件缺行均为无作者）；存书文件 frontmatter
+	 * `author`，null/缺省省略整行（零写入契约）。展示：主页文档行副行前缀；
+	 * 排序/过滤消费待后续
+	 */
+	author?: string | null;
 	/** 文档分类（㉟ 主页虚拟文件夹）：单层，null = 未分类；存书文件 frontmatter 单行标量 */
 	category: string | null;
 	/**
@@ -210,6 +217,27 @@ export const LINE_STYLE_LABELS: Record<LineStyle, string> = {
 /** 校验机器层/外部值是否为合法线型（非法值按未设置处理，读取层归一） */
 export function isLineStyle(v: unknown): v is LineStyle {
 	return typeof v === "string" && (LINE_STYLES as readonly string[]).includes(v);
+}
+
+/**
+ * 可重排文档（md/clip/epub）阅读栏宽三档（161）：standard 与历史固定 820 一致
+ * （缺省零变化）；narrow/wide 供行宽偏好。应用于加载期 basePageWidth（换档
+ * 需重开文档生效）；md 目录量测（measureMdOutline）与此同源保持换行一致。
+ */
+export type ReflowColumnWidth = "narrow" | "standard" | "wide";
+
+export const REFLOW_COLUMN_WIDTHS: Record<ReflowColumnWidth, number> = {
+	narrow: 640,
+	standard: 820,
+	wide: 1040,
+};
+
+/** 校验外部值是否为合法栏宽档（非法值回默认 standard） */
+export function isReflowColumnWidth(v: unknown): v is ReflowColumnWidth {
+	return (
+		typeof v === "string" &&
+		(Object.keys(REFLOW_COLUMN_WIDTHS) as readonly string[]).includes(v)
+	);
 }
 
 /**

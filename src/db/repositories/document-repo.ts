@@ -15,21 +15,30 @@ export class DocumentRepository {
 	 * 避免每次打开触发整书序列化 + 重写（2s 防抖后正好卡在用户开始阅读时）；
 	 * 标题变化/新建仍走 upsertBook（文件名跟随书名 + 落盘）。
 	 */
-	upsertByPath(filePath: string, title: string): BookDocument {
+	upsertByPath(filePath: string, title: string, author?: string | null): BookDocument {
 		const ts = now();
 		const existing = this.store.bookByFilePath(filePath);
 		if (existing) {
-			if (existing.doc.title === title) {
+			// 163 作者：显式传入且不同才更新（文档元数据刷新；undefined 不动）
+			const nextAuthor =
+				author !== undefined && (existing.doc.author ?? null) !== (author || null)
+					? author || null
+					: undefined;
+			if (existing.doc.title === title && nextAuthor === undefined) {
 				this.store.touchBookOpen(existing.doc.id);
 				return { ...existing.doc, updatedAt: ts };
 			}
 			const doc: BookDocument = { ...existing.doc, title, updatedAt: ts };
+			if (nextAuthor !== undefined) {
+				doc.author = nextAuthor;
+			}
 			this.store.upsertBook(doc);
 			return doc;
 		}
 		const doc: BookDocument = {
 			id: newId(),
 			title,
+			author: author || null, // 163：可选字段（null 序列化省略行）
 			filePath,
 			category: null,
 			collectMapId: null,

@@ -999,9 +999,13 @@ function renderDocRow(
 	if (doc.category) {
 		row.createDiv({ cls: "marinmind-doc-badge", text: doc.category });
 	}
+	// 163 作者前缀（元数据来自 epub dc:creator / mobi EXTH 100；长名 24 字截断）
+	const author = doc.author
+		? `${doc.author.slice(0, 24)}${doc.author.length > 24 ? "…" : ""} · `
+		: "";
 	row.createDiv({
 		cls: "marinmind-home-row-meta",
-		text: `${plugin.cards.count(doc.id)} 卡 · ${formatRelativeTime(doc.updatedAt, ts)}`,
+		text: `${author}${plugin.cards.count(doc.id)} 卡 · ${formatRelativeTime(doc.updatedAt, ts)}`,
 	});
 	if (batch) {
 		wireDocBatchInteractions(row, doc, selected);

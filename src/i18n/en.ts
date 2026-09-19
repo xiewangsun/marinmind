@@ -475,4 +475,23 @@ export const EN: Record<string, string> = {
 	"sk-…（凭据明文存于插件数据文件）": "sk-… (stored in plain text in the plugin data file)",
 	"基于当前文档问答：先在阅读器打开文档，选择上下文范围（当前页 / 全文），然后提问。回答中的「第 N 页」可点击跳转。点 🌐 可叠加联网搜索：模型自带搜索（GLM / gpt-4o-search-preview / sonar 系列，或 OpenRouter 模型名加 :online 后缀）直接用；普通模型可到 设置 → AI → 联网搜索服务 配置 Tavily / 博查 / SearXNG 后，插件先搜后拼资料作答（联网可能产生额外费用）。":
 		"Ask about the current document: open a document in the reader, pick a context scope (current page / full text), then ask. “Page N” mentions in answers are clickable. Toggle 🌐 to add web search: models with built-in search (GLM / gpt-4o-search-preview / sonar, or OpenRouter models with the :online suffix) use it directly; other models work after configuring Tavily / Bocha / SearXNG under Settings → AI → Web search service (web search may incur extra costs).",
+	// ---- 161：md 阅读优化（栏宽 / 库外直读） ----
+	重排文档栏宽: "Reflow column width",
+	"Markdown / 剪藏 / EPUB 阅读的栏宽三档（窄 640 / 标准 820 / 宽 1040）；标准为历史默认。换档后需重开文档生效。":
+		"Three column widths for Markdown / clip / EPUB reading (narrow 640 / standard 820 / wide 1040); standard is the historical default. Reopen the document to apply.",
+	"窄（640px）": "Narrow (640px)",
+	"标准（820px，默认）": "Standard (820px, default)",
+	"宽（1040px）": "Wide (1040px)",
+	// ---- 162-164：epub 加密分级 / 图片预览 / DOM 版面摘录 ----
+	"本页内容尚未渲染，稍候再试": "This page has not rendered yet — try again shortly",
+	本页没有可摘录的文本块: "No excerptable text blocks on this page",
+	全文: "Full document",
+	"第 {n} 章": "Chapter {n}",
+	"内容块较多，仅列出前 {n} 块（可分章执行）":
+		"Many blocks — only the first {n} are listed (run per chapter)",
+	正文: "Body",
+	已有: "Existing",
+	"已选 {n} 块": "{n} selected",
+	"已创建 {n} 张卡片": "Created {n} cards",
+	链接指向的图片在书内不存在: "The linked image does not exist in this book",
 };

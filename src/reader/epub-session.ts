@@ -15,7 +15,15 @@ import { entryText, resolveZipPath, type EpubBook } from "./epub-document";
 export type EpubLinkTarget =
 	| { kind: "spine"; spineIndex: number; fragment: string | null }
 	| { kind: "external"; url: string }
+	/** 162：a 链接指向 zip 内图片条目（非 spine）——reader 弹预览窗（blob 管线复用） */
+	| { kind: "image"; path: string }
 	| { kind: "unsupported" };
+
+/** 是否图片扩展名（与 imageMimeOf 的扩展集一致；链接分类用） */
+function isImagePath(path: string): boolean {
+	const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+	return ["svg", "jpg", "jpeg", "png", "gif", "webp"].includes(ext);
+}
 
 /** 整删标签（脚本/样式/嵌入框架/表单控件/音视频——音视频挂账后续优化） */
 const DROP_TAGS = new Set([
@@ -166,8 +174,9 @@ const KEEP_ATTRS = new Set([
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-/** 扩展名 → MIME（svg 必须显式类型才会在 <img> 渲染；位图靠 img 嗅探可省，仍给出更稳） */
-function imageMimeOf(path: string): string {
+/** 扩展名 → MIME（svg 必须显式类型才会在 <img> 渲染；位图靠 img 嗅探可省，仍给出更稳）；
+ * 162 起导出——reader 图片直链预览的 blob 类型共用同源 */
+export function imageMimeOf(path: string): string {
 	const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
 	if (ext === "svg") return "image/svg+xml";
 	if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
@@ -309,6 +318,10 @@ export class EpubSession {
 		const { path, fragment } = resolveZipPath(chapterFile, href);
 		const idx = this.spineIndexByHref.get(path);
 		if (idx === undefined) {
+			// 162：非 spine 但指向 zip 内图片 → 预览（存在性由点击时 readEntry 判定）
+			if (isImagePath(path)) {
+				return { kind: "image", path };
+			}
 			return { kind: "unsupported" };
 		}
 		return { kind: "spine", spineIndex: idx, fragment };

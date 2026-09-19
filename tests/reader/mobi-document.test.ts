@@ -727,6 +727,26 @@ describe("标题解析（㊽）", () => {
 	});
 });
 
+describe("作者解析（163 EXTH 100）", () => {
+	it("EXTH 100 提取 + 实体反转义；缺失 → null", () => {
+		const withAuthor = makePdb(
+			makeMobi6Records({
+				html: "<p>x</p>",
+				exth: [
+					{ type: 503, data: strToU8("书名") },
+					{ type: 100, data: strToU8("作者&amp;名") },
+				],
+			}),
+		);
+		const book = parseMobi(withAuthor);
+		expect(book.title).toBe("书名");
+		expect(book.author).toBe("作者&名");
+
+		const noAuthor = parseMobi(makePdb(makeMobi6Records({ html: "<p>x</p>" })));
+		expect(noAuthor.author).toBeNull();
+	});
+});
+
 describe("DRM 拒收（㊽）", () => {
 	it("encryption=1（老 MOBI 加密）与 =2（新 DRM）均中文报错", () => {
 		const drm = (enc: number) =>

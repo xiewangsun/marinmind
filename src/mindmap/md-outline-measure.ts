@@ -30,17 +30,17 @@ export async function measureMdOutline(
 	app: App,
 	component: Component,
 	text: string,
+	/** 161 栏宽三档：与阅读器实测栏宽一致（换行一致 y 漂移最小）；缺省 820 历史值 */
+	columnWidth = 820,
 ): Promise<MeasuredOutlineEntry[]> {
-	// width 820 与阅读器 md 列宽一致（换行位置不同 → 标题 y 会有小幅漂移，
-	// 归章/跳原文都按此 y 语义自洽，无需与阅读器逐像素对齐）
 	const host = document.createElement("div");
 	host.className = "markdown-preview-view";
-	// 151 审查：静态样式改 setCssStyles（隐藏量测容器，width 与 md 列宽一致）
+	// 151 审查：静态样式改 setCssStyles（隐藏量测容器，width 与阅读器栏宽一致）
 	host.setCssStyles({
 		position: "fixed",
 		left: "-10000px",
 		top: "0",
-		width: "820px",
+		width: `${columnWidth}px`,
 		visibility: "hidden",
 		pointerEvents: "none",
 	});

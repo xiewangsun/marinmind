@@ -1,4 +1,4 @@
-import { TFile, ItemView, Menu, Notice, Platform, debounce, setIcon } from "obsidian";
+import { TFile, ItemView, Menu, Modal, Notice, Platform, debounce, setIcon } from "obsidian";
 import type { ViewStateResult, WorkspaceLeaf } from "obsidian";
 import type MarinMindPlugin from "../main";
 import { resolveIcon, setIconSafe } from "../ui/icon-resolve";
@@ -15,9 +15,11 @@ import { docExtOf, fsBasename, isAbsoluteFsPath, isMobiExt } from "../storage/pa
 import { readExternalBinary } from "../storage/external-file";
 import { localizeClipImageRefs } from "../webclip/clip-md";
 import type { Card, DocRect, LineStyle, NormPoint } from "../types";
-import { LINE_STYLES, LINE_STYLE_LABELS } from "../types";
+import { LINE_STYLES, LINE_STYLE_LABELS, REFLOW_COLUMN_WIDTHS } from "../types";
 import { AudioRecorder, audioDurationSec, formatDurSec } from "./audio-recorder";
 import { AutoExcerptModal } from "./auto-excerpt-modal";
+import { collectDomBlocks, domBlocksToAuto } from "./dom-auto-excerpt";
+import { DomAutoExcerptModal } from "./dom-auto-excerpt-modal";
 import {
 	epubChapterTitleOf,
 	entryText,
@@ -25,7 +27,7 @@ import {
 	parseEpub,
 	type EpubBook,
 } from "./epub-document";
-import { EpubSession, type EpubLinkTarget } from "./epub-session";
+import { EpubSession, imageMimeOf, type EpubLinkTarget } from "./epub-session";
 import { parseMobi } from "./mobi-document";
 import { RecordingBar } from "./recording-bar";
 import { ExcerptLayer, flashEl, type ExcerptTool, type ReaderTool } from "./excerpt-layer";
@@ -93,8 +95,6 @@ const ZOOM_PRESETS = [1, 1.5, 2] as const;
 /** fit-width 计算预留的滚动容器水平内边距（与 CSS padding 12px×2 对应） */
 const SCROLL_PADDING_X = 24;
 
-/** ㊻-B md 文档阅读栏宽上限（scale=1 基准宽；实际显示 = min(栏宽, 窗格宽)） */
-const MD_COLUMN_WIDTH = 820;
 /** ㊻-B md 单页占位高度（渲染前撑起滚动条，渲染完成后由内容实际高度接管） */
 const MD_PLACEHOLDER_HEIGHT = 1000;
 
@@ -113,8 +113,10 @@ type DocKind = "pdf" | "md" | "epub" | "clip";
 /** ㊼ 按扩展名判定文档形态（库内/库外路径通吃；未知扩展名按 pdf 走 pdf.js 报错兜底） */
 function docKindOf(filePath: string): DocKind {
 	const ext = docExtOf(filePath);
-	if (ext === "md" && !isAbsoluteFsPath(filePath)) {
-		return "md"; // 库外 md 不支持（无 TFile 供 MarkdownRenderer 渲染上下文）
+	if (ext === "md") {
+		// 161 库外 md 桌面直读（字节走 readDocBytes，渲染 sourcePath 降级空串：
+		// [[内链]]/相对图片无 vault 语义不解析——挂账既定取舍）
+		return "md";
 	}
 	if (ext === "epub" || isMobiExt(ext)) {
 		return "epub"; // ㊽ MOBI 家族按 epub 别名搭车（章=页模型同构）
@@ -669,12 +671,22 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			this.mdText = localized.text;
 			title = fsBasename(filePath);
 		} else if (this.docKind === "md") {
-			const file = this.app.vault.getAbstractFileByPath(filePath);
-			if (!(file instanceof TFile)) {
-				throw new Error(`文件不在库中：${filePath}`);
+			if (isAbsoluteFsPath(filePath)) {
+				// 161 库外 md：字节走统一外部入口；标题取文件名（无 TFile）
+				const buf = await this.readDocBytes(filePath);
+				if (token !== this.loadToken) {
+					return;
+				}
+				this.mdText = new TextDecoder().decode(buf);
+				title = fsBasename(filePath);
+			} else {
+				const file = this.app.vault.getAbstractFileByPath(filePath);
+				if (!(file instanceof TFile)) {
+					throw new Error(`文件不在库中：${filePath}`);
+				}
+				this.mdText = await this.app.vault.cachedRead(file);
+				title = file.basename;
 			}
-			this.mdText = await this.app.vault.cachedRead(file);
-			title = file.basename;
 		} else if (this.docKind === "epub") {
 			const buf = await this.readDocBytes(filePath);
 			if (token !== this.loadToken) {
@@ -737,7 +749,12 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 
 		// 文档登记（以路径为业务键，重复打开复用记录；两种来源路径统一直通）
 		const oldTitle = this.plugin.documents.getByPath(filePath)?.title;
-		const doc = this.plugin.documents.upsertByPath(filePath, title);
+		// 163 作者：epub/mobi 元数据（OPF dc:creator / EXTH 100）随登记入库
+		const doc = this.plugin.documents.upsertByPath(
+			filePath,
+			title,
+			this.docKind === "epub" ? (this.epub?.author ?? null) : undefined,
+		);
 		this.currentDocId = doc.id;
 		// 80 阅读位置记忆：页码基准随文档登记初始化（与书文件存储值对齐，
 		// 静读不产生写；回放由 openPath 尾部 applyPendingPage 消费）
@@ -757,16 +774,18 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		}
 
 		// 滚动容器 + 各页骨架（先用第 1 页尺寸占位）
+		// 161 栏宽三档：可重排文档共用（设置档位映射像素，standard=820 与历史一致）
+		const columnWidth = REFLOW_COLUMN_WIDTHS[this.plugin.settings.reflowColumnWidth];
 		if (this.docKind === "md" || this.docKind === "clip") {
-			// ㊻-B md/clip 单页长文：栏宽 820 占位（渲染完成后高度由内容驱动），无真实页尺寸
-			this.basePageWidth = MD_COLUMN_WIDTH;
-			this.firstSize = { width: MD_COLUMN_WIDTH, height: MD_PLACEHOLDER_HEIGHT };
+			// ㊻-B md/clip 单页长文：定宽占位（渲染完成后高度由内容驱动），无真实页尺寸
+			this.basePageWidth = columnWidth;
+			this.firstSize = { width: columnWidth, height: MD_PLACEHOLDER_HEIGHT };
 			this.totalPages = 1;
 		} else if (this.docKind === "epub") {
 			const book = this.epub!;
-			// ㊼ epub 章=页模型：栏宽 820 与 md 一致；每章骨架高度由实测章高接管（见 ensureChapterRendered）
-			this.basePageWidth = MD_COLUMN_WIDTH;
-			this.firstSize = { width: MD_COLUMN_WIDTH, height: MD_PLACEHOLDER_HEIGHT };
+			// ㊼ epub 章=页模型：栏宽与 md 一致；每章骨架高度由实测章高接管（见 ensureChapterRendered）
+			this.basePageWidth = columnWidth;
+			this.firstSize = { width: columnWidth, height: MD_PLACEHOLDER_HEIGHT };
 			this.totalPages = book.spine.length;
 		} else {
 			const pdf = this.pdf;
@@ -948,12 +967,12 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		if (!pv || text == null || this.currentFilePath == null) {
 			return;
 		}
-		// 124 clip：fs 数据根场景无 vault 路径作相对解析基准（图片已替换 blob，
-		// 渲染不依赖 sourcePath；空串为 Obsidian 允许的「无源」形态）
-		const sourcePath =
-			this.docKind === "clip" && this.plugin.dataLoc.kind === "fs"
-				? ""
-				: this.currentFilePath;
+		// 124 clip fs / 161 库外 md：无 vault 路径作相对解析基准——空串为
+		// Obsidian 允许的「无源」形态（内链/相对图不解析，挂账既定降级）
+		const noVaultSource =
+			(this.docKind === "clip" && this.plugin.dataLoc.kind === "fs") ||
+			(this.docKind === "md" && isAbsoluteFsPath(this.currentFilePath));
+		const sourcePath = noVaultSource ? "" : this.currentFilePath;
 		const content = document.createElement("div");
 		content.className = "marinmind-md-doc markdown-preview-view";
 		pv.setReflowContent(content, "md");
@@ -1517,7 +1536,7 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 		scroll.scrollTop += pageTop - rootTop - 12; // 12px 顶部留白（对应容器 padding）
 	}
 
-	/** ㊼ epub 章内链接三分类消费（EpubSession host 级点击委托回调） */
+	/** ㊼ epub 章内链接四分类消费（EpubSession host 级点击委托回调） */
 	private handleEpubLink(target: EpubLinkTarget, evt: MouseEvent): void {
 		void evt;
 		if (target.kind === "spine") {
@@ -1528,7 +1547,32 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			window.open(target.url, "_blank");
 			return;
 		}
+		if (target.kind === "image") {
+			this.previewEpubImage(target.path);
+			return;
+		}
 		new Notice("链接目标不在书中章节内，暂不支持打开");
+	}
+
+	/**
+	 * 162 epub 图片直链预览：a 链接指向 zip 内图片条目（非 spine）弹窗放大
+	 * （blob 管线与章内 img 同源；条目缺失/被混淆标记 → 占位 Notice）。
+	 */
+	private previewEpubImage(path: string): void {
+		const bytes = this.epub?.readEntry(path);
+		if (!bytes) {
+			new Notice("链接指向的图片在书内不存在");
+			return;
+		}
+		const url = URL.createObjectURL(new Blob([bytes.slice()], { type: imageMimeOf(path) }));
+		const modal = new Modal(this.app);
+		modal.titleEl.setText(fsBasename(path));
+		modal.contentEl.createEl("img", {
+			cls: "marinmind-epub-img-preview",
+			attr: { src: url, alt: fsBasename(path) },
+		});
+		modal.onClose = () => URL.revokeObjectURL(url); // 关窗即回收（镜像 blob 铁律）
+		modal.open();
 	}
 
 	/**
@@ -1778,15 +1822,18 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				.setChecked(this.isRecording)
 				.onClick(() => void this.toggleRecording()),
 		);
-		// AI 一键摘录（㉓）与缩放：PDF 专属（㊻-B md/epub 无版面几何/固定栏宽）
+		// AI 一键摘录（㉓ pdf 几何 / 164 DOM 版面）与缩放（PDF 专属——可重排
+		// 文档无位图缩放语义）
+		menu.addSeparator();
+		menu.addItem((mi) =>
+			mi
+				.setTitle(t("AI 摘录"))
+				.setIcon("wand-2")
+				.onClick(() =>
+					this.isReflowDoc ? this.openDomAutoExcerpt() : this.openAutoExcerpt(),
+				),
+		);
 		if (!this.isReflowDoc) {
-			menu.addSeparator();
-			menu.addItem((mi) =>
-				mi
-					.setTitle(t("AI 摘录"))
-					.setIcon("wand-2")
-					.onClick(() => this.openAutoExcerpt()),
-			);
 			menu.addItem((mi) =>
 				mi
 					.setTitle(t("缩放…"))
@@ -2698,6 +2745,40 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	}
 
 	// ---------- AI 一键摘录（㉓） ----------
+
+	/**
+	 * 164 DOM 版面摘录入口（md/clip/epub）：当前页已渲染内容的结构走查
+	 * （h1-h6=标题 / p·li=正文）→ 勾选弹窗。坐标基准 = 页容器（与划选摘录
+	 * 同构，跳原文闪烁复用）；epub 只分析当前章（懒渲染的未来章无 DOM）。
+	 */
+	private openDomAutoExcerpt(): void {
+		const page = this.getCurrentPage();
+		const pv = this.pageViewByNumber.get(page);
+		if (!pv || !this.currentDocId) {
+			return;
+		}
+		const contentRoot = pv.el.querySelector(".marinmind-md-doc, .marinmind-epub-chapter");
+		if (!contentRoot) {
+			new Notice(t("本页内容尚未渲染，稍候再试"));
+			return;
+		}
+		const raw = collectDomBlocks(contentRoot);
+		if (raw.length === 0) {
+			new Notice(t("本页没有可摘录的文本块"));
+			return;
+		}
+		const { blocks, truncated } = domBlocksToAuto(raw, pv.el.getBoundingClientRect(), (el) =>
+			el.getBoundingClientRect(),
+		);
+		const pageLabel = this.docKind === "epub" ? t("第 {n} 章", { n: page }) : t("全文");
+		new DomAutoExcerptModal(this.app, this.plugin, {
+			documentId: this.currentDocId,
+			page,
+			blocks,
+			truncated,
+			pageLabel,
+		}).open();
+	}
 
 	/** AI 摘录入口：当前文档/页带入弹窗（版面识别 + 预览勾选 + 批量建卡） */
 	private openAutoExcerpt(): void {

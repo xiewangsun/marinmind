@@ -15,6 +15,7 @@ import {
 	firstElement,
 	parseXml,
 	type XmlElement,
+	type XmlNode,
 } from "./epub-xml";
 import type { OutlineEntry } from "./pdf-document";
 
@@ -43,6 +44,8 @@ export interface EpubTocNode {
 export interface EpubBook {
 	/** OPF dc:title；缺失为 null（调用方 basename 兜底） */
 	title: string | null;
+	/** 作者（163）：OPF 首个 dc:creator / mobi EXTH 100；缺失 null（不入 BookDocument 则省略行） */
+	author: string | null;
 	/** EPUB3 properties 含 cover-image 或 EPUB2 meta[name=cover] 双形态归一结果 */
 	coverHref: string | null;
 	/** 阅读顺序（含 linear="no"——过滤会丢封面页且破坏页码稳定性） */
@@ -113,6 +116,7 @@ interface OpfManifestItem {
 
 interface OpfInfo {
 	title: string | null;
+	author: string | null;
 	coverHref: string | null;
 	manifest: Map<string, OpfManifestItem>;
 	spine: EpubSpineItem[];
@@ -150,6 +154,24 @@ function parseOpfText(opfXml: string, opfPath: string): OpfInfo {
 		if (t) {
 			title = t;
 			break;
+		}
+	}
+	// 作者（163）：首个非空 dc:creator（local-name 匹配，无前缀/异前缀变体通吃）
+	let author: string | null = null;
+	for (const el of findElements(root, "dc:creator")) {
+		const a = elementText(el);
+		if (a) {
+			author = a;
+			break;
+		}
+	}
+	if (author === null) {
+		for (const el of findElements(root, "creator")) {
+			const a = elementText(el);
+			if (a) {
+				author = a;
+				break;
+			}
 		}
 	}
 	const manifest = new Map<string, OpfManifestItem>();
@@ -223,7 +245,7 @@ function parseOpfText(opfXml: string, opfPath: string): OpfInfo {
 			break;
 		}
 	}
-	return { title, coverHref, manifest, spine, ncxHref, navHref };
+	return { title, author, coverHref, manifest, spine, ncxHref, navHref };
 }
 
 /** 直接子元素按标签过滤（嵌套结构逐层递归用，深搜会重复收集孙级） */
@@ -374,17 +396,93 @@ function makeEntryReader(bytes: Uint8Array): (path: string) => Uint8Array | null
 	};
 }
 
+/** 字体混淆算法 URI（OCF 3.0 §4.2：内容可逆混淆，非 DRM） */
+const OBFUSCATION_ALGORITHMS = new Set([
+	"http://www.idpf.org/2008/embedding", // IDPF：sha1(identifier) 异或前 1040 字节
+	"http://ns.adobe.com/pdf/enc#RC", // Adobe：md5(uuid bytes) 异或前 1024 字节
+]);
+
+/** encryption.xml 加密清单条目：被加密条目的 zip 根相对路径 + 算法 URI */
+export interface EncryptedEntry {
+	path: string;
+	algorithm: string;
+}
+
+/** 取标签 local name（剥命名空间前缀）并小写归一 */
+function localTag(tag: string): string {
+	const at = tag.lastIndexOf(":");
+	return (at >= 0 ? tag.slice(at + 1) : tag).toLowerCase();
+}
+
 /**
- * 解析 EPUB 字节为结构化书籍。失败抛中文 Error；DRM（encryption.xml 存在）
- * 一律拒——不区分 Adobe DRM 与 IDPF 字体混淆（解混淆挂账后续优化方向）。
+ * 解析 encryption.xml 加密清单（162 分级）：逐条 EncryptedData 取
+ * EncryptionMethod@Algorithm 与 CipherData>CipherReference@URI（local-name
+ * 匹配，enc: 前缀有无通吃；URI 为 zip 根相对路径，与 spine 归一路径同域）。
+ * 畸形 / 空清单返回 null（宁拒不赌，上层按不支持报错）。
+ */
+export function parseEncryptionXml(xml: string): EncryptedEntry[] | null {
+	const root = parseXml(xml);
+	if (!root) {
+		return null;
+	}
+	const out: EncryptedEntry[] = [];
+	const walk = (node: XmlNode): void => {
+		if (typeof node === "string") {
+			return;
+		}
+		if (localTag(node.tag) === "encrypteddata") {
+			let algorithm: string | null = null;
+			let uri: string | null = null;
+			const scan = (n: XmlNode): void => {
+				if (typeof n === "string") {
+					return;
+				}
+				const name = localTag(n.tag);
+				if (name === "encryptionmethod" && algorithm === null) {
+					algorithm = elementAttr(n, "algorithm");
+				} else if (name === "cipherreference" && uri === null) {
+					uri = elementAttr(n, "uri");
+				} else {
+					n.children.forEach(scan);
+				}
+			};
+			node.children.forEach(scan);
+			if (algorithm && uri) {
+				out.push({ path: uri, algorithm });
+			}
+		}
+		node.children.forEach(walk);
+	};
+	walk(root);
+	return out.length > 0 ? out : null;
+}
+
+/**
+ * 解析 EPUB 字节为结构化书籍。失败抛中文 Error。加密分级（162）：
+ * - DRM（encryption.xml 内非混淆算法）仍一律拒；
+ * - 字体混淆（IDPF / Adobe 两算法）：条目标记跳过——统一主题排版本就不
+ *   消费书籍内嵌字体（CSS 净化层剥除 @font-face），跳过即可开书，零功能
+ *   损失；混淆条目撞 spine 正文（畸形书）按不支持报错。解混淆（sha1/md5
+ *   异或还原字体）待「书籍自带样式」挂账落地时一并评估。
  * E2 懒解压：结构文件走三趟 filter 限次解压（container+encryption → OPF →
  * nav/ncx），章节正文/图片不随打开解压——大书打开不再整包 inflate 长阻塞，
  * 全量解压字节也不再常驻内存（只留压缩原文 + ≤64MB 解压缓存）。
  */
 export function parseEpub(bytes: Uint8Array): EpubBook {
 	const metaPass = unzipEntries(bytes, ["META-INF/container.xml", "META-INF/encryption.xml"]);
-	if (metaPass["META-INF/encryption.xml"] !== undefined) {
-		throw new Error("该 EPUB 含加密内容（DRM 或字体混淆），暂不支持");
+	// 162 加密分级：混淆（可跳过）与 DRM（拒收）分家，见函数头注释
+	let obfuscatedPaths: Set<string> | null = null;
+	const encBytes = metaPass["META-INF/encryption.xml"];
+	if (encBytes !== undefined) {
+		const entries = parseEncryptionXml(strFromU8(encBytes));
+		if (!entries) {
+			throw new Error("该 EPUB 的加密清单（encryption.xml）无法解析，暂不支持");
+		}
+		const drm = entries.find((e) => !OBFUSCATION_ALGORITHMS.has(e.algorithm));
+		if (drm) {
+			throw new Error("该 EPUB 含 DRM 加密内容，暂不支持");
+		}
+		obfuscatedPaths = new Set(entries.map((e) => e.path));
 	}
 	const containerBytes = metaPass["META-INF/container.xml"];
 	if (!containerBytes) {
@@ -401,6 +499,14 @@ export function parseEpub(bytes: Uint8Array): EpubBook {
 	const opf = parseOpfText(strFromU8(opfBytes), opfPath);
 	if (opf.spine.length === 0) {
 		throw new Error("EPUB 没有可读章节（spine 为空）");
+	}
+	if (obfuscatedPaths) {
+		// 混淆条目撞 spine 正文 = 内容不可读（混淆本应只作用于字体）——明确报错
+		for (const item of opf.spine) {
+			if (obfuscatedPaths.has(item.href)) {
+				throw new Error("该 EPUB 的章节内容被加密，暂不支持");
+			}
+		}
 	}
 	// 目录：EPUB3 nav 优先，空结果回退 NCX，皆无 toc=[]（reader 兜底「第 N 章」平铺）
 	const idx = buildSpineIndex(opf.spine);
@@ -432,12 +538,15 @@ export function parseEpub(bytes: Uint8Array): EpubBook {
 			}
 		}
 	}
+	const entryReader = makeEntryReader(bytes);
 	return {
 		title: opf.title,
+		author: opf.author,
 		coverHref: opf.coverHref,
 		spine: opf.spine,
 		toc,
-		readEntry: makeEntryReader(bytes),
+		// 162：混淆条目（字体等）按缺失降级——图片引用走既有占位符兜底
+		readEntry: (path) => (obfuscatedPaths?.has(path) ? null : entryReader(path)),
 	};
 }
 

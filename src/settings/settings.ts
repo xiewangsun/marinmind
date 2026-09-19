@@ -12,9 +12,11 @@ import { isHighlightColor, type HighlightColorValue } from "../reader/highlight-
 import {
 	isLinkDirection,
 	isLineStyle,
+	isReflowColumnWidth,
 	isSrsScheduler,
 	type LineStyle,
 	type LinkDirection,
+	type ReflowColumnWidth,
 	type SrsScheduler,
 } from "../types";
 import { isAbsoluteFsPath, normalizeFsDir, normalizeVaultDir } from "../storage/paths";
@@ -150,6 +152,11 @@ export interface MarinMindSettings {
 	 */
 	excerptLineStyle: LineStyle;
 	/**
+	 * 可重排文档阅读栏宽（161，默认 standard=820 与历史一致）：md/clip/epub
+	 * 共用（同一重排模型）；换档需重开文档生效（basePageWidth 加载期定宽）。
+	 */
+	reflowColumnWidth: ReflowColumnWidth;
+	/**
 	 * 联动方向（79-1，默认双向）：文档↔脑图联动的门控档位——双向 / 仅文档→脑图 /
 	 * 仅脑图→文档 / 关闭（两窗格完全独立：自动跟随、点击定位、联动互关全停）。
 	 * 显式编排（工作区命令/视图切换条）不受此开关约束。
@@ -252,6 +259,7 @@ export const DEFAULT_SETTINGS: MarinMindSettings = {
 	reviewStatsBaseline: null,
 	selectionToolbar: true,
 	excerptLineStyle: "underline",
+	reflowColumnWidth: "standard",
 	linkDirection: "both",
 	workspaceHidden: null,
 	aiPresets: [],
@@ -350,6 +358,12 @@ export async function loadSettings(plugin: Plugin): Promise<MarinMindSettings> {
 	)
 		? merged.excerptLineStyle
 		: "underline";
+	// 161 重排栏宽：枚举外值回默认 standard
+	merged.reflowColumnWidth = isReflowColumnWidth(
+		(raw as { reflowColumnWidth?: unknown } | null)?.reflowColumnWidth,
+	)
+		? merged.reflowColumnWidth
+		: "standard";
 	// 79-1 联动方向：非法值回默认双向（镜像线型守卫）
 	merged.linkDirection = isLinkDirection(
 		(raw as { linkDirection?: unknown } | null)?.linkDirection,

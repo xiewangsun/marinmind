@@ -1229,6 +1229,9 @@ export function parseMobi(bytes: Uint8Array): EpubBook {
 		exthText(exth, 503, header.encoding) ??
 		(header.titleBytes ? decodeBookBytes(header.titleBytes, header.encoding) : "");
 	const title = unescapeMinimal(rawTitle.trim());
+	// 作者（163）：EXTH 100 author（与 503 标题同款 unescape 语义；缺失 null）
+	const authorRaw = exthText(exth, 100, header.encoding);
+	const author = authorRaw ? unescapeMinimal(authorRaw.trim()) || null : null;
 	// 封面：EXTH 201 coverOffset 优先 202 thumbnail 兜底（0 基资源号）
 	const coverOffset = exthU32(exth, 201) ?? exthU32(exth, 202);
 	const coverRecord = coverOffset !== null ? resourceAt(coverOffset) : null;
@@ -1245,6 +1248,7 @@ export function parseMobi(bytes: Uint8Array): EpubBook {
 	}));
 	return {
 		title: title || null,
+		author,
 		coverHref,
 		spine,
 		toc: book.toc,

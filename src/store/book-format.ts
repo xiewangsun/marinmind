@@ -71,6 +71,7 @@ const KNOWN_BOOK_FM_KEYS = new Set([
 	"marinmind",
 	"id",
 	"title",
+	"author",
 	"category",
 	"collect_map_id",
 	"auto_flashcard",
@@ -268,6 +269,8 @@ export function parseBookMd(text: string, opts: ParseBookOptions = {}): ParsedBo
 		id: docId || newId(),
 		filePath: yamlUnquote(fm.get("file_path") ?? ""),
 		title,
+		// 作者（163）：mobi EXTH 100 / epub dc:creator；缺行/空值 = 无作者（可选字段）
+		author: yamlUnquote(fm.get("author") ?? "").trim() || null,
 		// 分类缺失与空值都归未分类（frontmatter 只支持单行标量，yamlQuote 兜危险字符）
 		category: yamlUnquote(fm.get("category") ?? "").trim() || null,
 		// 摘录目标图覆盖（㊴）：缺行/空值 = 用同名默认图
@@ -583,6 +586,8 @@ export function serializeBookMd(input: SerializeBookInput): string {
 	out.push("marinmind: book");
 	out.push(`id: ${doc.id}`);
 	out.push(`title: ${yamlQuote(doc.title)}`);
+	// 作者（163）：null/缺省省略整行，存量书文件字节不变（零写入契约）
+	if (doc.author) out.push(`author: ${yamlQuote(doc.author)}`);
 	// 分类为 null 时省略整行——存量库（无分类）序列化字节不变，零写入契约不被破坏
 	if (doc.category) out.push(`category: ${yamlQuote(doc.category)}`);
 	// 摘录目标图覆盖同款省略策略（㊴）：null 不落行，存量库字节不变
