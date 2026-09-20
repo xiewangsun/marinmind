@@ -802,7 +802,7 @@ describe("畸形输入（宁拒不赌，中文文案）", () => {
 			arr[off + i] = s.charCodeAt(i);
 		}
 	};
-	it("过短字节 / 非 BOOKMOBI / Topaz 各自文案", () => {
+	it("过短字节 / 非 BOOKMOBI / Topaz 各自文案（172：Topaz 附 Calibre 引导）", () => {
 		expect(() => parseMobi(new Uint8Array(50))).toThrow(/不是有效的 MOBI/);
 		const notMobi = new Uint8Array(120);
 		putAscii(notMobi, 60, "JUNKJUNK");
@@ -810,7 +810,7 @@ describe("畸形输入（宁拒不赌，中文文案）", () => {
 		const tpz = new Uint8Array(120);
 		putAscii(tpz, 60, "TPZ");
 		putAscii(tpz, 64, "TPZ1");
-		expect(() => parseMobi(tpz)).toThrow(/Topaz/);
+		expect(() => parseMobi(tpz)).toThrow(/Topaz.*Calibre/s);
 	});
 	it("numRecords=0 / 记录表越界", () => {
 		const b = new Uint8Array(100);
@@ -824,5 +824,22 @@ describe("畸形输入（宁拒不赌，中文文案）", () => {
 		expect(() =>
 			parseMobi(makePdb([makeRecord0({ textRecordCount: 0, textLength: 0, version: 6 })])),
 		).toThrow(/无正文/);
+	});
+});
+
+describe("mbp 专有标签归一（172）", () => {
+	it("mbp:nu/mbp:ru 下划线区段映射 <u>；其余 mbp:* 剥壳保内容", () => {
+		const book = parseMobi(
+			makePdb(
+				makeMobi6Records({
+					html: "<p><mbp:nu>下划线词</mbp:nu>正文<mbp:ru>另一处</mbp:ru><mbp:whatever>杂项</mbp:whatever></p>",
+				}),
+			),
+		);
+		const ch = strFromU8(book.readEntry("c/0001.xhtml")!);
+		expect(ch).toContain("<u>下划线词</u>");
+		expect(ch).toContain("<u>另一处</u>");
+		expect(ch).toContain("杂项");
+		expect(ch).not.toMatch(/mbp:/);
 	});
 });

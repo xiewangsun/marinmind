@@ -213,7 +213,10 @@ function pdbRecordsOf(bytes: Uint8Array): Uint8Array[] {
 	const creator = latin1Of(bytes.subarray(64, 68));
 	const type = latin1Of(bytes.subarray(60, 64));
 	if (type.startsWith("TPZ") || creator.startsWith("TPZ")) {
-		throw new Error("该文件是 Topaz 格式（旧 .azw），暂不支持");
+		// 172：报错附可操作出路（挂账既定判断——Topaz 解析不做，引导转换）
+		throw new Error(
+			"该文件为 Topaz（.azw 旧格式）电子书，MarinMind 暂不支持——请先用 Calibre 转换为 azw3/mobi 后再导入",
+		);
 	}
 	// type@60 + creator@64 合起来才是完整魔数 "BOOKMOBI"
 	if (latin1Of(bytes.subarray(60, 68)) !== "BOOKMOBI") {
@@ -852,6 +855,15 @@ function buildMobi6Book(
 			mine.map((n) => ({ n, off: n - s.start })),
 		);
 		let html = decodeBookBytes(arr, header.encoding).replace(pagebreakRe, "");
+		// 172 Kindle 专有标签归一：mbp:nu/mbp:ru（下划线区段）映射 <u> 保语义；
+		// 其余 mbp:* 剥壳保内容（未知专有标签在 epub 净化层也会被 unwrap，
+		// 此处先行归一使 <u> 语义不丢）
+		html = html
+			.replace(/<\s*mbp:nu\s*>/gi, "<u>")
+			.replace(/<\/\s*mbp:nu\s*>/gi, "</u>")
+			.replace(/<\s*mbp:ru\s*>/gi, "<u>")
+			.replace(/<\/\s*mbp:ru\s*>/gi, "</u>")
+			.replace(/<\/?\s*mbp:[^>]*>/gi, "");
 		html = html
 			.replace(
 				/(<a\b[^>]*?)\sfilepos=(["']?)(\d+)\2/gi,

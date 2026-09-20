@@ -495,4 +495,13 @@ export const EN: Record<string, string> = {
 	"已创建 {n} 张卡片": "Created {n} cards",
 	链接指向的图片在书内不存在: "The linked image does not exist in this book",
 	链接指向的卡片已不存在: "The linked card no longer exists",
+	// ---- 169-172：文本锚 / 内联样式 / 媒体卡 / mobi 打磨 ----
+	转为媒体卡片: "Convert to media card",
+	媒体条目在书内不存在: "The media entry does not exist in this book",
+	"已创建媒体卡片（右键所在章的音频可再次创建）":
+		"Media card created (right-click audio in a chapter to create another)",
+	"媒体超过 20MB 附件上限，无法转卡": "Media exceeds the 20MB attachment limit",
+	媒体卡创建失败: "Failed to create the media card",
+	"该文件为 Topaz（.azw 旧格式）电子书，MarinMind 暂不支持——请先用 Calibre 转换为 azw3/mobi 后再导入":
+		"This is a Topaz (.azw legacy) book, which MarinMind does not support — convert it to azw3/mobi with Calibre first",
 };

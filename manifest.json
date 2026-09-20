@@ -1,7 +1,7 @@
 {
 	"id": "marinmind",
 	"name": "MarinMind",
-	"version": "1.1.1",
+	"version": "1.1.2",
 	"minAppVersion": "1.7.2",
 	"description": "Read PDF and EPUB books, turn highlights and excerpts into knowledge cards, organize them on mind maps, and review with built-in spaced repetition.",
 	"author": "xiewangsun",

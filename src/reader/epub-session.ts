@@ -10,6 +10,7 @@
  * blob URL 铁律：同路径复用同一 URL（Map 缓存），close 统一 revoke（幂等）。
  */
 import { entryText, resolveZipPath, type EpubBook } from "./epub-document";
+import { filterInlineStyle } from "./epub-style";
 
 /** 章内链接分类（a 点击经 host 级委托回调 reader-view 决定动作） */
 export type EpubLinkTarget =
@@ -23,6 +24,21 @@ export type EpubLinkTarget =
 function isImagePath(path: string): boolean {
 	const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
 	return ["svg", "jpg", "jpeg", "png", "gif", "webp"].includes(ext);
+}
+
+/** 音视频扩展名 → MIME（171 媒体卡；未知扩展名给通用二进制流由浏览器嗅探） */
+function mediaMimeOf(path: string): string {
+	const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+	if (ext === "mp3") return "audio/mpeg";
+	if (ext === "m4a" || ext === "m4b") return "audio/mp4";
+	if (ext === "aac") return "audio/aac";
+	if (ext === "ogg" || ext === "oga") return "audio/ogg";
+	if (ext === "wav") return "audio/wav";
+	if (ext === "flac") return "audio/flac";
+	if (ext === "mp4" || ext === "m4v") return "video/mp4";
+	if (ext === "webm") return "video/webm";
+	if (ext === "ogv") return "video/ogg";
+	return "application/octet-stream";
 }
 
 /**
@@ -55,7 +71,7 @@ function relaxLongChapter(chapter: HTMLElement): void {
 	}
 }
 
-/** 整删标签（脚本/样式/嵌入框架/表单控件/音视频——音视频挂账后续优化） */
+/** 整删标签（脚本/样式/嵌入框架/表单控件；audio/video 171 起保留，见 HTML_KEEP） */
 const DROP_TAGS = new Set([
 	"script",
 	"style",
@@ -64,8 +80,6 @@ const DROP_TAGS = new Set([
 	"iframe",
 	"object",
 	"embed",
-	"video",
-	"audio",
 	"source",
 	"track",
 	"form",
@@ -108,6 +122,10 @@ const HTML_KEEP = new Set([
 	"img",
 	"figure",
 	"figcaption",
+	// 171 音视频媒体卡：audio/video 保留（src 解析 blob + 右键转卡）；
+	// 子级 source/track 仍整删（src 由首个 source 兜底吸收进主元素）
+	"audio",
+	"video",
 	"blockquote",
 	"pre",
 	"code",
@@ -236,6 +254,8 @@ export class EpubSession {
 	constructor(
 		private readonly book: EpubBook,
 		private readonly onNavigate: (target: EpubLinkTarget, evt: MouseEvent) => void,
+		/** 171 音视频右键转卡回调（reader 弹菜单；不传则右键无动作） */
+		private readonly onMediaCard?: (path: string, spineIndex: number, evt: MouseEvent) => void,
 	) {
 		this.spineIndexByHref = new Map<string, number>();
 		book.spine.forEach((item, i) => {
@@ -329,7 +349,7 @@ export class EpubSession {
 	};
 
 	/** 同路径复用同一 blob URL（Map 缓存）；条目缺失返回 null（alt 兜底不阻塞） */
-	private blobUrlFor(path: string): string | null {
+	private blobUrlFor(path: string, mime = imageMimeOf(path)): string | null {
 		const cached = this.blobUrls.get(path);
 		if (cached) {
 			return cached;
@@ -340,7 +360,7 @@ export class EpubSession {
 			return null;
 		}
 		// slice 拷贝既满足 TS 的 BlobPart 泛型（ArrayBufferLike→ArrayBuffer），也隔离 zip 原字节
-		const url = URL.createObjectURL(new Blob([bytes.slice()], { type: imageMimeOf(path) }));
+		const url = URL.createObjectURL(new Blob([bytes.slice()], { type: mime }));
 		this.blobUrls.set(path, url);
 		return url;
 	}
@@ -410,9 +430,48 @@ export class EpubSession {
 				: document.createElement(tag);
 		this.copyAttrs(el, created, chapterFile, spineIndex, tag);
 		target.appendChild(created);
+		// 171 音视频：src 解析 blob + 控件接线 + 右键转卡钩子（子级
+		// source/track 不递归——src 已在此吸收，track 字幕不带）
+		if (tag === "audio" || tag === "video") {
+			this.setupMediaElement(el, created as HTMLElement, chapterFile, spineIndex);
+			return;
+		}
 		for (const child of Array.from(el.childNodes)) {
 			this.sanitizeNode(child, created, chapterFile, spineIndex, svgBoundary || inSvg);
 		}
+	}
+
+	/**
+	 * 171 音视频元素接线：src 取主元素 src 属性，缺省吸收首个 source 子级；
+	 * 解析 zip 条目为 blob（同图片管线，MIME 按扩展名）；controls + preload
+	 * none（不自动缓冲）；data-mm-media 记 zip 路径供转卡；右键弹转卡菜单
+	 * （经构造器 onMediaCard 回调交 reader）。无可用 src 时元素保留但不可播
+	 * （宁缺不猜——外部流媒体被防外联策略剥除属预期）。
+	 */
+	private setupMediaElement(
+		source: Element,
+		dest: HTMLElement,
+		chapterFile: string,
+		spineIndex: number,
+	): void {
+		const raw =
+			source.getAttribute("src") ?? source.querySelector("source")?.getAttribute("src") ?? "";
+		dest.setAttribute("controls", "");
+		dest.setAttribute("preload", "none");
+		if (!raw || raw.startsWith("#") || hasUrlScheme(raw)) {
+			return;
+		}
+		const { path } = resolveZipPath(chapterFile, raw);
+		const url = this.blobUrlFor(path, mediaMimeOf(path));
+		if (!url) {
+			return;
+		}
+		dest.setAttribute("src", url);
+		dest.dataset.mmMedia = path;
+		dest.addEventListener("contextmenu", (evt) => {
+			evt.preventDefault();
+			this.onMediaCard?.(path, spineIndex, evt);
+		});
 	}
 
 	/** 属性过滤拷贝：style/class/on* 剥；id 保留；src/href/xlink:href 逐个处理 */
@@ -426,7 +485,16 @@ export class EpubSession {
 		const linkAttrs: string[] = [];
 		for (const attr of Array.from(source.attributes)) {
 			const lname = attr.name.toLowerCase();
-			if (lname.startsWith("on") || lname === "style" || lname === "class") {
+			if (lname.startsWith("on") || lname === "class") {
+				continue;
+			}
+			if (lname === "style") {
+				// 170 书籍自带内联样式白名单：排版语义子集保留（缩进/对齐/
+				// 斜体），其余剥除（主题打架与布局风险，见 epub-style.ts）
+				const kept = filterInlineStyle(attr.value);
+				if (kept) {
+					dest.setAttribute("style", kept);
+				}
 				continue;
 			}
 			if (lname === "href" || lname === "src" || lname === "xlink:href") {

@@ -20,6 +20,7 @@ import { AudioRecorder, audioDurationSec, formatDurSec } from "./audio-recorder"
 import { AutoExcerptModal } from "./auto-excerpt-modal";
 import { collectDomBlocks, domBlocksToAuto } from "./dom-auto-excerpt";
 import { DomAutoExcerptModal } from "./dom-auto-excerpt-modal";
+import { relocateMdAnchorY } from "./md-relocate";
 import {
 	epubChapterTitleOf,
 	entryText,
@@ -705,8 +706,10 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 				);
 			}
 			this.epub = book;
-			this.epubSession = new EpubSession(book, (target, evt) =>
-				this.handleEpubLink(target, evt),
+			this.epubSession = new EpubSession(
+				book,
+				(target, evt) => this.handleEpubLink(target, evt),
+				(path, spineIndex, evt) => this.openEpubMediaMenu(path, spineIndex, evt),
 			);
 			title = book.title ?? fsBasename(filePath);
 			this.outlineEntries = epubOutline(book);
@@ -1555,6 +1558,57 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 	}
 
 	/**
+	/**
+	 * 171 epub 音视频右键菜单：转媒体卡（提取 zip 条目落附件仓建 audio 卡）。
+	 * 视频文件按 audio 卡建（excerptType 无 video 档；<audio> 可播其音轨，
+	 * 外语音书主场景即音频）。
+	 */
+	private openEpubMediaMenu(path: string, spineIndex: number, evt: MouseEvent): void {
+		const menu = new Menu();
+		menu.addItem((mi) =>
+			mi
+				.setTitle(t("转为媒体卡片"))
+				.setIcon("file-audio")
+				.onClick(() => void this.createEpubMediaCard(path, spineIndex)),
+		);
+		menu.showAtMouseEvent(evt);
+	}
+
+	/** 提取 zip 音视频条目 → 附件仓 → audio 卡（页 = 章；回显走 cardBus） */
+	private async createEpubMediaCard(path: string, spineIndex: number): Promise<void> {
+		if (!this.currentDocId) {
+			return;
+		}
+		const bytes = this.epub?.readEntry(path);
+		if (!bytes) {
+			new Notice(t("媒体条目在书内不存在"));
+			return;
+		}
+		const ext = (path.slice(path.lastIndexOf(".") + 1) || "mp3").toLowerCase();
+		try {
+			const ref = await this.plugin.attachments.save(
+				bytes.slice().buffer as ArrayBuffer,
+				ext,
+			);
+			this.plugin.cards.create({
+				documentId: this.currentDocId,
+				page: spineIndex + 1,
+				rects: [],
+				excerptType: "audio",
+				excerptRef: ref,
+			});
+			new Notice(t("已创建媒体卡片（右键所在章的音频可再次创建）"));
+		} catch (err) {
+			console.error("[MarinMind] epub 媒体卡创建失败", err);
+			new Notice(
+				err instanceof Error && err.message.includes("20MB")
+					? t("媒体超过 20MB 附件上限，无法转卡")
+					: t("媒体卡创建失败"),
+			);
+		}
+	}
+
+	/**
 	 * 162 epub 图片直链预览：a 链接指向 zip 内图片条目（非 spine）弹窗放大
 	 * （blob 管线与章内 img 同源；条目缺失/被混淆标记 → 占位 Notice）。
 	 */
@@ -1592,8 +1646,23 @@ export class MarinMindReaderView extends ItemView implements DocSearchHost {
 			}
 			return;
 		}
+		// 169 文本锚重定位（md/clip）：源被编辑后存量 rect 偏移——按摘录文本
+		// 现查内容 DOM，命中则以块的真实位置为锚（编辑后仍精确）；未命中回退
+		let effective = anchor;
+		if (
+			(this.docKind === "md" || this.docKind === "clip") &&
+			(card.excerptText ?? "").trim().length >= 2
+		) {
+			const contentRoot = pv.el.querySelector<HTMLElement>(".marinmind-md-doc");
+			const relocated = contentRoot
+				? relocateMdAnchorY(contentRoot, card.excerptText!)
+				: null;
+			if (relocated != null) {
+				effective = relocated;
+			}
+		}
 		// 锚点 = 页内归一化 y × 页高（layout 后的实测高度），目标让它落在视口上部约 1/4 处
-		const anchorPx = pv.el.clientHeight * anchor;
+		const anchorPx = pv.el.clientHeight * effective;
 		const current = pv.el.getBoundingClientRect().top - scroll.getBoundingClientRect().top;
 		const target = Math.max(0, anchorPx - scroll.clientHeight * 0.25);
 		scroll.scrollTop += current + target;
